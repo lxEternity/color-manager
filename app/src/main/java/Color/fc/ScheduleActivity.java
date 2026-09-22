@@ -46,7 +46,7 @@ public class ScheduleActivity extends Activity {
         saveHint = findViewById(R.id.saveHint);
 
         soc = MainActivity.cachedSoc;
-        if (soc == null) soc = SocInfo.detect("");
+        if (soc == null) soc = SocInfo.autoDetect();
 
         String fileA = RootShell.CONFIG_DIR + "/a.all.sh";
         String fileB = RootShell.CONFIG_DIR + "/b.all.sh";

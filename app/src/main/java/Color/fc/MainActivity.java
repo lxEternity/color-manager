@@ -72,8 +72,7 @@ public class MainActivity extends Activity {
             return;
         }
         new Thread(() -> {
-            String platform = RootShell.getprop("ro.board.platform");
-            cachedSoc = SocInfo.detect(platform);
+            cachedSoc = SocInfo.autoDetect();
             runOnUiThread(() -> applySoc(cachedSoc));
         }).start();
     }
@@ -117,10 +116,10 @@ public class MainActivity extends Activity {
 
     private void updatePower(PowerMonitor.BatteryStat st) {
         double w = Math.abs(st.watts);
-        powerValue.setText(String.format(Locale.US, "%.2f", w));
+        powerValue.setText(w > 0 ? String.format(Locale.US, "%.2f", w) : "--");
         if (w > peakWatts) peakWatts = w;
         sparkView.push(w);
-        peakValue.setText(String.format(Locale.US, "%.2f W", peakWatts));
+        peakValue.setText(peakWatts > 0 ? String.format(Locale.US, "%.2f W", peakWatts) : "--");
 
         String status = st.status.isEmpty()
                 ? (st.amps > 0 ? "放电" : "充电")
@@ -129,8 +128,8 @@ public class MainActivity extends Activity {
         powerStatus.setText(status);
         powerStatus.setTextColor("Charging".equalsIgnoreCase(st.status) ? 0xFF10B981 : 0xFFF59E0B);
 
-        currentValue.setText(String.format(Locale.US, "%.0f mA", Math.abs(st.amps) * 1000));
-        voltageValue.setText(String.format(Locale.US, "%.2f V", st.volts));
+        currentValue.setText(st.amps != 0 ? String.format(Locale.US, "%.0f mA", Math.abs(st.amps) * 1000) : "--");
+        voltageValue.setText(st.volts > 0 ? String.format(Locale.US, "%.2f V", st.volts) : "--");
 
         cellBadge.setText(st.cells >= 2 ? "双电芯 · 已校准" : "单电芯 · 已校准");
         if (st.level >= 0) batteryLevel.setText(st.level + "%");

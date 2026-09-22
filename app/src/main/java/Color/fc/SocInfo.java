@@ -1,5 +1,7 @@
 package Color.fc;
 
+import android.os.Build;
+
 /**
  * SOC 型号检测与配置映射
  * 天玑9300/9400/9500全系列、骁龙8gen1/2/3、8Elite(第一代) → 配置A
@@ -35,10 +37,37 @@ public class SocInfo {
             {"mt6995", "MT6995", "天玑 9500 系列", "天玑 9500", "MediaTek", "a"},
             {"mt6993", "MT6993", "天玑 9500 系列", "天玑 9500", "MediaTek", "a"},
             {"mt6991", "MT6991", "天玑 9400 系列", "天玑 9400", "MediaTek", "a"},
-            {"mt6989", "MT6989", "天玑 9300 系列", "天玑 9300", "MediaTek", "a"},
+            {"mt6989", "MT6989", "天玑 9300 / 9400E 系列", "天玑 9300", "MediaTek", "a"},
     };
 
-    /** 根据 ro.board.platform 检测 SOC 信息，未知平台默认加载配置A */
+    /**
+     * 自动检测：多属性 + Build 字段多级回退，命中即返回
+     * 顺序：ro.board.platform → ro.soc.model → ro.mediatek.platform
+     *       → Build.HARDWARE → Build.BOARD → Build.DEVICE
+     */
+    public static SocInfo autoDetect() {
+        String[] keys = {"ro.board.platform", "ro.soc.model", "ro.mediatek.platform"};
+        String first = "";
+        for (String k : keys) {
+            String v = RootShell.getprop(k);
+            if (v == null || v.trim().isEmpty()) continue;
+            v = v.trim();
+            if (first.isEmpty()) first = v;
+            SocInfo s = detect(v);
+            if (s.known) return s;
+        }
+        // Build 字段兜底（无需任何系统调用；MTK 的 HARDWARE 通常就是 platform）
+        String[] fields = {Build.HARDWARE, Build.BOARD, Build.DEVICE};
+        for (String f : fields) {
+            if (f == null || f.trim().isEmpty()) continue;
+            SocInfo s = detect(f.trim());
+            if (s.known) return s;
+        }
+        // 全部未命中：显示检测到的第一个值，未知平台默认配置A
+        return detect(first);
+    }
+
+    /** 根据 platform 字符串匹配 SOC 信息，未知平台默认加载配置A */
     public static SocInfo detect(String platform) {
         if (platform == null) platform = "";
         platform = platform.trim().toLowerCase();

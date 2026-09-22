@@ -6,6 +6,7 @@ import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Root 命令封装：读取/写入 /data/adb 下的模块脚本
@@ -22,25 +23,38 @@ public class RootShell {
     public static final String CONFIG_DIR = "/data/adb/modules/colorFC/config";
     public static final String GOV_DIR = "/data/adb/modules/colorFC/A";
 
-    /** 执行 su -c 命令 */
+    /** 执行 su -c 命令（带超时保护，防止授权弹窗/卡死阻塞） */
     public static Result exec(String cmd) {
         Result r = new Result();
+        Process p = null;
         try {
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
-            BufferedReader so = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            BufferedReader se = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-            StringBuilder ob = new StringBuilder();
-            StringBuilder eb = new StringBuilder();
-            String line;
-            while ((line = so.readLine()) != null) ob.append(line).append('\n');
-            while ((line = se.readLine()) != null) eb.append(line).append('\n');
-            r.out = ob.toString();
-            r.err = eb.toString();
-            r.code = p.waitFor();
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            if (!p.waitFor(6, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                r.err = "timeout";
+                return r;
+            }
+            r.out = readAll(p.getInputStream());
+            r.err = readAll(p.getErrorStream());
+            r.code = p.exitValue();
         } catch (Exception e) {
             r.err = String.valueOf(e);
+            if (p != null) p.destroyForcibly();
         }
         return r;
+    }
+
+    private static String readAll(java.io.InputStream is) {
+        try {
+            BufferedReader r = new BufferedReader(new InputStreamReader(is));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) sb.append(line).append('\n');
+            r.close();
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /** 是否拥有 Root */
@@ -76,9 +90,23 @@ public class RootShell {
         }
     }
 
-    /** 读取系统属性：直接执行 getprop（无需 root）→ build.prop → su getprop */
+    /**
+     * 读取系统属性（多级回退，任一可用即返回）：
+     * 1. 反射 SystemProperties（无需进程，最可靠）
+     * 2. 直接执行 getprop（普通权限）
+     * 3. 解析 build.prop
+     * 4. su getprop
+     */
     public static String getprop(String name) {
-        // 直接执行 getprop 命令，普通权限即可，最可靠
+        // 1. 反射 SystemProperties
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method get = sp.getMethod("get", String.class, String.class);
+            String v = (String) get.invoke(null, name, "");
+            if (v != null && !v.trim().isEmpty()) return v.trim();
+        } catch (Throwable ignored) {
+        }
+        // 2. 直接执行 getprop
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"getprop", name});
             BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
@@ -88,6 +116,7 @@ public class RootShell {
             if (line != null && !line.trim().isEmpty()) return line.trim();
         } catch (Exception ignored) {
         }
+        // 3. 解析 build.prop
         try {
             File[] props = {new File("/system/build.prop"), new File("/vendor/build.prop")};
             for (File f : props) {
@@ -104,6 +133,7 @@ public class RootShell {
             }
         } catch (Exception ignored) {
         }
+        // 4. su getprop
         Result r = exec("getprop " + name);
         return r.out == null ? "" : r.out.trim();
     }

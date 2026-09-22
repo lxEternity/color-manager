@@ -209,12 +209,7 @@ public class ModeActivity extends Activity {
 
     private void renderRules() {
         ruleBox.removeAllViews();
-        // 全局默认行（moren）
-        ruleBox.addView(ruleRow("moren", "全局默认", moren, v ->
-                pickMode(mode -> {
-                    moren = mode;
-                    renderRules();
-                })));
+        // moren 不再显示卡片(与全局模式切换功能重复), conf 中原值保留
         for (Map.Entry<String, String> e : rules.entrySet()) {
             ruleBox.addView(ruleRow(e.getKey(), appName(e.getKey()), e.getValue(), v ->
                     pickMode(mode -> {
@@ -224,9 +219,8 @@ public class ModeActivity extends Activity {
         }
     }
 
-    /** 一条规则行：点击整行改模式，右侧 × 删除（moren 行无删除，单行紧凑） */
+    /** 一条规则行：点击整行改模式，右侧 × 删除 */
     private View ruleRow(String pkg, String label, String mode, View.OnClickListener onEdit) {
-        final boolean isMoren = "moren".equals(pkg);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -237,8 +231,7 @@ public class ModeActivity extends Activity {
         bg.setColor(0xFFF2F7FC);
         bg.setCornerRadius(dp(10));
         row.setBackground(bg);
-        // moren 行紧凑：单行小 padding
-        row.setPadding(dp(12), isMoren ? dp(6) : dp(10), dp(12), isMoren ? dp(6) : dp(10));
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
         row.setOnClickListener(onEdit);
 
         LinearLayout info = new LinearLayout(this);
@@ -253,13 +246,11 @@ public class ModeActivity extends Activity {
         name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         info.addView(name);
 
-        if (!isMoren) {
-            TextView sub = new TextView(this);
-            sub.setText(pkg);
-            sub.setTextColor(0xFF5D6B85);
-            sub.setTextSize(10.5f);
-            info.addView(sub);
-        }
+        TextView sub = new TextView(this);
+        sub.setText(pkg);
+        sub.setTextColor(0xFF5D6B85);
+        sub.setTextSize(10.5f);
+        info.addView(sub);
         row.addView(info);
 
         TextView modeV = new TextView(this);
@@ -269,19 +260,17 @@ public class ModeActivity extends Activity {
         modeV.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         row.addView(modeV);
 
-        if (!"moren".equals(pkg)) {
-            ImageView del = new ImageView(this);
-            del.setImageResource(android.R.drawable.ic_delete);
-            del.setColorFilter(0xFFE5484D, android.graphics.PorterDuff.Mode.SRC_ATOP);
-            LayoutParams dlp = new LayoutParams(dp(26), dp(26));
-            dlp.leftMargin = dp(12);
-            del.setLayoutParams(dlp);
-            del.setOnClickListener(v -> {
-                rules.remove(pkg);
-                renderRules();
-            });
-            row.addView(del);
-        }
+        ImageView del = new ImageView(this);
+        del.setImageResource(android.R.drawable.ic_delete);
+        del.setColorFilter(0xFFE5484D, android.graphics.PorterDuff.Mode.SRC_ATOP);
+        LayoutParams dlp = new LayoutParams(dp(26), dp(26));
+        dlp.leftMargin = dp(12);
+        del.setLayoutParams(dlp);
+        del.setOnClickListener(v -> {
+            rules.remove(pkg);
+            renderRules();
+        });
+        row.addView(del);
         return row;
     }
 

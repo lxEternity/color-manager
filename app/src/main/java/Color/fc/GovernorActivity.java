@@ -162,7 +162,7 @@ public class GovernorActivity extends Activity {
         ((TextView) row.findViewById(R.id.label)).setText(label);
         Spinner sp = row.findViewById(R.id.spinner);
         ArrayAdapter<String> ad = new ArrayAdapter<>(this, R.layout.gov_spinner_item, GOV_PRESETS);
-        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        ad.setDropDownViewResource(R.layout.gov_dropdown_item);
         sp.setAdapter(ad);
         selectGov(sp, def);
         spinners.put(key, sp);

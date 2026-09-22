@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient android:startColor="#22D3EE" android:endColor="#6366F1" android:angle="0" />
-    <corners android:radius="14dp" />
-</shape>
+<!-- 霓虹按钮：外层青色光晕 + 青紫渐变主体 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#2E00E5FF" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+    <item android:left="3dp" android:top="3dp" android:right="3dp" android:bottom="3dp">
+        <shape>
+            <gradient android:startColor="#00D9F5" android:endColor="#8B5CF6" android:angle="0" />
+            <corners android:radius="19dp" />
+        </shape>
+    </item>
+</layer-list>

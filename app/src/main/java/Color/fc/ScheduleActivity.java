@@ -51,7 +51,8 @@ public class ScheduleActivity extends Activity {
         String fileA = RootShell.CONFIG_DIR + "/a.all.sh";
         String fileB = RootShell.CONFIG_DIR + "/b.all.sh";
         socTip.setText(soc.known
-                ? String.format(Locale.US, "当前 SOC：%s（%s）→ 加载配置 %s", soc.code, soc.marketing, soc.config.toUpperCase())
+                ? String.format(Locale.US, "当前 SOC：%s（%s）→ 加载方案 %s", soc.code, soc.marketing,
+                        "a".equals(soc.config) ? "1" : "2")
                 : "检测错误，默认加载方案1");
 
         tabAV.setOnClickListener(v -> switchTab("a"));
@@ -244,9 +245,9 @@ public class ScheduleActivity extends Activity {
     private void applyTabStyle() {
         boolean isA = "a".equals(tab);
         tabAV.setBackgroundResource(isA ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
-        tabAV.setTextColor(isA ? 0xFF22D3EE : 0xFF8B98A8);
+        tabAV.setTextColor(isA ? 0xFF0098BB : 0xFF7C8AA0);
         tabBV.setBackgroundResource(isA ? R.drawable.bg_tab : R.drawable.bg_tab_sel);
-        tabBV.setTextColor(isA ? 0xFF8B98A8 : 0xFF22D3EE);
+        tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0098BB);
     }
 
     /** 保存当前编辑的配置到对应文件 */

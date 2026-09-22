@@ -1,20 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#0B0F14</color>
-    <color name="bgCard">#141A22</color>
-    <color name="bgCardStroke">#1F2A38</color>
-    <color name="bgInput">#0D1219</color>
-    <color name="bgInputStroke">#2A3646</color>
-    <color name="textPrimary">#E8EEF5</color>
-    <color name="textSecondary">#8B98A8</color>
-    <color name="textDim">#5C6875</color>
-    <color name="accent">#22D3EE</color>
-    <color name="accent2">#6366F1</color>
-    <color name="accentSoft">#19283A</color>
-    <color name="green">#10B981</color>
-    <color name="blue">#3B82F6</color>
-    <color name="orange">#F59E0B</color>
-    <color name="red">#EF4444</color>
-    <color name="titleBar">#0E141C</color>
-    <color name="divider">#1C2530</color>
+    <!-- 白底浅色系 -->
+    <color name="bg">#F5F7FC</color>
+    <color name="bgCard">#FFFFFF</color>
+    <color name="bgCardStroke">#E8EDF5</color>
+    <color name="bgInput">#F7F9FD</color>
+    <color name="bgInputStroke">#DCE4F0</color>
+    <color name="textPrimary">#1B2540</color>
+    <color name="textSecondary">#5D6B85</color>
+    <color name="textDim">#9AA7BD</color>
+    <!-- 霓虹主色（白底可读） -->
+    <color name="accent">#00B8E0</color>
+    <color name="accent2">#7C4DFF</color>
+    <color name="accentSoft">#E7F8FE</color>
+    <color name="green">#0FA968</color>
+    <color name="blue">#2F6BFF</color>
+    <color name="orange">#E08A00</color>
+    <color name="red">#E5484D</color>
+    <color name="titleBar">#FFFFFF</color>
+    <color name="divider">#EFF2F8</color>
 </resources>

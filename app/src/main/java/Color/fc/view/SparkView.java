@@ -27,13 +27,13 @@ public class SparkView extends View {
 
     public SparkView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        linePaint.setColor(0xFF22D3EE);
+        linePaint.setColor(0xFF00A8CC);
         linePaint.setStyle(Paint.Style.STROKE);
         linePaint.setStrokeWidth(dp(2));
-        gridPaint.setColor(0xFF1C2530);
+        gridPaint.setColor(0xFFE9EEF6);
         gridPaint.setStyle(Paint.Style.STROKE);
         gridPaint.setStrokeWidth(1);
-        dotPaint.setColor(0xFF22D3EE);
+        dotPaint.setColor(0xFF00A8CC);
     }
 
     public void push(double watts) {

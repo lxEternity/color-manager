@@ -2,6 +2,7 @@ package Color.fc;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.View;
@@ -12,7 +13,7 @@ import android.widget.EditText;
 import android.widget.Toast;
 
 /**
- * 访问密码锁
+ * 访问密码锁：仅首次打开需要输入，验证一次后记住解锁状态
  */
 public class LockActivity extends Activity {
 
@@ -22,6 +23,15 @@ public class LockActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // 已解锁过则直接进入主页
+        SharedPreferences sp = getSharedPreferences("lock", MODE_PRIVATE);
+        if (sp.getBoolean("unlocked", false)) {
+            startActivity(new Intent(this, MainActivity.class));
+            finish();
+            return;
+        }
+
         setContentView(R.layout.activity_lock);
 
         EditText input = findViewById(R.id.passwordInput);
@@ -30,6 +40,7 @@ public class LockActivity extends Activity {
         Runnable tryUnlock = () -> {
             String pwd = input.getText().toString();
             if (ACCESS_PASSWORD.equals(pwd)) {
+                sp.edit().putBoolean("unlocked", true).apply();
                 startActivity(new Intent(this, MainActivity.class));
                 finish();
             } else {

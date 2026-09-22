@@ -30,6 +30,8 @@ public class ModeActivity extends Activity {
     /** 模块工作目录（quanj.sh: mingc="qingtd"） */
     private static final String MOKML = "/sdcard/Android/qingtd";
     private static final String CONF_FILE = MOKML + "/动态模式切换.conf";
+    /** 模块目录内的 conf 模板（service.sh 开机恢复源） */
+    private static final String MODULE_CONF_FILE = "/data/adb/modules/colorFC/qingtd/动态模式切换.conf";
     private static final String STOP_FILE = MOKML + "/stop";
 
     /** 模块四模式（powercfg.json 确认） */
@@ -204,23 +206,33 @@ public class ModeActivity extends Activity {
         }
         final String content = buildConf();
         new Thread(() -> {
-            RootShell.Result r = RootShell.writeFile(getCacheDir(), content, CONF_FILE);
-            final boolean saved = r.ok();
+            // 双写: 工作文件 + 模块目录模板
+            // (service.sh/qingtd.sh 可能从模块模板恢复conf, 只写工作文件会被回滚)
+            RootShell.Result r1 = RootShell.writeFile(getCacheDir(), content, CONF_FILE);
+            boolean saved = r1.ok();
+            RootShell.Result r2 = RootShell.writeFile(getCacheDir(), content, MODULE_CONF_FILE);
             if (saved) {
-                // 策略由模块动态进程执行：保存后确保它在跑（stop 清理 + 拉起）
+                // 策略由模块动态进程执行：确保它在跑（stop 清理 + 拉起）
                 RootShell.exec(
                         "rm -f '" + STOP_FILE + "'"
                         + "; pgrep -f \"[q]ingtdjc\" >/dev/null 2>&1"
                         + " || nohup sh /data/adb/modules/colorFC/script/qingtd.sh >/dev/null 2>&1 &");
-            }
-            runOnUiThread(() -> {
-                if (saved) {
-                    toast("保存成功，动态切换已就绪");
+                // 写后2秒回读验证是否被外部回滚
+                try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
+                String back = RootShell.readFile(CONF_FILE);
+                final boolean stable = back != null && back.trim().equals(content.trim());
+                runOnUiThread(() -> {
+                    if (stable) {
+                        toast("保存成功");
+                    } else {
+                        toast("保存后被系统回滚，请把此提示截图反馈");
+                    }
                     loadState();
-                } else {
-                    toast("保存失败");
-                }
-            });
+                });
+            } else {
+                final String err = r1.err + (r2.ok() ? "" : " | 模板写入失败");
+                runOnUiThread(() -> toast("保存失败：" + err));
+            }
         }).start();
     }
 

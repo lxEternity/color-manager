@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 调速器选择行：显示当前值，点击弹出上下滑动选择 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -14,13 +15,19 @@
         android:maxLines="1"
         android:ellipsize="end" />
 
-    <Spinner
-        android:id="@+id/spinner"
+    <TextView
+        android:id="@+id/govValue"
         android:layout_width="match_parent"
         android:layout_height="38dp"
         android:layout_marginTop="4dp"
         android:background="@drawable/bg_input"
-        android:popupBackground="@drawable/bg_spinner_popup"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp" />
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="36dp"
+        android:textColor="@color/textPrimary"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:drawableEnd="@drawable/ic_arrow_down"
+        android:drawablePadding="0dp"
+        android:drawableTint="@color/textDim" />
 </LinearLayout>

@@ -7,12 +7,11 @@ import android.view.View;
 import android.view.animation.Animation;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.RotateAnimation;
-import android.widget.ArrayAdapter;
+import android.app.AlertDialog;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -26,7 +25,7 @@ public class GovernorActivity extends Activity {
 
     private final GovernorConfig.Gov[] govs = new GovernorConfig.Gov[4];
     private final HashMap<String, EditText> inputs = new HashMap<>();
-    private final HashMap<String, Spinner> spinners = new HashMap<>();
+    private final HashMap<String, TextView> spinners = new HashMap<>();
     private boolean loading = true;
 
     /** 预设调速器列表（不再支持手动输入） */
@@ -156,30 +155,35 @@ public class GovernorActivity extends Activity {
         box.addView(row);
     }
 
-    /** 预设调速器下拉选择（不支持手动输入） */
+    /** 预设调速器选择：点击弹出上下滑动单选弹窗 */
     private void addGovernorSelector(LinearLayout box, String key, String label, String def) {
         View row = getLayoutInflater().inflate(R.layout.governor_row, box, false);
         ((TextView) row.findViewById(R.id.label)).setText(label);
-        Spinner sp = row.findViewById(R.id.spinner);
-        ArrayAdapter<String> ad = new ArrayAdapter<>(this, R.layout.gov_spinner_item, GOV_PRESETS);
-        ad.setDropDownViewResource(R.layout.gov_dropdown_item);
-        sp.setAdapter(ad);
-        selectGov(sp, def);
-        spinners.put(key, sp);
+        TextView val = row.findViewById(R.id.govValue);
+        val.setText(def);
+        val.setOnClickListener(v -> showGovPicker(key, val));
+        spinners.put(key, val);
         box.addView(row);
     }
 
-    /** 选中指定调速器；脚本读到的值不在预设列表时追加显示，保证回显真实 */
-    private void selectGov(Spinner sp, String v) {
-        if (v == null || v.isEmpty()) v = GOV_PRESETS[0];
-        @SuppressWarnings("unchecked")
-        ArrayAdapter<String> ad = (ArrayAdapter<String>) sp.getAdapter();
-        int pos = ad.getPosition(v);
-        if (pos < 0) {
-            ad.add(v);
-            pos = ad.getPosition(v);
+    /** 上下滑动选择弹窗：当前值高亮，预设外值追加显示 */
+    private void showGovPicker(String key, TextView val) {
+        String cur = val.getText().toString();
+        String[] list = new String[GOV_PRESETS.length];
+        int checked = -1;
+        for (int i = 0; i < GOV_PRESETS.length; i++) {
+            list[i] = GOV_PRESETS[i];
+            if (GOV_PRESETS[i].equals(cur)) checked = i;
         }
-        sp.setSelection(pos, false);
+        final String[] items = list;
+        new AlertDialog.Builder(this)
+                .setTitle("选择调速器")
+                .setSingleChoiceItems(items, checked, (d, w) -> {
+                    val.setText(items[w]);
+                    d.dismiss();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void fillInputs() {
@@ -202,8 +206,8 @@ public class GovernorActivity extends Activity {
                 String v = readField(g, fields[i][j]);
                 if (v == null || v.isEmpty()) v = defaults[i][j];
                 if ("governor".equals(fields[i][j])) {
-                    Spinner sp = spinners.get(key);
-                    if (sp != null) selectGov(sp, v);
+                    TextView sp = spinners.get(key);
+                    if (sp != null && v != null && !v.isEmpty()) sp.setText(v);
                     continue;
                 }
                 EditText et = inputs.get(key);
@@ -258,9 +262,9 @@ public class GovernorActivity extends Activity {
             for (int j = 0; j < fields[i].length; j++) {
                 String f = fields[i][j];
                 if ("governor".equals(f)) {
-                    Spinner sp = spinners.get(i + "." + f);
-                    if (sp != null && sp.getSelectedItem() != null) {
-                        writeField(govs[i], f, sp.getSelectedItem().toString());
+                    TextView sp = spinners.get(i + "." + f);
+                    if (sp != null && sp.getText() != null && sp.getText().length() > 0) {
+                        writeField(govs[i], f, sp.getText().toString());
                     }
                     continue;
                 }

@@ -258,35 +258,59 @@ public class ModeActivity extends Activity {
     }
 
     private void pinRefresh(String hz) {
-        // 四重写入：ColorOS官方 user_refresh_rate + Android标准 + OPlus私有 + 框架强制命令
+        // 多重写入: ColorOS官方(user_refresh_rate) + Android标准 + OPlus私有 + 框架强制命令
+        // 注: 模块 qtbh.sh 会在前台切换时执行 $MODULE_PATH/fps 重设帧率，可能覆盖锁定
         final String cmd;
         if (hz == null) {
-            cmd = "settings delete system user_refresh_rate"
-                    + "; settings delete system peak_refresh_rate"
-                    + "; settings delete system min_refresh_rate"
-                    + "; settings delete system oppo_max_refresh_rate"
-                    + "; settings delete system oppo_min_refresh_rate"
+            cmd = "settings delete system user_refresh_rate; settings delete secure user_refresh_rate"
+                    + "; settings delete system peak_refresh_rate; settings delete system min_refresh_rate"
+                    + "; settings delete system oppo_max_refresh_rate; settings delete system oppo_min_refresh_rate"
+                    + "; settings delete secure oppo_max_refresh_rate; settings delete secure oppo_min_refresh_rate"
                     + "; cmd display clear-user-preferred-display-mode 2>/dev/null; echo OK";
         } else {
             cmd = "settings put system user_refresh_rate " + hz
+                    + "; settings put secure user_refresh_rate " + hz
                     + "; settings put system peak_refresh_rate " + hz
                     + "; settings put system min_refresh_rate " + hz
                     + "; settings put system oppo_max_refresh_rate " + hz
                     + "; settings put system oppo_min_refresh_rate " + hz
+                    + "; settings put secure oppo_max_refresh_rate " + hz
+                    + "; settings put secure oppo_min_refresh_rate " + hz
                     + "; cmd display set-user-preferred-refresh-rate " + hz + " 2>/dev/null"
                     + "; cmd display set-user-preferred-display-mode 0 0 " + hz + " 2>/dev/null; echo OK";
         }
         new Thread(() -> {
             RootShell.exec(cmd, 10);
+            // 等待2秒回读实际刷新率判断是否物理生效
+            try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
+            final String real = getRealRefresh();
             pinnedHz = hz;
             runOnUiThread(() -> {
                 applyRefreshState();
                 renderRefreshChips();
-                toast(hz == null ? "已恢复自动刷新率" : "已锁定 " + hz + " Hz");
-                // 2秒后回读实际刷新率验证是否物理生效
-                curRefreshView.postDelayed(this::applyRefreshState, 2000);
+                if (hz == null) {
+                    toast("已恢复自动刷新率");
+                } else if (matchesReal(hz, real)) {
+                    toast("已锁定 " + hz + " Hz ✓");
+                } else {
+                    // 物理未生效: 大概率被模块fps脚本覆盖或系统拒绝
+                    toast("锁定未生效（实际仍 " + real + "）\n"
+                            + "模块可能正在管理帧率，请提供模块fps脚本：\n"
+                            + "/data/adb/modules/colorFC/fps");
+                }
             });
         }).start();
+    }
+
+    /** 实际刷新率是否等于锁定值（容差0.5） */
+    private boolean matchesReal(String pin, String real) {
+        try {
+            float p = Float.parseFloat(pin);
+            float r = Float.parseFloat(real);
+            return Math.abs(p - r) < 0.5f;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 模块日志末行（反馈用） */

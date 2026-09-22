@@ -84,8 +84,10 @@ public class ModeActivity extends Activity {
             RootShell.Result stop = RootShell.exec("ls '" + STOP_FILE + "' 2>/dev/null");
             // conf
             String conf = RootShell.readFile(CONF_FILE);
-            // 当前刷新率锁定状态
-            RootShell.Result peak = RootShell.exec("settings get system peak_refresh_rate");
+            // 当前刷新率锁定状态（ColorOS 官方 key 优先，标准 key 兜底）
+            RootShell.Result peak = RootShell.exec(
+                    "R=$(settings get system user_refresh_rate)"
+                    + "; [ \"$R\" = null ] && R=$(settings get system peak_refresh_rate); echo $R");
             final boolean taken = stop.ok() && !stop.out.trim().isEmpty();
             final String mode = cur == null ? "" : cur.trim();
             final String pin = (peak.ok() && !peak.out.trim().isEmpty()
@@ -217,10 +219,10 @@ public class ModeActivity extends Activity {
 
     private void applyRefreshState() {
         curRefreshView.setText(pinnedHz == null
-                ? String.format("当前状态：自动（%s）", getRealRefresh())
-                : String.format("当前状态：锁定 %s Hz", pinnedHz.endsWith(".0")
-                        ? pinnedHz.substring(0, pinnedHz.length() - 2)
-                        : pinnedHz));
+                ? String.format("当前状态：自动（实际 %s）", getRealRefresh())
+                : String.format("当前状态：锁定 %s Hz（实际 %s）",
+                        pinnedHz.endsWith(".0") ? pinnedHz.substring(0, pinnedHz.length() - 2) : pinnedHz,
+                        getRealRefresh()));
     }
 
     private String getRealRefresh() {
@@ -256,17 +258,18 @@ public class ModeActivity extends Activity {
     }
 
     private void pinRefresh(String hz) {
-        // ColorOS 不遵守标准 peak/min key：三重写入(标准 + OPlus 私有 + Android 14 cmd)
+        // 四重写入：ColorOS官方 user_refresh_rate + Android标准 + OPlus私有 + 框架强制命令
         final String cmd;
         if (hz == null) {
-            cmd = "settings delete system peak_refresh_rate"
+            cmd = "settings delete system user_refresh_rate"
+                    + "; settings delete system peak_refresh_rate"
                     + "; settings delete system min_refresh_rate"
                     + "; settings delete system oppo_max_refresh_rate"
                     + "; settings delete system oppo_min_refresh_rate"
-                    + "; cmd display clear-user-preferred-display-mode 2>/dev/null"
-                    + "; cmd display set-user-preferred-display-mode -1 2>/dev/null; echo OK";
+                    + "; cmd display clear-user-preferred-display-mode 2>/dev/null; echo OK";
         } else {
-            cmd = "settings put system peak_refresh_rate " + hz
+            cmd = "settings put system user_refresh_rate " + hz
+                    + "; settings put system peak_refresh_rate " + hz
                     + "; settings put system min_refresh_rate " + hz
                     + "; settings put system oppo_max_refresh_rate " + hz
                     + "; settings put system oppo_min_refresh_rate " + hz
@@ -280,6 +283,8 @@ public class ModeActivity extends Activity {
                 applyRefreshState();
                 renderRefreshChips();
                 toast(hz == null ? "已恢复自动刷新率" : "已锁定 " + hz + " Hz");
+                // 2秒后回读实际刷新率验证是否物理生效
+                curRefreshView.postDelayed(this::applyRefreshState, 2000);
             });
         }).start();
     }
@@ -397,41 +402,13 @@ public class ModeActivity extends Activity {
             toast("配置尚未加载完成");
             return;
         }
-        final List<ResolveInfo> apps = new ArrayList<>();
-        try {
-            Intent i = new Intent(Intent.ACTION_MAIN);
-            i.addCategory(Intent.CATEGORY_LAUNCHER);
-            apps.addAll(getPackageManager().queryIntentActivities(i, 0));
-        } catch (Exception ignored) {
-        }
-        if (apps.isEmpty()) {
-            toast("未扫描到应用");
-            return;
-        }
-        Collections.sort(apps, (a, b) -> String.valueOf(a.loadLabel(getPackageManager()))
-                .compareTo(String.valueOf(b.loadLabel(getPackageManager()))));
-        final String[] names = new String[apps.size()];
-        final String[] pkgs = new String[apps.size()];
-        for (int i = 0; i < apps.size(); i++) {
-            names[i] = String.valueOf(apps.get(i).loadLabel(getPackageManager()));
-            pkgs[i] = apps.get(i).activityInfo.packageName;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("选择应用")
-                .setItems(names, (d, which) -> {
-                    final String pkg = pkgs[which];
-                    if (rules.containsKey(pkg)) {
-                        toast(names[which] + " 已有规则，点击该行可修改");
-                        return;
-                    }
-                    pickMode(mode -> {
-                        rules.put(pkg, mode);
-                        renderRules();
-                        toast("已添加：" + names[which] + " → " + modeName(mode) + "\n记得保存策略");
-                    });
-                })
-                .setNegativeButton("取消", null)
-                .show();
+        // 底部收纳式应用菜单：可搜索、带图标、已配置应用带模式徽章
+        AppPickerDialog.show(this, rules, (pkg, label) ->
+                pickMode(mode -> {
+                    rules.put(pkg, mode);
+                    renderRules();
+                    toast("已添加：" + label + " → " + modeName(mode) + "\n记得保存策略");
+                }));
     }
 
     private interface ModeCb { void on(String mode); }
@@ -454,7 +431,22 @@ public class ModeActivity extends Activity {
         final String content = buildConf();
         new Thread(() -> {
             RootShell.Result r = RootShell.writeFile(getCacheDir(), content, CONF_FILE);
-            runOnUiThread(() -> toast(r.ok() ? "保存成功" : "保存失败"));
+            final boolean saved = r.ok();
+            if (saved) {
+                // 策略由模块动态进程执行：保存后确保它在跑（stop 清理 + 拉起）
+                RootShell.exec(
+                        "rm -f '" + STOP_FILE + "'"
+                        + "; pgrep -f \"[q]ingtdjc\" >/dev/null 2>&1"
+                        + " || nohup sh /data/adb/modules/colorFC/script/qingtd.sh >/dev/null 2>&1 &");
+            }
+            runOnUiThread(() -> {
+                if (saved) {
+                    toast("保存成功，动态切换已就绪");
+                    loadState();
+                } else {
+                    toast("保存失败");
+                }
+            });
         }).start();
     }
 

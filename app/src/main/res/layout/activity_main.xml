@@ -476,7 +476,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="调度接管"
+                        android:text="应用策略"
                         android:textColor="@color/textPrimary"
                         android:textSize="15sp"
                         android:textStyle="bold" />
@@ -485,7 +485,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="全局模式切换 / 应用策略"
+                        android:text="按应用自动切换调度模式"
                         android:textColor="@color/textSecondary"
                         android:textSize="12sp" />
                 </LinearLayout>

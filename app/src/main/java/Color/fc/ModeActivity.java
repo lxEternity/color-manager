@@ -148,17 +148,25 @@ public class ModeActivity extends Activity {
     }
 
     private void switchMode(String mode) {
-        // Scene 同款外部控制：sh /data/powercfg.sh <模式>（创建 stop，固定全局模式）
+        // 先 source 模块变量(quanj.sh)保证 $mokml/$MODULE_PATH 就绪，
+        // 并复位 qhz 防堵塞标记，再走 Scene 同款外部控制接口
+        final String cmd = ". /data/adb/modules/colorFC/script/quanj.sh 2>/dev/null;"
+                + "[ -f \"$mosdz/qhz\" ] && echo 1 > \"$mosdz/qhz\";"
+                + "sh '" + POWERCFG + "' " + mode + "; echo EXIT_$?";
         new Thread(() -> {
-            RootShell.Result r = RootShell.exec("sh '" + POWERCFG + "' " + mode
-                    + " && echo done");
+            RootShell.Result r = RootShell.exec(cmd, 15);
+            String cur = RootShell.readFile(CUR_MODE_FILE);
+            String log = lastLogLine();
+            final boolean applied = mode.equals(cur == null ? "" : cur.trim());
             runOnUiThread(() -> {
-                if (r.out != null && r.out.contains("done")) {
+                if (applied) {
                     toast("已接管：" + modeName(mode));
-                    loadState();
+                } else if (r.out != null && r.out.contains("EXIT_0")) {
+                    toast("接管命令已执行，模块日志：\n" + (log.isEmpty() ? "(无新日志)" : log));
                 } else {
-                    toast("切换失败，请检查模块是否安装");
+                    toast("切换失败：" + (r.err != null && !r.err.isEmpty() ? r.err : "模块无响应"));
                 }
+                loadState();
             });
         }).start();
     }
@@ -248,12 +256,25 @@ public class ModeActivity extends Activity {
     }
 
     private void pinRefresh(String hz) {
-        final String cmd = hz == null
-                ? "settings delete system peak_refresh_rate; settings delete system min_refresh_rate"
-                : "settings put system peak_refresh_rate " + hz
-                  + " && settings put system min_refresh_rate " + hz;
+        // ColorOS 不遵守标准 peak/min key：三重写入(标准 + OPlus 私有 + Android 14 cmd)
+        final String cmd;
+        if (hz == null) {
+            cmd = "settings delete system peak_refresh_rate"
+                    + "; settings delete system min_refresh_rate"
+                    + "; settings delete system oppo_max_refresh_rate"
+                    + "; settings delete system oppo_min_refresh_rate"
+                    + "; cmd display clear-user-preferred-display-mode 2>/dev/null"
+                    + "; cmd display set-user-preferred-display-mode -1 2>/dev/null; echo OK";
+        } else {
+            cmd = "settings put system peak_refresh_rate " + hz
+                    + "; settings put system min_refresh_rate " + hz
+                    + "; settings put system oppo_max_refresh_rate " + hz
+                    + "; settings put system oppo_min_refresh_rate " + hz
+                    + "; cmd display set-user-preferred-refresh-rate " + hz + " 2>/dev/null"
+                    + "; cmd display set-user-preferred-display-mode 0 0 " + hz + " 2>/dev/null; echo OK";
+        }
         new Thread(() -> {
-            RootShell.exec(cmd);
+            RootShell.exec(cmd, 10);
             pinnedHz = hz;
             runOnUiThread(() -> {
                 applyRefreshState();
@@ -261,6 +282,12 @@ public class ModeActivity extends Activity {
                 toast(hz == null ? "已恢复自动刷新率" : "已锁定 " + hz + " Hz");
             });
         }).start();
+    }
+
+    /** 模块日志末行（反馈用） */
+    private String lastLogLine() {
+        RootShell.Result r = RootShell.exec("tail -1 '" + MOKML + "/logs.txt' 2>/dev/null");
+        return r.out == null ? "" : r.out.trim();
     }
 
     // ==================== 区块3: 应用策略 ====================

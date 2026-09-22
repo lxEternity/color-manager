@@ -25,11 +25,16 @@ public class RootShell {
 
     /** 执行 su -c 命令（带超时保护，防止授权弹窗/卡死阻塞） */
     public static Result exec(String cmd) {
+        return exec(cmd, 6);
+    }
+
+    /** 执行 su -c 命令（自定义超时秒数） */
+    public static Result exec(String cmd, int timeoutSec) {
         Result r = new Result();
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
-            if (!p.waitFor(6, TimeUnit.SECONDS)) {
+            if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 r.err = "timeout";
                 return r;

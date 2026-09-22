@@ -210,7 +210,7 @@ public class ModeActivity extends Activity {
     private void renderRules() {
         ruleBox.removeAllViews();
         // 全局默认行（moren）
-        ruleBox.addView(ruleRow("moren", "全局默认（未匹配应用时）", moren, v ->
+        ruleBox.addView(ruleRow("moren", "全局默认", moren, v ->
                 pickMode(mode -> {
                     moren = mode;
                     renderRules();

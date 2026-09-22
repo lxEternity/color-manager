@@ -101,7 +101,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="应用策略（自定义调度模式）"
+                    android:text="应用策略"
                     android:textColor="@color/textPrimary"
                     android:textSize="15sp"
                     android:textStyle="bold" />
@@ -111,7 +111,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="按前台应用自动切换调度模式，规则写入模块动态切换配置"
+                    android:text=""
                     android:textColor="@color/textSecondary"
                     android:textSize="12sp" />
 

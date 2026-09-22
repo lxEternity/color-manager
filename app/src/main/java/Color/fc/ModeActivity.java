@@ -165,8 +165,9 @@ public class ModeActivity extends Activity {
 
     private void restoreDynamic() {
         // stop 时模块已 kill 动态进程(qingtdjc)，恢复需删除 stop 并重新拉起
+        // 注意: pgrep -f "[q]ingtdjc" 用正则技巧避免匹配到执行命令的 shell 自身
         final String cmd = "rm -f '" + STOP_FILE + "'"
-                + "; pgrep -f qingtdjc >/dev/null 2>&1"
+                + "; pgrep -f \"[q]ingtdjc\" >/dev/null 2>&1"
                 + " || nohup sh /data/adb/modules/colorFC/script/qingtd.sh >/dev/null 2>&1 &";
         new Thread(() -> {
             RootShell.exec(cmd);

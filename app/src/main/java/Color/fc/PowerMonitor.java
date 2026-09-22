@@ -7,54 +7,68 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 电池功耗监控：自动扫描 /sys/class/power_supply 下的 Battery 节点，
+ * 电池功耗监控：通过 root 批量扫描 /sys/class/power_supply 下的 Battery 节点，
  * 自动校准单位（µA/mA、µV/mV、µW/mW）与单/双电芯，计算实时功耗。
+ * 注：普通 App 受 SELinux 限制无法直接读 sysfs，必须走 su。
  */
 public class PowerMonitor {
 
     public static class BatteryStat {
         public double watts;    // 总功耗 W
-        public double volts;   // 总电压 V
-        public double amps;    // 电流 A
+        public double volts;    // 总电压 V
+        public double amps;     // 电流 A
         public int cells = 1;  // 电芯数
-        public int level = -1;// 电量 %
+        public int level = -1; // 电量 %
         public double tempC;   // 温度 ℃
         public String status = "";
     }
 
+    /** 一条 su 脚本批量读取所有 Battery 节点：path|V|I|P|cap|temp|status */
+    private static final String SCAN_SCRIPT =
+            "for d in /sys/class/power_supply/*; do "
+                    + "[ -f \"$d/type\" ] || continue; "
+                    + "t=$(cat \"$d/type\" 2>/dev/null); "
+                    + "[ \"$t\" = \"Battery\" ] || [ \"$t\" = \"battery\" ] || continue; "
+                    + "echo \"$d|$(cat \"$d/voltage_now\" 2>/dev/null)|$(cat \"$d/current_now\" 2>/dev/null)"
+                    + "|$(cat \"$d/power_now\" 2>/dev/null)|$(cat \"$d/capacity\" 2>/dev/null)"
+                    + "|$(cat \"$d/temp\" 2>/dev/null)|$(cat \"$d/status\" 2>/dev/null)\"; "
+                    + "done";
+
     public static BatteryStat readOnce() {
         try {
-            File dir = new File("/sys/class/power_supply");
-            File[] subs = dir.listFiles();
-            if (subs == null) return null;
-            List<File> bats = new ArrayList<>();
-            for (File f : subs) {
-                if (!f.isDirectory()) continue;
-                String t = readTrim(new File(f, "type"));
-                if (t != null && t.trim().equalsIgnoreCase("Battery")) bats.add(f);
+            RootShell.Result r = RootShell.exec(SCAN_SCRIPT);
+            if (!r.ok() || r.out == null || r.out.trim().isEmpty()) return null;
+
+            List<String[]> rows = new ArrayList<>();
+            for (String line : r.out.split("\\n")) {
+                if (line.trim().isEmpty()) continue;
+                String[] p = line.split("\\|");
+                if (p.length >= 7) rows.add(p);
             }
-            if (bats.isEmpty()) return null;
+            if (rows.isEmpty()) return null;
 
             BatteryStat st = new BatteryStat();
-            double totalV = 0, sumI = 0;
+            double totalV = 0, sumI = 0, pn = 0;
             int used = 0;
-            for (File b : bats) {
-                double v = readDouble(new File(b, "voltage_now"));
-                double i = readDouble(new File(b, "current_now"));
+            for (String[] p : rows) {
+                double v = toD(p[1]);
+                double i = toD(p[2]);
                 if (v == 0 && i == 0) continue;
                 totalV += calibV(v);
                 sumI += calibI(i);
                 used++;
             }
-
             // 优先使用内核直接给出的功率节点
-            double pn = 0;
-            for (File b : bats) {
-                pn = readDouble(new File(b, "power_now"));
+            for (String[] p : rows) {
+                pn = toD(p[3]);
                 if (pn != 0) break;
             }
-
-            if (used == 0 && pn == 0) return null;
+            if (used == 0 && pn == 0) {
+                // 电压电流都读不到，仅剩容量/温度也有意义
+                fillBasic(st, rows.get(0));
+                if (st.level < 0 && st.tempC == 0) return null;
+                return st;
+            }
 
             st.cells = Math.max(used, 1);
             if (used > 0) {
@@ -65,49 +79,42 @@ public class PowerMonitor {
             } else {
                 st.watts = calibW(pn);
             }
-            // 双电芯：多个 Battery 节点（串联/并联均按总功率求和）
-            st.cells = Math.max(used, 1);
-            if (bats.size() >= 2 && used >= 2) st.cells = used;
-
-            File main = bats.get(0);
-            st.level = (int) readDouble(new File(main, "capacity"));
-            double temp = readDouble(new File(main, "temp"));
-            st.tempC = temp > 1000 ? temp / 10.0 : temp;
-            String s = readTrim(new File(main, "status"));
-            if (s != null) st.status = s.trim();
+            fillBasic(st, rows.get(0));
             return st;
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** 统计 CPU 核心数 */
-    public static int cpuCount() {
-        int n = 0;
-        for (int i = 0; i < 16; i++) {
-            if (new File("/sys/devices/system/cpu/cpu" + i).exists()) n++;
-        }
-        return n;
+    /** 电量 / 温度 / 充电状态（温度节点单位 0.1℃，自动换算） */
+    private static void fillBasic(BatteryStat st, String[] p) {
+        st.level = (int) toD(p[4]);
+        double t = toD(p[5]);
+        st.tempC = t > 60 ? t / 10.0 : t;   // 285 → 28.5℃；直接给 25 则保留
+        if (p[6] != null) st.status = p[6].trim();
     }
 
-    private static double readDouble(File f) {
-        String s = readTrim(f);
+    /** 统计 CPU 核心数（/proc 对普通进程可读） */
+    public static int cpuCount() {
+        int n = 0;
+        try {
+            BufferedReader r = new BufferedReader(new FileReader("/proc/cpuinfo"));
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (line.startsWith("processor")) n++;
+            }
+            r.close();
+        } catch (Exception ignored) {
+        }
+        return n > 0 ? n : 8;
+    }
+
+    private static double toD(String s) {
         if (s == null) return 0;
         try {
             return Double.parseDouble(s.trim());
         } catch (Exception e) {
             return 0;
-        }
-    }
-
-    private static String readTrim(File f) {
-        try {
-            BufferedReader r = new BufferedReader(new FileReader(f));
-            String l = r.readLine();
-            r.close();
-            return l;
-        } catch (Exception e) {
-            return null;
         }
     }
 

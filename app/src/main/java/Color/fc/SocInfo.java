@@ -13,14 +13,16 @@ public class SocInfo {
     public final String shortName;  // 短名（用于芯片图）
     public final String vendor;     // 厂商
     public final String config;     // "a" / "b"
+    public final boolean known;     // 是否命中预设 SOC 列表
 
-    private SocInfo(String platform, String code, String marketing, String shortName, String vendor, String config) {
+    private SocInfo(String platform, String code, String marketing, String shortName, String vendor, String config, boolean known) {
         this.platform = platform;
         this.code = code;
         this.marketing = marketing;
         this.shortName = shortName;
         this.vendor = vendor;
         this.config = config;
+        this.known = known;
     }
 
     private static final String[][] MAP = {
@@ -42,11 +44,11 @@ public class SocInfo {
         platform = platform.trim().toLowerCase();
         for (String[] row : MAP) {
             if (row[0].equals(platform)) {
-                return new SocInfo(row[0], row[1], row[2], row[3], row[4], row[5]);
+                return new SocInfo(row[0], row[1], row[2], row[3], row[4], row[5], true);
             }
         }
-        String up = platform.toUpperCase();
-        String marketing = platform.isEmpty() ? "未知平台" : "未知平台（" + up + "）";
-        return new SocInfo(platform, up, marketing, up.length() <= 8 ? up : up.substring(0, 8), "--", "a");
+        String up = platform.isEmpty() ? "未知" : platform.toUpperCase();
+        String marketing = platform.isEmpty() ? "检测错误" : "检测错误（" + up + "）";
+        return new SocInfo(platform, up, marketing, up.length() <= 8 ? up : up.substring(0, 8), "--", "a", false);
     }
 }

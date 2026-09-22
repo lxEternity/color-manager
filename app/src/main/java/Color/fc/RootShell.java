@@ -76,8 +76,18 @@ public class RootShell {
         }
     }
 
-    /** 读取系统属性（优先无 root 读 build.prop，失败用 su getprop） */
+    /** 读取系统属性：直接执行 getprop（无需 root）→ build.prop → su getprop */
     public static String getprop(String name) {
+        // 直接执行 getprop 命令，普通权限即可，最可靠
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"getprop", name});
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line = r.readLine();
+            r.close();
+            p.waitFor();
+            if (line != null && !line.trim().isEmpty()) return line.trim();
+        } catch (Exception ignored) {
+        }
         try {
             File[] props = {new File("/system/build.prop"), new File("/vendor/build.prop")};
             for (File f : props) {

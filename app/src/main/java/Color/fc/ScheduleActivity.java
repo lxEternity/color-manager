@@ -50,9 +50,9 @@ public class ScheduleActivity extends Activity {
 
         String fileA = RootShell.CONFIG_DIR + "/a.all.sh";
         String fileB = RootShell.CONFIG_DIR + "/b.all.sh";
-        String desc = String.format(Locale.US,
-                "当前 SOC：%s（%s）→ 检测结果：加载配置 %s", soc.code, soc.marketing, soc.config.toUpperCase());
-        socTip.setText(desc);
+        socTip.setText(soc.known
+                ? String.format(Locale.US, "当前 SOC：%s（%s）→ 加载配置 %s", soc.code, soc.marketing, soc.config.toUpperCase())
+                : "检测错误，默认加载方案1");
 
         tabAV.setOnClickListener(v -> switchTab("a"));
         tabBV.setOnClickListener(v -> switchTab("b"));

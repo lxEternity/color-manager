@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
     private double peakWatts = 0;
 
     private ChipView chipView;
-    private TextView socMarketing, socPlatform, socConfig, rootBadge;
+    private TextView socMarketing, socPlatform, rootBadge;
     private TextView powerValue, powerStatus, currentValue, voltageValue, peakValue, cellBadge;
     private TextView cpuCount, batteryLevel, batteryTemp;
     private SparkView sparkView;
@@ -43,7 +43,6 @@ public class MainActivity extends Activity {
         chipView = findViewById(R.id.chipView);
         socMarketing = findViewById(R.id.socMarketing);
         socPlatform = findViewById(R.id.socPlatform);
-        socConfig = findViewById(R.id.socConfig);
         rootBadge = findViewById(R.id.rootBadge);
         powerValue = findViewById(R.id.powerValue);
         powerStatus = findViewById(R.id.powerStatus);
@@ -84,7 +83,6 @@ public class MainActivity extends Activity {
         chipView.setChip(s.shortName, s.code);
         socMarketing.setText(s.marketing);
         socPlatform.setText(String.format(Locale.US, "platform: %s · %s", s.platform, s.vendor));
-        socConfig.setText(String.format(Locale.US, "已加载配置: %s (%s.all.sh)", s.config.toUpperCase(), s.config));
         int n = PowerMonitor.cpuCount();
         cpuCount.setText(n > 0 ? String.valueOf(n) : "--");
     }

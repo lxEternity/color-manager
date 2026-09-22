@@ -3,14 +3,15 @@ package Color.fc;
 import android.app.Activity;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.View;
 import android.view.animation.Animation;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.RotateAnimation;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -24,7 +25,14 @@ public class GovernorActivity extends Activity {
 
     private final GovernorConfig.Gov[] govs = new GovernorConfig.Gov[4];
     private final HashMap<String, EditText> inputs = new HashMap<>();
+    private final HashMap<String, Spinner> spinners = new HashMap<>();
     private boolean loading = true;
+
+    /** 预设调速器列表（不再支持手动输入） */
+    private static final String[] GOV_PRESETS = {
+            "conservative", "walt", "ips", "sugov_next", "scx",
+            "hmbird", "powersave", "performance", "schedutil"
+    };
 
     private static final String[] FILES = {"conservative.sh", "scx1.sh", "scx2.sh", "scx3.sh"};
     private static final String[] NAMES = {"省电 · conservative.sh", "均衡 · scx1.sh",
@@ -85,16 +93,16 @@ public class GovernorActivity extends Activity {
                 rotateArrow(arrow, expand);
             });
 
-            addParam(box, idx + ".governor",
-                    "调速器名称（写入 scaling_governor）", i == 0 ? "conservative" : "scx", true);
+            addGovernorSelector(box, idx + ".governor",
+                    "切换预设调速器（写入 scaling_governor）", i == 0 ? "conservative" : "scx");
             if (i == 0) {
-                addParam(box, idx + ".upThreshold", "up_threshold 升频阈值（% 负载超过即升频）", "98", false);
-                addParam(box, idx + ".downThreshold", "down_threshold 降频阈值（% 负载低于即降频）", "93", false);
-                addParam(box, idx + ".freqStep", "freq_step 每次调频步进（%）", "1", false);
+                addParam(box, idx + ".upThreshold", "up_threshold 升频阈值（% 负载超过即升频）", "98", true);
+                addParam(box, idx + ".downThreshold", "down_threshold 降频阈值（% 负载低于即降频）", "93", true);
+                addParam(box, idx + ".freqStep", "freq_step 每次调频步进（%）", "1", true);
                 addParam(box, idx + ".samplingRate", "sampling_rate 采样周期（µs）", "14000", false);
             } else {
                 addParam(box, idx + ".targetLoads", "target_loads 目标负载（%，scx 调速器）",
-                        i == 1 ? "90" : "70", false);
+                        i == 1 ? "90" : "70", true);
             }
             container.addView(card);
         }
@@ -110,16 +118,68 @@ public class GovernorActivity extends Activity {
         arrow.startAnimation(ra);
     }
 
-    private void addParam(LinearLayout box, String key, String label, String def, boolean text) {
+    private void addParam(LinearLayout box, String key, String label, String def, boolean seek) {
         View row = getLayoutInflater().inflate(R.layout.param_row, box, false);
         ((TextView) row.findViewById(R.id.label)).setText(label);
         EditText et = row.findViewById(R.id.input);
-        if (text) {
-            et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        }
         et.setText(def);
+        SeekBar sb = row.findViewById(R.id.seek);
+        if (seek) {
+            sb.setMax(100);
+            try {
+                sb.getProgressDrawable().setColorFilter(0xFF00B8D4, android.graphics.PorterDuff.Mode.SRC_IN);
+                sb.getThumb().setColorFilter(0xFF00B8D4, android.graphics.PorterDuff.Mode.SRC_IN);
+            } catch (Exception ignored) {
+            }
+            et.addTextChangedListener(new android.text.TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int a, int b2, int c) {}
+                @Override public void onTextChanged(CharSequence s, int a, int b2, int c) {}
+                @Override public void afterTextChanged(android.text.Editable s) {
+                    try {
+                        int v = Integer.parseInt(s.toString().trim());
+                        sb.setProgress(Math.max(0, Math.min(100, v)));
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+            sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                    if (fromUser) et.setText(String.valueOf(p));
+                }
+                @Override public void onStartTrackingTouch(SeekBar s) {}
+                @Override public void onStopTrackingTouch(SeekBar s) {}
+            });
+        } else {
+            sb.setVisibility(View.GONE);
+        }
         inputs.put(key, et);
         box.addView(row);
+    }
+
+    /** 预设调速器下拉选择（不支持手动输入） */
+    private void addGovernorSelector(LinearLayout box, String key, String label, String def) {
+        View row = getLayoutInflater().inflate(R.layout.governor_row, box, false);
+        ((TextView) row.findViewById(R.id.label)).setText(label);
+        Spinner sp = row.findViewById(R.id.spinner);
+        ArrayAdapter<String> ad = new ArrayAdapter<>(this, R.layout.gov_spinner_item, GOV_PRESETS);
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(ad);
+        selectGov(sp, def);
+        spinners.put(key, sp);
+        box.addView(row);
+    }
+
+    /** 选中指定调速器；脚本读到的值不在预设列表时追加显示，保证回显真实 */
+    private void selectGov(Spinner sp, String v) {
+        if (v == null || v.isEmpty()) v = GOV_PRESETS[0];
+        @SuppressWarnings("unchecked")
+        ArrayAdapter<String> ad = (ArrayAdapter<String>) sp.getAdapter();
+        int pos = ad.getPosition(v);
+        if (pos < 0) {
+            ad.add(v);
+            pos = ad.getPosition(v);
+        }
+        sp.setSelection(pos, false);
     }
 
     private void fillInputs() {
@@ -139,10 +199,15 @@ public class GovernorActivity extends Activity {
             GovernorConfig.Gov g = govs[i];
             for (int j = 0; j < fields[i].length; j++) {
                 String key = i + "." + fields[i][j];
-                EditText et = inputs.get(key);
-                if (et == null) continue;
                 String v = readField(g, fields[i][j]);
                 if (v == null || v.isEmpty()) v = defaults[i][j];
+                if ("governor".equals(fields[i][j])) {
+                    Spinner sp = spinners.get(key);
+                    if (sp != null) selectGov(sp, v);
+                    continue;
+                }
+                EditText et = inputs.get(key);
+                if (et == null) continue;
                 et.setText(v);
             }
         }
@@ -191,11 +256,19 @@ public class GovernorActivity extends Activity {
         };
         for (int i = 0; i < 4; i++) {
             for (int j = 0; j < fields[i].length; j++) {
-                EditText et = inputs.get(i + "." + fields[i][j]);
+                String f = fields[i][j];
+                if ("governor".equals(f)) {
+                    Spinner sp = spinners.get(i + "." + f);
+                    if (sp != null && sp.getSelectedItem() != null) {
+                        writeField(govs[i], f, sp.getSelectedItem().toString());
+                    }
+                    continue;
+                }
+                EditText et = inputs.get(i + "." + f);
                 if (et == null) continue;
                 String v = et.getText().toString().trim();
                 if (v.isEmpty()) v = defaults[i][j];
-                writeField(govs[i], fields[i][j], v);
+                writeField(govs[i], f, v);
             }
         }
 

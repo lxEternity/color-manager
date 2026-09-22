@@ -176,14 +176,18 @@ public class GovernorActivity extends Activity {
             if (GOV_PRESETS[i].equals(cur)) checked = i;
         }
         final String[] items = list;
-        new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(this)
                 .setTitle("选择调速器")
                 .setSingleChoiceItems(items, checked, (d, w) -> {
                     val.setText(items[w]);
                     d.dismiss();
                 })
                 .setNegativeButton("取消", null)
-                .show();
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
     }
 
     private void fillInputs() {
@@ -296,7 +300,7 @@ public class GovernorActivity extends Activity {
             final String errF = err.toString();
             runOnUiThread(() -> {
                 if (okF == 4) {
-                    Toast.makeText(this, "调速器配置已全部保存（4/4）", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "已保存，实时生效", Toast.LENGTH_LONG).show();
                 } else {
                     Toast.makeText(this, "保存 " + okF + "/4，失败：" + errF, Toast.LENGTH_LONG).show();
                 }

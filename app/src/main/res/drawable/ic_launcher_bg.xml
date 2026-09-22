@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 背景：浅蓝到浅粉对角渐变，衬托白蓝粉红三层棱形框 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#0B0F14" />
+    <gradient
+        android:angle="315"
+        android:startColor="#E8F1FF"
+        android:endColor="#FFE8F4"
+        android:type="linear" />
 </shape>

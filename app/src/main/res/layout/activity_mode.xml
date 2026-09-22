@@ -77,7 +77,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="调用模块外部控制接口（Scene 同款），切换立即生效"
+                    android:text="点击切换全局模式，立即生效"
                     android:textColor="@color/textDim"
                     android:textSize="11sp" />
 

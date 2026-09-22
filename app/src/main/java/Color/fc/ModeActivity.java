@@ -25,8 +25,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 调度接管（Scene 式）：
- * 1. 全局模式接管/恢复 —— /data/powercfg.sh 外部控制接口 + stop 文件
+ * 调度管理：
+ * 1. 全局模式切换/恢复 —— /data/powercfg.sh 切换入口 + stop 文件
  * 2. 刷新率管理 —— 扫描系统全部档位并锁定/恢复自动
  * 3. 应用策略 —— 编辑 动态模式切换.conf（moren=全局默认 / 包名=模式）
  */
@@ -113,7 +113,7 @@ public class ModeActivity extends Activity {
     private void applyModeState() {
         String disp = modeName(curMode);
         curModeView.setText(takenOver
-                ? String.format("当前模式：%s（已接管固定）", disp)
+                ? String.format("当前模式：%s（已切换）", disp)
                 : String.format("当前模式：%s（模块动态切换中）", disp));
         renderModeButtons();
     }
@@ -151,7 +151,7 @@ public class ModeActivity extends Activity {
 
     private void switchMode(String mode) {
         // 先 source 模块变量(quanj.sh)保证 $mokml/$MODULE_PATH 就绪，
-        // 并复位 qhz 防堵塞标记，再走 Scene 同款外部控制接口
+        // 并复位 qhz 防堵塞标记，再执行模块切换入口
         final String cmd = ". /data/adb/modules/colorFC/script/quanj.sh 2>/dev/null;"
                 + "[ -f \"$mosdz/qhz\" ] && echo 1 > \"$mosdz/qhz\";"
                 + "sh '" + POWERCFG + "' " + mode + "; echo EXIT_$?";
@@ -162,9 +162,9 @@ public class ModeActivity extends Activity {
             final boolean applied = mode.equals(cur == null ? "" : cur.trim());
             runOnUiThread(() -> {
                 if (applied) {
-                    toast("已接管：" + modeName(mode));
+                    toast("已切换：" + modeName(mode));
                 } else if (r.out != null && r.out.contains("EXIT_0")) {
-                    toast("接管命令已执行，模块日志：\n" + (log.isEmpty() ? "(无新日志)" : log));
+                    toast("已切换（模块日志：\n" + (log.isEmpty() ? "无新日志" : log) + "）");
                 } else {
                     toast("切换失败：" + (r.err != null && !r.err.isEmpty() ? r.err : "模块无响应"));
                 }

@@ -168,6 +168,10 @@ public class AppPickerDialog {
         });
 
         d.show();
+        if (all.isEmpty()) {
+            TextView hint = d.findViewById(R.id.pickHint);
+            if (hint != null) hint.setText("未扫描到应用：请更新到 v1.15+ 并重新安装");
+        }
     }
 
     private static int dp(android.content.Context c, int v) {

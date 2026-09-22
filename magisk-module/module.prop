@@ -1,0 +1,6 @@
+id=color_webui
+name=Color管理器 WebUI
+version=v1.0
+versionCode=1
+author=lxEternity
+description=Color管理器网页版: 开机自启HTTP服务(端口8765) 调度参数/调速器切换/电芯检测 需配合Termux安装python (pkg install python)

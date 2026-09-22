@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 背景：纯白 -->
+<!-- 背景：深空蓝紫渐变（科技底色） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#FFFFFF" />
+    <gradient
+        android:angle="315"
+        android:startColor="#0B1226"
+        android:endColor="#2A1E52"
+        android:type="linear" />
 </shape>

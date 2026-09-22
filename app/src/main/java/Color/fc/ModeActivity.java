@@ -224,8 +224,9 @@ public class ModeActivity extends Activity {
         }
     }
 
-    /** 一条规则行：点击整行改模式，右侧 × 删除（moren 行无删除） */
+    /** 一条规则行：点击整行改模式，右侧 × 删除（moren 行无删除，单行紧凑） */
     private View ruleRow(String pkg, String label, String mode, View.OnClickListener onEdit) {
+        final boolean isMoren = "moren".equals(pkg);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -236,7 +237,8 @@ public class ModeActivity extends Activity {
         bg.setColor(0xFFF2F7FC);
         bg.setCornerRadius(dp(10));
         row.setBackground(bg);
-        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        // moren 行紧凑：单行小 padding
+        row.setPadding(dp(12), isMoren ? dp(6) : dp(10), dp(12), isMoren ? dp(6) : dp(10));
         row.setOnClickListener(onEdit);
 
         LinearLayout info = new LinearLayout(this);
@@ -251,11 +253,13 @@ public class ModeActivity extends Activity {
         name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         info.addView(name);
 
-        TextView sub = new TextView(this);
-        sub.setText("moren".equals(pkg) ? "moren=" + moren : pkg);
-        sub.setTextColor(0xFF5D6B85);
-        sub.setTextSize(10.5f);
-        info.addView(sub);
+        if (!isMoren) {
+            TextView sub = new TextView(this);
+            sub.setText(pkg);
+            sub.setTextColor(0xFF5D6B85);
+            sub.setTextSize(10.5f);
+            info.addView(sub);
+        }
         row.addView(info);
 
         TextView modeV = new TextView(this);

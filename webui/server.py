@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Color管理器 WebUI 服务器（零依赖，Python3 标准库）
+Color管理器 WebUI 服务器（零依赖，Python3 标准库，纯本地工作无需联网）
 - root 环境运行（Termux: tsu python3 server.py）→ 读取真实电池/CPU sysfs，可直接切换调速器
 - 无 root 运行 → 自动进入演示模式（UI 完整，数据为模拟，参数保存有效）
-- 访问: http://手机IP:8765  （手机本机浏览器打开 http://127.0.0.1:8765）
+- 仅绑定本机回环 127.0.0.1，局域网其他设备无法访问
+- 访问: http://127.0.0.1:8765
 """
 import json, os, random, subprocess, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -269,10 +270,9 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": False}, 404)
 
 if __name__ == "__main__":
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"Color管理器 WebUI 已启动")
-    print(f"  本机访问:   http://127.0.0.1:{PORT}")
-    print(f"  局域网访问: http://<手机IP>:{PORT}")
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    print(f"Color管理器 WebUI 已启动（仅本机可访问）")
+    print(f"  浏览器打开: http://127.0.0.1:{PORT}")
     print(f"  演示模式: {'开(未检测到sysfs)' if read_int(BAT + '/capacity') is None else '关(真实数据)'}")
     try:
         srv.serve_forever()

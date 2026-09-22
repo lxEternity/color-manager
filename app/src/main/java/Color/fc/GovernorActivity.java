@@ -280,7 +280,6 @@ public class GovernorActivity extends Activity {
             }
         }
 
-        Toast.makeText(this, "正在写入调速器脚本…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             String[] contents = {
                     GovernorConfig.generateConservative(govs[0]),
@@ -300,7 +299,7 @@ public class GovernorActivity extends Activity {
             final String errF = err.toString();
             runOnUiThread(() -> {
                 if (okF == 4) {
-                    Toast.makeText(this, "已保存，实时生效", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(this, "保存 " + okF + "/4，失败：" + errF, Toast.LENGTH_LONG).show();
                 }

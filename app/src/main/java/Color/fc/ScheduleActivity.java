@@ -350,15 +350,13 @@ public class ScheduleActivity extends Activity {
         }
         String path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
         String content = AllConfig.generate(cfg);
-        String name = "a".equals(tab) ? "方案1" : "方案2";
-        Toast.makeText(this, "正在写入" + name + "…", Toast.LENGTH_SHORT).show();
 
         new Thread(() -> {
             RootShell.Result r = RootShell.writeFile(getCacheDir(), content, path);
             runOnUiThread(() -> {
                 if (r.ok()) {
                     dirty = false;
-                    Toast.makeText(this, name + " 已保存（" + path + "）", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(this, "写入失败：" + r.err, Toast.LENGTH_LONG).show();
                 }

@@ -38,10 +38,10 @@ public class GovernorActivity extends Activity {
     private static final String[] FILES = {"conservative.sh", "scx1.sh", "scx2.sh", "scx3.sh"};
     private static final String[] NAMES = {"省电模式", "均衡模式", "性能模式", "极速模式"};
     private static final String[] DESCS = {
-            "省电模式调速器：conservative 调速器参数（CPU0-7）",
-            "均衡模式调速器：scx 目标负载（CPU 0/3/5/7）",
-            "性能模式调速器：scx 目标负载（CPU 0/3/5/7）",
-            "极速模式调速器：全核切换调速器（CPU0-7）"
+            "省电模式调速器参数（CPU0-7）",
+            "均衡模式调速器参数（CPU 0/3/5/7）",
+            "性能模式调速器参数（CPU 0/3/5/7）",
+            "极速模式全核调速器参数（CPU0-7）"
     };
 
     @Override
@@ -101,7 +101,7 @@ public class GovernorActivity extends Activity {
                 addParam(box, idx + ".freqStep", "freq_step 每次调频步进（%）", "1", true);
                 addParam(box, idx + ".samplingRate", "sampling_rate 采样周期（µs）", "14000", false);
             } else {
-                addParam(box, idx + ".targetLoads", "target_loads 目标负载（%，scx 调速器）",
+                addParam(box, idx + ".targetLoads", "target_loads 目标负载（%）",
                         i == 1 ? "90" : "70", true);
             }
             container.addView(card);

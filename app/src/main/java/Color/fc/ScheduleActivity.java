@@ -2,6 +2,7 @@ package Color.fc;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.graphics.PorterDuff;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.Editable;
@@ -13,6 +14,7 @@ import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -32,6 +34,8 @@ public class ScheduleActivity extends Activity {
     private SocInfo soc;
 
     private final HashMap<String, EditText> inputs = new HashMap<>();
+    private final HashMap<String, SeekBar> seekBars = new HashMap<>();
+    private boolean syncing = false;
     private TextView tabAV, tabBV, socTip, saveHint;
 
     @Override
@@ -134,19 +138,84 @@ public class ScheduleActivity extends Activity {
         arrow.startAnimation(ra);
     }
 
-    /** 添加一个带说明的参数输入框 */
+    /** 参数滑条范围：min~max，步进 step */
+    private static class ParamRange {
+        final long min, max, step;
+        ParamRange(long min, long max, long step) {
+            this.min = min;
+            this.max = max;
+            this.step = step;
+        }
+        int maxProgress() {
+            return (int) ((max - min) / step);
+        }
+        int toProgress(long v) {
+            if (v < min) v = min;
+            if (v > max) v = max;
+            return (int) ((v - min) / step);
+        }
+        long toValue(int p) {
+            long v = min + p * step;
+            return v > max ? max : v;
+        }
+    }
+
+    /** 按参数 key 确定滑条范围 */
+    private static ParamRange rangeOf(String key) {
+        String f = key.substring(key.indexOf('.') + 1);
+        if ("llcc".equals(f)) return new ParamRange(300000, 1800000, 10000);
+        if ("walt1".equals(f) || "walt2".equals(f)) return new ParamRange(0, 2000, 20);
+        // opt2 / cpuMax / cpuMin / uclamp* 均为百分比
+        return new ParamRange(0, 100, 1);
+    }
+
+    /** 添加一个带说明、滑条+输入框联动的参数行 */
     private void addParam(LinearLayout box, String key, String label) {
         View row = getLayoutInflater().inflate(R.layout.param_row, box, false);
         ((TextView) row.findViewById(R.id.label)).setText(label);
         EditText et = row.findViewById(R.id.input);
+        SeekBar sb = row.findViewById(R.id.seek);
+        ParamRange pr = rangeOf(key);
+        sb.setMax(pr.maxProgress());
+
+        // 霓虹青配色（白底下可见）
+        try {
+            sb.getProgressDrawable().setColorFilter(0xFF00B8D4, PorterDuff.Mode.SRC_IN);
+            sb.getThumb().setColorFilter(0xFF00B8D4, PorterDuff.Mode.SRC_IN);
+        } catch (Exception ignored) {
+        }
+
+        // 拖动滑条 → 数值写入输入框
+        sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                if (!fromUser || syncing) return;
+                syncing = true;
+                et.setText(String.valueOf(pr.toValue(p)));
+                syncing = false;
+                if (!loading) dirty = true;
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+
+        // 输入数值 → 滑条跟随
         et.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b2, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b2, int c) {}
             @Override public void afterTextChanged(Editable s) {
                 if (!loading) dirty = true;
+                if (syncing) return;
+                try {
+                    long v = Long.parseLong(s.toString().trim());
+                    syncing = true;
+                    sb.setProgress(pr.toProgress(v));
+                    syncing = false;
+                } catch (Exception ignored) {
+                }
             }
         });
         inputs.put(key, et);
+        seekBars.put(key, sb);
         box.addView(row);
     }
 

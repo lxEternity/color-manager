@@ -13,7 +13,8 @@ from urllib.parse import urlparse
 
 BASE   = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(BASE, "static")
-DATA_FILE = os.path.join(BASE, "data.json")
+# 参数存储位置可用环境变量覆盖（例如放到模块升级不会清除的工作目录）
+DATA_FILE = os.environ.get("COLOR_WEBUI_DATA", os.path.join(BASE, "data.json"))
 PORT = 8765
 
 BAT = "/sys/class/power_supply/battery"

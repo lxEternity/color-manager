@@ -437,7 +437,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="conservative / scx1 / scx2 / scx3 调速器编辑"
+                        android:text="省电 / 均衡 / 性能 / 极速 模式调速器编辑"
                         android:textColor="@color/textSecondary"
                         android:textSize="12sp" />
                 </LinearLayout>

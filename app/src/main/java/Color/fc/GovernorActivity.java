@@ -36,8 +36,7 @@ public class GovernorActivity extends Activity {
     };
 
     private static final String[] FILES = {"conservative.sh", "scx1.sh", "scx2.sh", "scx3.sh"};
-    private static final String[] NAMES = {"省电 · conservative.sh", "均衡 · scx1.sh",
-            "性能 · scx2.sh", "极速 · scx3.sh"};
+    private static final String[] NAMES = {"省电模式", "均衡模式", "性能模式", "极速模式"};
     private static final String[] DESCS = {
             "省电模式调速器：conservative 调速器参数（CPU0-7）",
             "均衡模式调速器：scx 目标负载（CPU 0/3/5/7）",

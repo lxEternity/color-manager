@@ -10,14 +10,14 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="18dp"
-        android:paddingBottom="14dp">
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="10dp">
 
         <ImageView
-            android:layout_width="34dp"
-            android:layout_height="34dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:src="@mipmap/ic_launcher"
             android:contentDescription="@string/app_name" />
 
@@ -25,10 +25,10 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="10dp"
             android:text="@string/app_name"
             android:textColor="@color/textPrimary"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold" />
 
         <TextView
@@ -67,7 +67,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="18dp">
+                android:padding="14dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -77,14 +77,14 @@
 
                     <Color.fc.view.ChipView
                         android:id="@+id/chipView"
-                        android:layout_width="92dp"
-                        android:layout_height="92dp" />
+                        android:layout_width="72dp"
+                        android:layout_height="72dp" />
 
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginStart="16dp"
+                        android:layout_marginStart="13dp"
                         android:orientation="vertical">
 
                         <TextView
@@ -93,25 +93,25 @@
                             android:layout_height="wrap_content"
                             android:text="检测中…"
                             android:textColor="@color/textPrimary"
-                            android:textSize="19sp"
+                            android:textSize="17sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:id="@+id/socPlatform"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
+                            android:layout_marginTop="3dp"
                             android:text="platform: --"
                             android:textColor="@color/textSecondary"
-                            android:textSize="13sp" />
+                            android:textSize="12sp" />
                     </LinearLayout>
                 </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginTop="14dp"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginTop="10dp"
+                    android:layout_marginBottom="9dp"
                     android:background="@color/divider" />
 
                 <LinearLayout
@@ -197,10 +197,10 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="11dp"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="18dp">
+                android:padding="14dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -243,17 +243,17 @@
                         android:layout_height="wrap_content"
                         android:text="--"
                         android:textColor="@color/accent"
-                        android:textSize="42sp"
+                        android:textSize="36sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="6dp"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="6dp"
                         android:text="W"
                         android:textColor="@color/textSecondary"
-                        android:textSize="16sp" />
+                        android:textSize="14sp" />
 
                     <View
                         android:layout_width="0dp"
@@ -273,14 +273,14 @@
                 <Color.fc.view.SparkView
                     android:id="@+id/sparkView"
                     android:layout_width="match_parent"
-                    android:layout_height="96dp"
-                    android:layout_marginTop="8dp" />
+                    android:layout_height="70dp"
+                    android:layout_marginTop="6dp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="10dp">
+                    android:layout_marginTop="8dp">
 
                     <LinearLayout
                         android:layout_width="0dp"
@@ -361,22 +361,22 @@
                 android:id="@+id/menuSchedule"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="11dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:background="@drawable/bg_card"
-                android:padding="18dp">
+                android:padding="13dp">
 
                 <View
                     android:layout_width="4dp"
-                    android:layout_height="38dp"
+                    android:layout_height="32dp"
                     android:background="@color/blue" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="12dp"
                     android:orientation="vertical">
 
                     <TextView
@@ -384,7 +384,7 @@
                         android:layout_height="wrap_content"
                         android:text="调度参数"
                         android:textColor="@color/textPrimary"
-                        android:textSize="16sp"
+                        android:textSize="15sp"
                         android:textStyle="bold" />
 
                     <TextView
@@ -407,22 +407,22 @@
                 android:id="@+id/menuGovernor"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="11dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:background="@drawable/bg_card"
-                android:padding="18dp">
+                android:padding="13dp">
 
                 <View
                     android:layout_width="4dp"
-                    android:layout_height="38dp"
+                    android:layout_height="32dp"
                     android:background="@color/green" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="12dp"
                     android:orientation="vertical">
 
                     <TextView
@@ -430,7 +430,7 @@
                         android:layout_height="wrap_content"
                         android:text="调速器配置"
                         android:textColor="@color/textPrimary"
-                        android:textSize="16sp"
+                        android:textSize="15sp"
                         android:textStyle="bold" />
 
                     <TextView
@@ -452,7 +452,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="14dp"
                 android:gravity="center"
                 android:text="Color FC · 调度管理 · v1.0"
                 android:textColor="@color/textDim"

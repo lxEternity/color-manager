@@ -485,7 +485,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="模式接管 / 应用策略 / 刷新率锁定"
+                        android:text="全局模式切换 / 应用策略"
                         android:textColor="@color/textSecondary"
                         android:textSize="12sp" />
                 </LinearLayout>

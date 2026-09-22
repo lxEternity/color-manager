@@ -7,9 +7,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.GradientDrawable;
-import android.hardware.display.DisplayManager;
 import android.os.Bundle;
-import android.view.Display;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.ImageView;
@@ -27,8 +25,7 @@ import java.util.Map;
 /**
  * 调度管理：
  * 1. 全局模式切换/恢复 —— /data/powercfg.sh 切换入口 + stop 文件
- * 2. 刷新率管理 —— 扫描系统全部档位并锁定/恢复自动
- * 3. 应用策略 —— 编辑 动态模式切换.conf（moren=全局默认 / 包名=模式）
+ * 2. 应用策略 —— 编辑 动态模式切换.conf（moren=全局默认 / 包名=模式）
  */
 public class ModeActivity extends Activity {
 
@@ -45,15 +42,14 @@ public class ModeActivity extends Activity {
             {"performance", "性能"}, {"fast", "极速"}
     };
 
-    private TextView curModeView, curRefreshView, ruleHint;
-    private LinearLayout modeBox, refreshBox, ruleBox;
+    private TextView curModeView, ruleHint;
+    private LinearLayout modeBox, ruleBox;
 
     private String curMode = "";
     private boolean takenOver = false;   // 是否处于接管状态（stop 文件存在）
     private String moren = "powersave";
     /** 应用规则：包名 -> 模式 */
     private final LinkedHashMap<String, String> rules = new LinkedHashMap<>();
-    private String pinnedHz = null;     // 刷新率锁定值，null=自动
     private boolean confLoaded = false;
 
     @Override
@@ -63,10 +59,8 @@ public class ModeActivity extends Activity {
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
         curModeView = findViewById(R.id.curModeView);
-        curRefreshView = findViewById(R.id.curRefreshView);
         ruleHint = findViewById(R.id.ruleHint);
         modeBox = findViewById(R.id.modeBox);
-        refreshBox = findViewById(R.id.refreshBox);
         ruleBox = findViewById(R.id.ruleBox);
 
         findViewById(R.id.addRuleBtn).setOnClickListener(v -> pickApp());
@@ -84,20 +78,12 @@ public class ModeActivity extends Activity {
             RootShell.Result stop = RootShell.exec("ls '" + STOP_FILE + "' 2>/dev/null");
             // conf
             String conf = RootShell.readFile(CONF_FILE);
-            // 当前刷新率锁定状态（ColorOS 官方 key 优先，标准 key 兜底）
-            RootShell.Result peak = RootShell.exec(
-                    "R=$(settings get system user_refresh_rate)"
-                    + "; [ \"$R\" = null ] && R=$(settings get system peak_refresh_rate); echo $R");
             final boolean taken = stop.ok() && !stop.out.trim().isEmpty();
             final String mode = cur == null ? "" : cur.trim();
-            final String pin = (peak.ok() && !peak.out.trim().isEmpty()
-                    && !"null".equals(peak.out.trim())) ? peak.out.trim() : null;
             runOnUiThread(() -> {
                 curMode = mode;
                 takenOver = taken;
-                pinnedHz = pin;
                 applyModeState();
-                applyRefreshState();
             });
             if (conf != null) {
                 parseConf(conf);
@@ -107,7 +93,6 @@ public class ModeActivity extends Activity {
                 runOnUiThread(() -> ruleHint.setText("未读取到模块配置文件（动态模式切换.conf）"));
             }
         }).start();
-        renderRefreshChips();
     }
 
     private void applyModeState() {
@@ -186,131 +171,6 @@ public class ModeActivity extends Activity {
                 loadState();
             });
         }).start();
-    }
-
-    // ==================== 区块2: 刷新率管理 ====================
-
-    private void renderRefreshChips() {
-        refreshBox.removeAllViews();
-        List<Float> hzs = scanRefreshRates();
-        LinearLayout row = newRow();
-        int inRow = 0;
-        // "自动" 档
-        TextView auto = chipButton("自动", pinnedHz == null, v -> pinRefresh(null));
-        row.addView(auto);
-        inRow++;
-        for (float hz : hzs) {
-            final String label = String.format(Locale.US, "%.0f Hz", hz);
-            final String val = String.format(Locale.US, "%.1f", hz);
-            TextView c = chipButton(label, pinnedHz != null && val.equals(pinnedHz)
-                    || pinnedHz != null && label.equals(pinnedHz + " Hz")
-                    || (pinnedHz != null && Math.abs(Float.parseFloat(pinnedHz) - hz) < 0.05f),
-                    v -> pinRefresh(val));
-            if (inRow == 3) {
-                refreshBox.addView(row);
-                row = newRow();
-                inRow = 0;
-            }
-            row.addView(c);
-            inRow++;
-        }
-        if (inRow > 0) refreshBox.addView(row);
-    }
-
-    private void applyRefreshState() {
-        curRefreshView.setText(pinnedHz == null
-                ? String.format("当前状态：自动（实际 %s）", getRealRefresh())
-                : String.format("当前状态：锁定 %s Hz（实际 %s）",
-                        pinnedHz.endsWith(".0") ? pinnedHz.substring(0, pinnedHz.length() - 2) : pinnedHz,
-                        getRealRefresh()));
-    }
-
-    private String getRealRefresh() {
-        try {
-            DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
-            Display.Mode m = dm.getDisplay(Display.DEFAULT_DISPLAY).getMode();
-            return String.format(Locale.US, "%.0f Hz", m.getRefreshRate());
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /** 扫描系统支持的全部刷新率档位（无需 root） */
-    private List<Float> scanRefreshRates() {
-        List<Float> hzs = new ArrayList<>();
-        try {
-            DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
-            Display.Mode[] modes = dm.getDisplay(Display.DEFAULT_DISPLAY).getSupportedModes();
-            for (Display.Mode m : modes) {
-                float hz = m.getRefreshRate();
-                boolean dup = false;
-                for (float h : hzs) if (Math.abs(h - hz) < 0.05f) { dup = true; break; }
-                if (!dup) hzs.add(hz);
-            }
-            Collections.sort(hzs);
-        } catch (Exception ignored) {
-        }
-        if (hzs.isEmpty()) {
-            // 回退：常见档位
-            hzs.add(60f); hzs.add(90f); hzs.add(120f);
-        }
-        return hzs;
-    }
-
-    private void pinRefresh(String hz) {
-        // 多重写入: ColorOS官方(user_refresh_rate) + Android标准 + OPlus私有 + 框架强制命令
-        // 注: 模块 qtbh.sh 会在前台切换时执行 $MODULE_PATH/fps 重设帧率，可能覆盖锁定
-        final String cmd;
-        if (hz == null) {
-            cmd = "settings delete system user_refresh_rate; settings delete secure user_refresh_rate"
-                    + "; settings delete system peak_refresh_rate; settings delete system min_refresh_rate"
-                    + "; settings delete system oppo_max_refresh_rate; settings delete system oppo_min_refresh_rate"
-                    + "; settings delete secure oppo_max_refresh_rate; settings delete secure oppo_min_refresh_rate"
-                    + "; cmd display clear-user-preferred-display-mode 2>/dev/null; echo OK";
-        } else {
-            cmd = "settings put system user_refresh_rate " + hz
-                    + "; settings put secure user_refresh_rate " + hz
-                    + "; settings put system peak_refresh_rate " + hz
-                    + "; settings put system min_refresh_rate " + hz
-                    + "; settings put system oppo_max_refresh_rate " + hz
-                    + "; settings put system oppo_min_refresh_rate " + hz
-                    + "; settings put secure oppo_max_refresh_rate " + hz
-                    + "; settings put secure oppo_min_refresh_rate " + hz
-                    + "; cmd display set-user-preferred-refresh-rate " + hz + " 2>/dev/null"
-                    + "; cmd display set-user-preferred-display-mode 0 0 " + hz + " 2>/dev/null; echo OK";
-        }
-        new Thread(() -> {
-            RootShell.exec(cmd, 10);
-            // 等待2秒回读实际刷新率判断是否物理生效
-            try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
-            final String real = getRealRefresh();
-            pinnedHz = hz;
-            runOnUiThread(() -> {
-                applyRefreshState();
-                renderRefreshChips();
-                if (hz == null) {
-                    toast("已恢复自动刷新率");
-                } else if (matchesReal(hz, real)) {
-                    toast("已锁定 " + hz + " Hz ✓");
-                } else {
-                    // 物理未生效: 大概率被模块fps脚本覆盖或系统拒绝
-                    toast("锁定未生效（实际仍 " + real + "）\n"
-                            + "模块可能正在管理帧率，请提供模块fps脚本：\n"
-                            + "/data/adb/modules/colorFC/fps");
-                }
-            });
-        }).start();
-    }
-
-    /** 实际刷新率是否等于锁定值（容差0.5） */
-    private boolean matchesReal(String pin, String real) {
-        try {
-            float p = Float.parseFloat(pin);
-            float r = Float.parseFloat(real);
-            return Math.abs(p - r) < 0.5f;
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     /** 模块日志末行（反馈用） */

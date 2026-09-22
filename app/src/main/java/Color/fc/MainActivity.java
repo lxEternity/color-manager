@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(this, ScheduleActivity.class)));
         findViewById(R.id.menuGovernor).setOnClickListener(v ->
                 startActivity(new Intent(this, GovernorActivity.class)));
+        findViewById(R.id.menuMode).setOnClickListener(v ->
+                startActivity(new Intent(this, ModeActivity.class)));
 
         detectSoc();
         detectRoot();

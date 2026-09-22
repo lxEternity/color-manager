@@ -70,6 +70,9 @@ public class MainActivity extends Activity {
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         cellBadge.setOnClickListener(v -> showCellDialog());
+
+        // 兜底：每次到前台重读持久化的电芯模式，防止意外丢失
+        updateCellModeFromPrefs();
     }
 
     /** 检测 SOC 型号并展示对应配置 */
@@ -121,6 +124,17 @@ public class MainActivity extends Activity {
         }, 300);
     }
 
+    /** 每次到前台从持久化存储重读电芯模式 */
+    private void updateCellModeFromPrefs() {
+        cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateCellModeFromPrefs();
+    }
+
     /** 电芯模式切换：并联双电芯机型电压 4.4V 与单芯无异，只能手动指定 */
     private void showCellDialog() {
         String[] items = {
@@ -134,7 +148,7 @@ public class MainActivity extends Activity {
                 .setSingleChoiceItems(items, checked, (d, w) -> {
                     cellMode = w == 1 ? 2 : (w == 2 ? 1 : 0);
                     getSharedPreferences("colorfc", MODE_PRIVATE)
-                            .edit().putInt("cellMode", cellMode).apply();
+                            .edit().putInt("cellMode", cellMode).commit();
                     d.dismiss();
                 })
                 .setNegativeButton("取消", null)

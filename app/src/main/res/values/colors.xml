@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0B0F14</color>
+    <color name="bgCard">#141A22</color>
+    <color name="bgCardStroke">#1F2A38</color>
+    <color name="bgInput">#0D1219</color>
+    <color name="bgInputStroke">#2A3646</color>
+    <color name="textPrimary">#E8EEF5</color>
+    <color name="textSecondary">#8B98A8</color>
+    <color name="textDim">#5C6875</color>
+    <color name="accent">#22D3EE</color>
+    <color name="accent2">#6366F1</color>
+    <color name="accentSoft">#19283A</color>
+    <color name="green">#10B981</color>
+    <color name="blue">#3B82F6</color>
+    <color name="orange">#F59E0B</color>
+    <color name="red">#EF4444</color>
+    <color name="titleBar">#0E141C</color>
+    <color name="divider">#1C2530</color>
+</resources>

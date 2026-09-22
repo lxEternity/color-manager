@@ -1,20 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 白底浅色系 -->
+    <!-- 白底浅色系（背景保持白色） -->
     <color name="bg">#F5F7FC</color>
     <color name="bgCard">#FFFFFF</color>
-    <color name="bgCardStroke">#E8EDF5</color>
+    <color name="bgCardStroke">#E4EBF4</color>
     <color name="bgInput">#F7F9FD</color>
     <color name="bgInputStroke">#DCE4F0</color>
     <color name="textPrimary">#1B2540</color>
     <color name="textSecondary">#5D6B85</color>
     <color name="textDim">#9AA7BD</color>
-    <!-- 霓虹主色（白底可读） -->
-    <color name="accent">#00B8E0</color>
-    <color name="accent2">#7C4DFF</color>
-    <color name="accentSoft">#E7F8FE</color>
-    <color name="green">#0FA968</color>
-    <color name="blue">#2F6BFF</color>
+    <!-- 图片色系：靓青（主）/ 品紫（辅）/ 警示橙 -->
+    <color name="accent">#0096C8</color>
+    <color name="accent2">#A02CF0</color>
+    <color name="accentSoft">#E5F7FD</color>
+    <color name="magenta">#A02CF0</color>
+    <color name="cyan">#00B8E0</color>
+    <color name="green">#00B5A3</color>
+    <color name="blue">#0096C8</color>
     <color name="orange">#E08A00</color>
     <color name="red">#E5484D</color>
     <color name="titleBar">#FFFFFF</color>

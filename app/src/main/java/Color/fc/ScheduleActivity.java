@@ -87,7 +87,7 @@ public class ScheduleActivity extends Activity {
     /** 构建 4 个模式卡片（收起状态，点击展开参数） */
     private void buildCards() {
         LinearLayout container = findViewById(R.id.modesContainer);
-        int[] colors = {0xFF10B981, 0xFF3B82F6, 0xFFF59E0B, 0xFFEF4444};
+        int[] colors = {0xFF00B5A3, 0xFF0096C8, 0xFFE08A00, 0xFFA02CF0};
 
         for (int i = 0; i < AllConfig.MODE_KEYS.length; i++) {
             String key = AllConfig.MODE_KEYS[i];
@@ -180,8 +180,8 @@ public class ScheduleActivity extends Activity {
 
         // 霓虹青配色（白底下可见）
         try {
-            sb.getProgressDrawable().setColorFilter(0xFF00B8D4, PorterDuff.Mode.SRC_IN);
-            sb.getThumb().setColorFilter(0xFF00B8D4, PorterDuff.Mode.SRC_IN);
+            sb.getProgressDrawable().setColorFilter(0xFF0096C8, PorterDuff.Mode.SRC_IN);
+            sb.getThumb().setColorFilter(0xFF0096C8, PorterDuff.Mode.SRC_IN);
         } catch (Exception ignored) {
         }
 
@@ -322,9 +322,9 @@ public class ScheduleActivity extends Activity {
     private void applyTabStyle() {
         boolean isA = "a".equals(tab);
         tabAV.setBackgroundResource(isA ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
-        tabAV.setTextColor(isA ? 0xFF0098BB : 0xFF7C8AA0);
+        tabAV.setTextColor(isA ? 0xFF0077A8 : 0xFF7C8AA0);
         tabBV.setBackgroundResource(isA ? R.drawable.bg_tab : R.drawable.bg_tab_sel);
-        tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0098BB);
+        tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0077A8);
     }
 
     /** 保存当前编辑的配置到对应文件 */

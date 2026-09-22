@@ -370,7 +370,7 @@
                 <View
                     android:layout_width="4dp"
                     android:layout_height="32dp"
-                    android:background="@color/blue" />
+                    android:background="@color/accent" />
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -400,7 +400,7 @@
                     android:layout_width="20dp"
                     android:layout_height="20dp"
                     android:src="@drawable/ic_arrow_right"
-                    android:tint="@color/blue"
+                    android:tint="@color/accent"
                     android:contentDescription="调度参数" />
             </LinearLayout>
 
@@ -417,7 +417,7 @@
                 <View
                     android:layout_width="4dp"
                     android:layout_height="32dp"
-                    android:background="@color/green" />
+                    android:background="@color/magenta" />
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -447,7 +447,7 @@
                     android:layout_width="20dp"
                     android:layout_height="20dp"
                     android:src="@drawable/ic_arrow_right"
-                    android:tint="@color/green"
+                    android:tint="@color/magenta"
                     android:contentDescription="调速器配置" />
             </LinearLayout>
         </LinearLayout>

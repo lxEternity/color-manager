@@ -69,7 +69,7 @@ public class GovernorActivity extends Activity {
 
     private void buildCards() {
         LinearLayout container = findViewById(R.id.modesContainer);
-        int[] colors = {0xFF10B981, 0xFF3B82F6, 0xFFF59E0B, 0xFFEF4444};
+        int[] colors = {0xFF00B5A3, 0xFF0096C8, 0xFFE08A00, 0xFFA02CF0};
 
         for (int i = 0; i < 4; i++) {
             final int idx = i;
@@ -126,8 +126,8 @@ public class GovernorActivity extends Activity {
         if (seek) {
             sb.setMax(100);
             try {
-                sb.getProgressDrawable().setColorFilter(0xFF00B8D4, android.graphics.PorterDuff.Mode.SRC_IN);
-                sb.getThumb().setColorFilter(0xFF00B8D4, android.graphics.PorterDuff.Mode.SRC_IN);
+                sb.getProgressDrawable().setColorFilter(0xFF0096C8, android.graphics.PorterDuff.Mode.SRC_IN);
+                sb.getThumb().setColorFilter(0xFF0096C8, android.graphics.PorterDuff.Mode.SRC_IN);
             } catch (Exception ignored) {
             }
             et.addTextChangedListener(new android.text.TextWatcher() {

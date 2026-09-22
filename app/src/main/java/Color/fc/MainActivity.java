@@ -173,7 +173,7 @@ public class MainActivity extends Activity {
                 : ("Charging".equalsIgnoreCase(st.status) ? "充电中"
                 : "Full".equalsIgnoreCase(st.status) ? "已充满" : "放电中");
         powerStatus.setText(status);
-        powerStatus.setTextColor("Charging".equalsIgnoreCase(st.status) ? 0xFF10B981 : 0xFFF59E0B);
+        powerStatus.setTextColor("Charging".equalsIgnoreCase(st.status) ? 0xFF00B5A3 : 0xFFE08A00);
 
         currentValue.setText(amps != 0 ? String.format(Locale.US, "%.0f mA", Math.abs(amps) * 1000) : "--");
         voltageValue.setText(st.volts > 0 ? String.format(Locale.US, "%.2f V", st.volts) : "--");

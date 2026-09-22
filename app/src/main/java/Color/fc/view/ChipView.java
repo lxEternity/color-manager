@@ -53,7 +53,7 @@ public class ChipView extends View {
         float pad = pinLen + dp(4);
 
         LinearGradient g = new LinearGradient(0, 0, w, h,
-                0xFF22D3EE, 0xFF6366F1, Shader.TileMode.CLAMP);
+                0xFF1D4ED8, 0xFF3B82F6, Shader.TileMode.CLAMP);
         chipPaint.setShader(g);
         RectF body = new RectF(pad, pad, w - pad, h - pad);
         canvas.drawRoundRect(body, dp(12), dp(12), chipPaint);

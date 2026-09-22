@@ -1,84 +1,99 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 前景：科技感棱形芯片 + 电路走线 + 粒子 + 渐变字母 -->
+<!-- 前景：CPU 芯片（深蓝光泽）+ 心电波形 + 火焰温度计 + 警告三角 + 青色霓虹容器框 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
 
-    <!-- 外层棱形：蓝→粉霓虹渐变描边 -->
+    <!-- 玻璃容器：青色霓虹圆角方描边 -->
     <path
-        android:strokeWidth="3"
-        android:pathData="M54,18 L90,54 L54,90 L18,54 Z">
-        <aapt:attr name="android:strokeColor">
-            <gradient
-                android:type="linear"
-                android:startX="18" android:startY="18"
-                android:endX="90" android:endY="90"
-                android:startColor="#3B82F6"
-                android:endColor="#EC4899" />
-        </aapt:attr>
-    </path>
+        android:strokeColor="#CC00B8E0"
+        android:strokeWidth="2.5"
+        android:fillColor="#0A00E5FF"
+        android:pathData="M29,25 h50 a4,4 0 0 1 4,4 v50 a4,4 0 0 1 -4,4 h-50 a4,4 0 0 1 -4,-4 v-50 a4,4 0 0 1 4,-4 z" />
 
-    <!-- 中层棱形：青色霓虹 -->
-    <path
-        android:strokeColor="#22D3EE"
-        android:strokeWidth="2"
-        android:pathData="M54,27 L81,54 L54,81 L27,54 Z" />
+    <!-- 容器四角品紫光点 -->
+    <path android:fillColor="#A02CF0"
+        android:pathData="M78,31 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+    <path android:fillColor="#A02CF0"
+        android:pathData="M31,77 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
+    <path android:fillColor="#66A02CF0"
+        android:pathData="M76,74 m-1.4,0 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0" />
 
-    <!-- 内层棱形：近白 -->
+    <!-- 电路走线：容器到芯片（上下左右各2根 + 端点节点） -->
     <path
-        android:strokeColor="#BAE6FD"
-        android:strokeWidth="1.5"
-        android:pathData="M54,35 L73,54 L54,73 L35,54 Z" />
-
-    <!-- 电路走线：四顶点向外延伸 -->
-    <path
-        android:strokeColor="#60A5FA"
-        android:strokeWidth="1.5"
-        android:pathData="M54,18 L54,11 M90,54 L97,54 M54,90 L54,97 M18,54 L11,54" />
-    <!-- 走线端点节点 -->
-    <path
-        android:fillColor="#60A5FA"
-        android:pathData="M54,11 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
-    <path
-        android:fillColor="#F472B6"
-        android:pathData="M97,54 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
-    <path
-        android:fillColor="#60A5FA"
-        android:pathData="M54,97 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
-    <path
-        android:fillColor="#F472B6"
-        android:pathData="M11,54 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
-
-    <!-- 对角电路折线（左上） -->
-    <path
-        android:strokeColor="#22D3EE"
+        android:strokeColor="#00B8E0"
         android:strokeWidth="1.2"
-        android:pathData="M27,27 L21,27 L21,33" />
+        android:pathData="M47.5,25 V34 M60.5,25 V34 M47.5,83 V74 M60.5,83 V74 M25,47.5 H34 M25,60.5 H34 M83,47.5 H74 M83,60.5 H74" />
+    <path android:fillColor="#00B8E0"
+        android:pathData="M47.5,25 m-1.3,0 a1.3,1.3 0 1,0 2.6,0 a1.3,1.3 0 1,0 -2.6,0" />
+    <path android:fillColor="#A02CF0"
+        android:pathData="M60.5,25 m-1.3,0 a1.3,1.3 0 1,0 2.6,0 a1.3,1.3 0 1,0 -2.6,0" />
+    <path android:fillColor="#00B8E0"
+        android:pathData="M47.5,83 m-1.3,0 a1.3,1.3 0 1,0 2.6,0 a1.3,1.3 0 1,0 -2.6,0" />
+    <path android:fillColor="#A02CF0"
+        android:pathData="M60.5,83 m-1.3,0 a1.3,1.3 0 1,0 2.6,0 a1.3,1.3 0 1,0 -2.6,0" />
+
+    <!-- CPU 引脚：上下各5根、左右各4根（银蓝金属） -->
     <path
-        android:strokeColor="#22D3EE"
-        android:strokeWidth="1.2"
-        android:pathData="M81,81 L87,81 L87,75" />
+        android:strokeColor="#93A7C4"
+        android:strokeWidth="1.4"
+        android:pathData="M41.2,34 V38 M47.6,34 V38 M54,34 V38 M60.4,34 V38 M66.8,34 V38
+                         M41.2,70 V74 M47.6,70 V74 M54,70 V74 M60.4,70 V74 M66.8,70 V74
+                         M34,41.2 H38 M34,50 H38 M34,58 H38 M34,66.8 H38
+                         M70,41.2 H74 M70,50 H74 M70,58 H74 M70,66.8 H74" />
 
-    <!-- 散布粒子 -->
-    <path android:fillColor="#F472B6"
-        android:pathData="M34,44 m-1.4,0 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0" />
-    <path android:fillColor="#22D3EE"
-        android:pathData="M76,40 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0" />
-    <path android:fillColor="#60A5FA"
-        android:pathData="M40,72 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0" />
-    <path android:fillColor="#E0F2FE"
-        android:pathData="M72,70 m-1,0 a1,1 0 1,0 2,0 a1,1 0 1,0 -2,0" />
-
-    <!-- 中间 C 字：白→蓝双色渐变 -->
-    <path android:pathData="M60.5,44.5l2.2,-3.8c-2.3,-1.6 -5.2,-2.3 -8.2,-1.8c-4.9,0.9 -8.5,5.2 -8.5,10.2c0,5 3.6,9.3 8.5,10.2c3,0.5 5.9,-0.2 8.2,-1.8l-2.2,-3.8c-1.4,1 -3.1,1.4 -4.9,1.1c-2.9,-0.5 -5,-3 -5,-5.9c0,-2.9 2.1,-5.4 5,-5.9C57.4,43.1 59.1,43.5 60.5,44.5z">
+    <!-- CPU 芯片主体：深蓝渐变光泽 -->
+    <path android:pathData="M38,38 h32 v32 h-32 z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="44" android:startY="40"
-                android:endX="64" android:endY="68"
-                android:startColor="#FFFFFF"
-                android:endColor="#60A5FA" />
+                android:startX="38" android:startY="38"
+                android:endX="70" android:endY="70"
+                android:startColor="#1D4ED8"
+                android:endColor="#3B82F6" />
         </aapt:attr>
     </path>
+    <!-- 芯片左上玻璃高光 -->
+    <path android:fillColor="#33FFFFFF"
+        android:pathData="M40,40 h18 v3 h-18 z" />
+
+    <!-- 心电波形：青绿→黄绿渐变 -->
+    <path
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.2"
+        android:pathData="M41,56 L46,56 L49,49 L53,63 L57,52 L60,56 L67,56">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="41" android:startY="56"
+                android:endX="67" android:endY="56"
+                android:startColor="#00E5FF"
+                android:endColor="#A3E635" />
+        </aapt:attr>
+    </path>
+
+    <!-- 警告三角（左上）：黄底 + 深蓝感叹号 -->
+    <path android:fillColor="#FFC400"
+        android:strokeColor="#E08A00"
+        android:strokeWidth="0.6"
+        android:pathData="M46.5,40.5 L51.5,49 L41.5,49 Z" />
+    <path android:fillColor="#16337A"
+        android:pathData="M46.5,42.8 h1 v2.6 h-1 z M46.5,46.6 m0.5,0 a0.5,0.5 0 1,0 -1,0 a0.5,0.5 0 1,0 1,0" />
+
+    <!-- 火焰温度计（右上）：橙色圆环 + 火焰 -->
+    <path
+        android:strokeColor="#FF9100"
+        android:strokeWidth="1.3"
+        android:fillColor="#00000000"
+        android:pathData="M64,45.5 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path android:fillColor="#FF9100"
+        android:pathData="M64,41.8 c1.6,2.1 3.2,3.1 3.2,5 a3.2,3.2 0 1,1 -6.4,0 c0,-1.9 1.6,-2.9 3.2,-5 z" />
+
+    <!-- 底部数据点缀：青绿小点 -->
+    <path android:fillColor="#00E5FF"
+        android:pathData="M42,65 m-1,0 a1,1 0 1,0 2,0 a1,1 0 1,0 -2,0" />
+    <path android:fillColor="#A3E635"
+        android:pathData="M66,65 m-1,0 a1,1 0 1,0 2,0 a1,1 0 1,0 -2,0" />
 </vector>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 霓虹按钮：外层青色光晕 + 青紫渐变主体 -->
+<!-- 霓虹按钮：青色光晕 + 靓青→品紫渐变主体（图片色系） -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape>
@@ -9,7 +9,7 @@
     </item>
     <item android:left="3dp" android:top="3dp" android:right="3dp" android:bottom="3dp">
         <shape>
-            <gradient android:startColor="#00D9F5" android:endColor="#8B5CF6" android:angle="0" />
+            <gradient android:startColor="#00C3F0" android:endColor="#A02CF0" android:angle="0" />
             <corners android:radius="19dp" />
         </shape>
     </item>

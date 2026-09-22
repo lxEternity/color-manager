@@ -75,8 +75,7 @@ public class ScheduleActivity extends Activity {
                 loading = false;
                 applyTabStyle();
                 fillInputs();
-                String hint = (cfgA == null ? "a 为默认值" : "a 已读取");
-                saveHint.setText(hint + " · 修改后点击保存写入");
+                updateSaveHint();
             });
         }).start();
     }
@@ -227,7 +226,7 @@ public class ScheduleActivity extends Activity {
         if (dirty) {
             new AlertDialog.Builder(this)
                     .setTitle("未保存的修改")
-                    .setMessage("当前配置已修改但未保存，切换后将丢失，是否继续？")
+                    .setMessage("当前方案已修改但未保存，切换后将丢失，是否继续？")
                     .setPositiveButton("继续", (d, w) -> doSwitch(t))
                     .setNegativeButton("取消", null)
                     .show();
@@ -240,6 +239,15 @@ public class ScheduleActivity extends Activity {
         tab = t;
         applyTabStyle();
         fillInputs();
+        updateSaveHint();
+    }
+
+    /** 底部提示：按当前页签显示方案1/方案2 读取状态 */
+    private void updateSaveHint() {
+        String name = "a".equals(tab) ? "方案1" : "方案2";
+        AllConfig cur = currentCfg();
+        saveHint.setText((cur == null ? name + " 为默认值" : name + " 已读取")
+                + " · 修改后点击保存写入");
     }
 
     private void applyTabStyle() {
@@ -253,7 +261,7 @@ public class ScheduleActivity extends Activity {
     /** 保存当前编辑的配置到对应文件 */
     private void saveConfig() {
         if (currentCfg() == null) {
-            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
         AllConfig cfg = currentCfg();
@@ -273,14 +281,15 @@ public class ScheduleActivity extends Activity {
         }
         String path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
         String content = AllConfig.generate(cfg);
-        Toast.makeText(this, "正在写入 " + path, Toast.LENGTH_SHORT).show();
+        String name = "a".equals(tab) ? "方案1" : "方案2";
+        Toast.makeText(this, "正在写入" + name + "…", Toast.LENGTH_SHORT).show();
 
         new Thread(() -> {
             RootShell.Result r = RootShell.writeFile(getCacheDir(), content, path);
             runOnUiThread(() -> {
                 if (r.ok()) {
                     dirty = false;
-                    Toast.makeText(this, "已保存到 " + path, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, name + " 已保存（" + path + "）", Toast.LENGTH_LONG).show();
                 } else {
                     Toast.makeText(this, "写入失败：" + r.err, Toast.LENGTH_LONG).show();
                 }

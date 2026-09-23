@@ -60,6 +60,12 @@ public class ThemeStore {
         return c.getSharedPreferences(SP, Context.MODE_PRIVATE).getInt("bgOffY", 0);
     }
 
+    /** 控件玻璃透明度 30-100（%），沉浸背景生效时应用到全部卡片/控件 */
+    public static int glassAlpha(Context c) {
+        int v = c.getSharedPreferences(SP, Context.MODE_PRIVATE).getInt("glass", 75);
+        return Math.max(30, Math.min(100, v));
+    }
+
     /** 主题版本号：日/夜间切换时 +1，ThemedActivity 检测到变化后重建页面 */
     public static int themeVersion(Context c) {
         return c.getSharedPreferences(SP, Context.MODE_PRIVATE).getInt("ver", 0);
@@ -104,6 +110,11 @@ public class ThemeStore {
     public static void setBgOffY(Context c, int v) {
         c.getSharedPreferences(SP, Context.MODE_PRIVATE).edit()
                 .putInt("bgOffY", Math.max(-50, Math.min(50, v))).commit();
+    }
+
+    public static void setGlass(Context c, int v) {
+        c.getSharedPreferences(SP, Context.MODE_PRIVATE).edit()
+                .putInt("glass", Math.max(30, Math.min(100, v))).commit();
     }
 
     // ==================== 应用 ====================
@@ -162,6 +173,20 @@ public class ThemeStore {
             w.setNavigationBarColor(bar);
         }
         setLightStatusIcons(w, !dark);
+        // 沉浸模式：全局控件玻璃化——卡片/输入框等圆角背景半透明透出壁纸/背景图
+        walkGlass(w.getDecorView(), immersive ? Math.round(glassAlpha(a) * 2.55f) : 255);
+    }
+
+    /** 递归遍历控件树，把 GradientDrawable（shape 背景）调成玻璃透明度 */
+    private static void walkGlass(View v, int alpha) {
+        android.graphics.drawable.Drawable bg = v.getBackground();
+        if (bg instanceof android.graphics.drawable.GradientDrawable) {
+            bg.setAlpha(alpha);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) walkGlass(g.getChildAt(i), alpha);
+        }
     }
 
     /** 状态栏图标颜色：亮背景用深色图标，暗背景用浅色图标 */

@@ -31,7 +31,7 @@ public class ThemeActivity extends ThemedActivity {
 
     private static final int REQ_PICK = 71;
 
-    private TextView chipDay, chipNight, alphaValue, scaleValue, offXValue, offYValue;
+    private TextView chipDay, chipNight, alphaValue, scaleValue, offXValue, offYValue, glassValue;
     private Switch swTransparent, swImage;
     private ImageView preview;
     private TextView pickBtn, clearBtn;
@@ -116,6 +116,17 @@ public class ThemeActivity extends ThemedActivity {
             ThemeStore.setTransparent(this, on);
             ThemeStore.applyBackground(this);
         });
+
+        // 控件透明度：沉浸背景生效时全局卡片/控件的玻璃透明度
+        LinearLayout rowG = row("控件透明度", "透明背景/背景图生效时，卡片控件玻璃化程度");
+        glassValue = val();
+        rowG.addView(glassValue);
+        card2.addView(rowG);
+        card2.addView(seek(30, 100, ThemeStore.glassAlpha(this), (sb, p) -> {
+            ThemeStore.setGlass(this, p);
+            glassValue.setText(p + "%");
+            ThemeStore.applyBackground(this);
+        }));
 
         card2.addView(divider());
 
@@ -312,6 +323,7 @@ public class ThemeActivity extends ThemedActivity {
         scaleValue.setText(ThemeStore.bgScale(this) + "%");
         offXValue.setText(ThemeStore.bgOffX(this) + "%");
         offYValue.setText(ThemeStore.bgOffY(this) + "%");
+        glassValue.setText(ThemeStore.glassAlpha(this) + "%");
         refreshPreview();
     }
 

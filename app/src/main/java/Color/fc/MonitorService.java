@@ -154,6 +154,7 @@ public class MonitorService extends Service {
         }
         ui.postDelayed(this::fastLoop, 200);
         ui.postDelayed(this::slowLoop, 800);
+        ui.postDelayed(this::historyLoop, 5000);
     }
 
     @Override
@@ -245,8 +246,7 @@ public class MonitorService extends Service {
         pill.setTextColor(0xFF00E5FF);
         pill.setTextSize(13);
         pill.setText("≡");
-        shadow(pill);
-        pill.setBackground(winBg());
+        pill.setBackground(winBg(dp(14)));
         pill.setPadding(dp(9), dp(2), dp(9), dp(3));
         pillLp = overlayLp();
         pillLp.x = dp(12);
@@ -311,26 +311,20 @@ public class MonitorService extends Service {
             menuRows[i].setTextSize(11);
             menuRows[i].setTypeface(Typeface.MONOSPACE);
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
             p.topMargin = dp(2);
             menu.addView(menuRows[i], p);
         }
-
-        View div = new View(this);
-        LinearLayout.LayoutParams dp2 = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1);
-        dp2.topMargin = dp(5);
-        menu.addView(div, dp2);
 
         menuQuit = new TextView(this);
         menuQuit.setTextColor(0xFFEF4444);
         menuQuit.setTextSize(10);
         menuQuit.setText("✕ 关闭监视器");
         LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        qp.topMargin = dp(4);
+        qp.topMargin = dp(9);
         menu.addView(menuQuit, qp);
 
         menu.setOnTouchListener(new DragTouch(e -> {
@@ -351,36 +345,29 @@ public class MonitorService extends Service {
         }, null));
     }
 
-    /** 菜单行状态刷新 */
+    /** 菜单行状态刷新：已开启 淡蓝色 / 未开启 暗红色 */
     private void updateMenu() {
         if (!menuOpen) return;
         for (int i = 0; i < menuRows.length; i++) {
             menuRows[i].setText((winOpen[i] ? "✓ " : "✗ ") + WIN_LABELS[i]);
-            menuRows[i].setTextColor(winOpen[i] ? WIN_COLORS[i] : 0xFF4B5563);
+            menuRows[i].setTextColor(winOpen[i] ? 0xFF7DD3FC : 0xFFB91C1C);
         }
     }
 
     // ==================== 独立悬浮窗 ====================
 
-    /** 监视窗/胶囊背景：全透明，仅文字悬浮不挡屏幕 */
-    private GradientDrawable winBg() {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0x00000000);
-        return bg;
-    }
-
-    /** 菜单背景：半透明深色（临时弹出，保证可读性） */
-    private GradientDrawable menuBg() {
+    /** 监视窗背景：半透明深色 + 青色描边 */
+    private GradientDrawable winBg(int radius) {
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xC0101820);
         bg.setStroke(1, 0x5000E5FF);
-        bg.setCornerRadius(dp(10));
+        bg.setCornerRadius(radius);
         return bg;
     }
 
-    /** 文字阴影：全透明背景下任何页面均可读 */
-    private void shadow(TextView tv) {
-        tv.setShadowLayer(dp(2.5f), 0, 0, 0xD9000000);
+    /** 菜单背景 */
+    private GradientDrawable menuBg() {
+        return winBg(dp(10));
     }
 
     private WindowManager.LayoutParams overlayLp() {
@@ -423,8 +410,8 @@ public class MonitorService extends Service {
     private void addWindow(int i) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.HORIZONTAL);
-        box.setBackground(winBg());
-        box.setPadding(dp(6), dp(2), dp(2), dp(2));
+        box.setBackground(winBg(dp(10)));
+        box.setPadding(dp(8), dp(3), dp(6), dp(3));
 
         final TextView close = new TextView(this);
         if (i == 4) {
@@ -433,7 +420,6 @@ public class MonitorService extends Service {
             tvRec.setTextSize(11);
             tvRec.setText("●");
             tvRec.setPadding(dp(1), dp(1), dp(4), dp(1));
-            shadow(tvRec);
             box.addView(tvRec, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         }
@@ -441,14 +427,12 @@ public class MonitorService extends Service {
         winText[i].setTextColor(WIN_COLORS[i]);
         winText[i].setTextSize(11);
         winText[i].setTypeface(Typeface.MONOSPACE);
-        shadow(winText[i]);
         box.addView(winText[i], new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         close.setTextColor(0xFF8B949E);
         close.setTextSize(11);
         close.setText("✕");
         close.setPadding(dp(6), dp(1), dp(1), dp(1));
-        shadow(close);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         cp.leftMargin = dp(4);
@@ -587,6 +571,23 @@ public class MonitorService extends Service {
             }).start();
         } else {
             ui.postDelayed(this::slowLoop, 2000);
+        }
+    }
+
+    // ==================== 后台功耗记录（功耗窗关闭时仍采样） ====================
+
+    private void historyLoop() {
+        if (!winOpen[0]) {   // 功耗窗开启时 fastLoop 已高频记录
+            new Thread(() -> {
+                try {
+                    PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
+                    if (st != null) PowerHistoryManager.record(this, st);
+                } catch (Exception ignored) {
+                }
+                ui.postDelayed(this::historyLoop, 10_000);
+            }).start();
+        } else {
+            ui.postDelayed(this::historyLoop, 10_000);
         }
     }
 

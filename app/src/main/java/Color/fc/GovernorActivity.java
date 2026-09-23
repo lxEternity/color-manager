@@ -26,7 +26,7 @@ import java.util.Map;
  * 调速器配置：conservative.sh（省电）/ scx1.sh（均衡）/ scx2.sh（性能）/ scx3.sh（极速）
  * 每个模式调速器名称与参数可编辑，输入框内默认值可视化（conservative / scx）
  */
-public class GovernorActivity extends Activity {
+public class GovernorActivity extends ThemedActivity {
 
     private final GovernorConfig.Gov[] govs = new GovernorConfig.Gov[4];
     private final HashMap<String, EditText> inputs = new HashMap<>();
@@ -140,7 +140,7 @@ public class GovernorActivity extends Activity {
         TextView label = new TextView(this);
         label.setText("启用核心（点击开关，未选中=该模式下关闭此核）");
         label.setTextSize(11);
-        label.setTextColor(0xFF5D6B85);
+        label.setTextColor(getResources().getColor(R.color.textSecondary));
         label.setPadding(dp(2), dp(4), dp(2), dp(4));
         box.addView(label);
 
@@ -181,8 +181,8 @@ public class GovernorActivity extends Activity {
     /** 芯片选中/未选样式 */
     private void styleChip(TextView chip, boolean on) {
         GradientDrawable bg = (GradientDrawable) chip.getBackground();
-        bg.setColor(on ? 0xFF0096C8 : 0xFFE2E8F0);
-        chip.setTextColor(on ? 0xFFFFFFFF : 0xFF8A94A8);
+        bg.setColor(on ? 0xFF0096C8 : getResources().getColor(R.color.bgInput));
+        chip.setTextColor(on ? 0xFFFFFFFF : getResources().getColor(R.color.textDim));
     }
 
     private int dp(int v) {

@@ -25,7 +25,7 @@ import java.util.Map;
 /**
  * 应用策略 —— 编辑模块 动态模式切换.conf（moren=全局默认 / 包名=模式）
  */
-public class ModeActivity extends Activity {
+public class ModeActivity extends ThemedActivity {
 
     /** 模块工作目录（quanj.sh: mingc="qingtd"） */
     private static final String MOKML = "/sdcard/Android/qingtd";
@@ -128,7 +128,7 @@ public class ModeActivity extends Activity {
         lp.bottomMargin = dp(6);
         row.setLayoutParams(lp);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xFFE8F4F8);
+        bg.setColor(getResources().getColor(R.color.accentSoft));
         bg.setCornerRadius(dp(10));
         row.setBackground(bg);
         row.setPadding(dp(12), dp(6), dp(12), dp(6));
@@ -140,7 +140,7 @@ public class ModeActivity extends Activity {
 
         TextView label = new TextView(this);
         label.setText("全局默认");
-        label.setTextColor(0xFF1B2540);
+        label.setTextColor(getResources().getColor(R.color.textPrimary));
         label.setTextSize(13);
         label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         LayoutParams llp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
@@ -149,7 +149,7 @@ public class ModeActivity extends Activity {
 
         TextView modeV = new TextView(this);
         modeV.setText(modeName(moren));
-        modeV.setTextColor(0xFF0096C8);
+        modeV.setTextColor(getResources().getColor(R.color.accent));
         modeV.setTextSize(13);
         modeV.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         row.addView(modeV);
@@ -165,7 +165,7 @@ public class ModeActivity extends Activity {
         lp.topMargin = dp(6);
         row.setLayoutParams(lp);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xFFF2F7FC);
+        bg.setColor(getResources().getColor(R.color.bgInput));
         bg.setCornerRadius(dp(10));
         row.setBackground(bg);
         row.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -178,21 +178,21 @@ public class ModeActivity extends Activity {
 
         TextView name = new TextView(this);
         name.setText(label);
-        name.setTextColor(0xFF1B2540);
+        name.setTextColor(getResources().getColor(R.color.textPrimary));
         name.setTextSize(13);
         name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         info.addView(name);
 
         TextView sub = new TextView(this);
         sub.setText(pkg);
-        sub.setTextColor(0xFF5D6B85);
+        sub.setTextColor(getResources().getColor(R.color.textSecondary));
         sub.setTextSize(10.5f);
         info.addView(sub);
         row.addView(info);
 
         TextView modeV = new TextView(this);
         modeV.setText(modeName(mode));
-        modeV.setTextColor(0xFF0096C8);
+        modeV.setTextColor(getResources().getColor(R.color.accent));
         modeV.setTextSize(13);
         modeV.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         row.addView(modeV);

@@ -15,7 +15,7 @@ import android.widget.Toast;
 /**
  * 访问密码锁：仅首次打开需要输入，验证一次后记住解锁状态
  */
-public class LockActivity extends Activity {
+public class LockActivity extends ThemedActivity {
 
     /** 访问密码 */
     static final String ACCESS_PASSWORD = "bjs5120";

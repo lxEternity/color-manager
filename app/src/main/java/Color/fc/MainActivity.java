@@ -25,13 +25,14 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import Color.fc.view.Beam;
 import Color.fc.view.ChipView;
 import Color.fc.view.SparkView;
 
 /**
  * 主页：SOC 可视化 + 实时功耗（自动校准单/双电芯）+ 功能入口
  */
-public class MainActivity extends Activity {
+public class MainActivity extends ThemedActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SocInfo soc;
@@ -74,12 +75,17 @@ public class MainActivity extends Activity {
         batteryTemp = findViewById(R.id.batteryTemp);
         sparkView = findViewById(R.id.sparkView);
 
-        findViewById(R.id.menuSchedule).setOnClickListener(v ->
-                startActivity(new Intent(this, ScheduleActivity.class)));
-        findViewById(R.id.menuGovernor).setOnClickListener(v ->
-                startActivity(new Intent(this, GovernorActivity.class)));
-        findViewById(R.id.menuMode).setOnClickListener(v ->
-                startActivity(new Intent(this, ModeActivity.class)));
+        // 功能入口：光束转场进入下一页面
+        wireBeam(R.id.menuSchedule, ScheduleActivity.class);
+        wireBeam(R.id.menuGovernor, GovernorActivity.class);
+        wireBeam(R.id.menuMode, ModeActivity.class);
+        wireBeam(R.id.menuTheme, ThemeActivity.class);
+        tintBadges();
+        // 记录卡片：按压动效
+        Beam.press(findViewById(R.id.menuFrameRecords));
+        Beam.press(findViewById(R.id.menuPowerHistory));
+        Beam.press(findViewById(R.id.menuMonitor));
+        Beam.press(findViewById(R.id.socCard));
 
         detectSoc();
         detectRoot();
@@ -107,6 +113,37 @@ public class MainActivity extends Activity {
 
         // 兜底：每次到前台重读持久化的电芯模式，防止意外丢失
         updateCellModeFromPrefs();
+    }
+
+    /** 入口卡片：按压动效 + 点击触发光束转场进入下一页面 */
+    private void wireBeam(int id, Class<?> cls) {
+        View v = findViewById(id);
+        Beam.press(v);
+        v.setOnClickListener(x -> Beam.go(this, new Intent(this, cls)));
+    }
+
+    /** 功能入口徽章着色：柔和底色 + 同色系字符 */
+    private void tintBadges() {
+        int[][] pairs = {
+                {R.id.badgeSchedule, R.color.accent},
+                {R.id.badgeGovernor, R.color.magenta},
+                {R.id.badgeMode, R.color.green},
+                {R.id.badgeTheme, R.color.orange}
+        };
+        for (int[] p : pairs) {
+            TextView badge = findViewById(p[0]);
+            if (badge == null) continue;
+            int color = getResources().getColor(p[1]);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(9));
+            bg.setColor((color & 0x00FFFFFF) | 0x26000000);
+            badge.setBackground(bg);
+            badge.setTextColor(color);
+        }
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     /** 检测 SOC 型号并展示对应配置 */

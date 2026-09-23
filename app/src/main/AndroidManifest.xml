@@ -36,6 +36,7 @@
         <activity android:name=".ScheduleActivity" android:exported="false" />
         <activity android:name=".GovernorActivity" android:exported="false" />
         <activity android:name=".ModeActivity" android:exported="false" />
+        <activity android:name=".ThemeActivity" android:exported="false" />
 
         <service
             android:name=".MonitorService"

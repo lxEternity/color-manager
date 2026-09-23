@@ -27,7 +27,7 @@ import java.util.Map;
  * 调度参数：自动检测 SOC，加载对应 a.all.sh / b.all.sh，
  * 按模式（省电/均衡/性能/极速）展开参数编辑
  */
-public class ScheduleActivity extends Activity {
+public class ScheduleActivity extends ThemedActivity {
 
     private AllConfig cfgA, cfgB;
     private String tab = "a";

@@ -186,23 +186,22 @@ public class MonitorService extends Service {
         void tap(MotionEvent e);
     }
 
-    /** 拖动 + 单击（可选拖动回调） */
+    /** 拖动 + 单击（可选拖动回调）；始终读取视图当前布局参数，避免参数错位 */
     private class DragTouch implements View.OnTouchListener {
-        private final WindowManager.LayoutParams lp;
         private final Tap tap;
         private final Runnable onMoved;
         private float sx, sy, dx, dy;
         private long downAt;
         private boolean moved = false;
 
-        DragTouch(WindowManager.LayoutParams lp, Tap tap, Runnable onMoved) {
-            this.lp = lp;
+        DragTouch(Tap tap, Runnable onMoved) {
             this.tap = tap;
             this.onMoved = onMoved;
         }
 
         @Override
         public boolean onTouch(View v, MotionEvent e) {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) v.getLayoutParams();
             switch (e.getAction()) {
                 case MotionEvent.ACTION_DOWN:
                     sx = e.getRawX();
@@ -246,13 +245,13 @@ public class MonitorService extends Service {
         pill.setTextColor(0xFF00E5FF);
         pill.setTextSize(13);
         pill.setText("≡");
-        GradientDrawable bg = winBg(dp(14));
-        pill.setBackground(bg);
+        shadow(pill);
+        pill.setBackground(winBg());
         pill.setPadding(dp(9), dp(2), dp(9), dp(3));
         pillLp = overlayLp();
         pillLp.x = dp(12);
         pillLp.y = dp(120);
-        pill.setOnTouchListener(new DragTouch(pillLp, e -> toggleMenu(), this::closeMenu));
+        pill.setOnTouchListener(new DragTouch(e -> toggleMenu(), this::closeMenu));
         wm.addView(pill, pillLp);
     }
 
@@ -264,9 +263,10 @@ public class MonitorService extends Service {
     private void openMenu() {
         if (menuOpen) return;
         if (menu == null) buildMenu();
+        WindowManager.LayoutParams plp = (WindowManager.LayoutParams) pill.getLayoutParams();
         menuLp = overlayLp();
-        menuLp.x = pillLp.x;
-        menuLp.y = pillLp.y + dp(44);
+        menuLp.x = plp.x;
+        menuLp.y = plp.y + dp(44);
         wm.addView(menu, menuLp);
         menuOpen = true;
         updateMenu();
@@ -284,7 +284,7 @@ public class MonitorService extends Service {
     private void buildMenu() {
         menu = new LinearLayout(this);
         menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setBackground(winBg(dp(10)));
+        menu.setBackground(menuBg());
         menu.setPadding(dp(9), dp(3), dp(9), dp(5));
 
         LinearLayout head = new LinearLayout(this);
@@ -295,15 +295,15 @@ public class MonitorService extends Service {
         title.setText("悬浮窗菜单");
         head.addView(title, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        View spring = new View(this);
-        head.addView(spring, new LinearLayout.LayoutParams(0, 1, 1f));
         menuClose = new TextView(this);
         menuClose.setTextColor(0xFF8B949E);
         menuClose.setTextSize(11);
         menuClose.setText("✕");
         menuClose.setPadding(dp(5), dp(1), dp(1), dp(1));
-        head.addView(menuClose, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        cp.leftMargin = dp(8);
+        head.addView(menuClose, cp);
         menu.addView(head);
 
         for (int i = 0; i < menuRows.length; i++) {
@@ -333,7 +333,7 @@ public class MonitorService extends Service {
         qp.topMargin = dp(4);
         menu.addView(menuQuit, qp);
 
-        menu.setOnTouchListener(new DragTouch(menuLp == null ? overlayLp() : menuLp, e -> {
+        menu.setOnTouchListener(new DragTouch(e -> {
             if (hit(menuClose, e)) {
                 closeMenu();
                 return;
@@ -362,12 +362,25 @@ public class MonitorService extends Service {
 
     // ==================== 独立悬浮窗 ====================
 
-    private GradientDrawable winBg(int radius) {
+    /** 监视窗/胶囊背景：全透明，仅文字悬浮不挡屏幕 */
+    private GradientDrawable winBg() {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x00000000);
+        return bg;
+    }
+
+    /** 菜单背景：半透明深色（临时弹出，保证可读性） */
+    private GradientDrawable menuBg() {
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xC0101820);
         bg.setStroke(1, 0x5000E5FF);
-        bg.setCornerRadius(radius);
+        bg.setCornerRadius(dp(10));
         return bg;
+    }
+
+    /** 文字阴影：全透明背景下任何页面均可读 */
+    private void shadow(TextView tv) {
+        tv.setShadowLayer(dp(2.5f), 0, 0, 0xD9000000);
     }
 
     private WindowManager.LayoutParams overlayLp() {
@@ -410,8 +423,8 @@ public class MonitorService extends Service {
     private void addWindow(int i) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.HORIZONTAL);
-        box.setBackground(winBg(dp(10)));
-        box.setPadding(dp(8), dp(3), dp(6), dp(3));
+        box.setBackground(winBg());
+        box.setPadding(dp(6), dp(2), dp(2), dp(2));
 
         final TextView close = new TextView(this);
         if (i == 4) {
@@ -420,6 +433,7 @@ public class MonitorService extends Service {
             tvRec.setTextSize(11);
             tvRec.setText("●");
             tvRec.setPadding(dp(1), dp(1), dp(4), dp(1));
+            shadow(tvRec);
             box.addView(tvRec, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         }
@@ -427,22 +441,24 @@ public class MonitorService extends Service {
         winText[i].setTextColor(WIN_COLORS[i]);
         winText[i].setTextSize(11);
         winText[i].setTypeface(Typeface.MONOSPACE);
+        shadow(winText[i]);
         box.addView(winText[i], new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        View spring = new View(this);
-        box.addView(spring, new LinearLayout.LayoutParams(0, 1, 1f));
         close.setTextColor(0xFF8B949E);
         close.setTextSize(11);
         close.setText("✕");
-        close.setPadding(dp(5), dp(1), dp(1), dp(1));
-        box.addView(close, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        close.setPadding(dp(6), dp(1), dp(1), dp(1));
+        shadow(close);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        cp.leftMargin = dp(4);
+        box.addView(close, cp);
 
         winLp[i] = overlayLp();
-        winLp[i].x = dp(16) + i * dp(6);
-        winLp[i].y = dp(170) + i * dp(46);
+        winLp[i].x = dp(16) + i * dp(10);
+        winLp[i].y = dp(170) + i * dp(40);
         final int idx = i;
-        box.setOnTouchListener(new DragTouch(winLp[idx], e -> {
+        box.setOnTouchListener(new DragTouch(e -> {
             if (hit(close, e)) {
                 closeWindow(idx);
                 return;

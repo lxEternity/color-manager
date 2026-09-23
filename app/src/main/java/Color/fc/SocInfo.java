@@ -5,7 +5,7 @@ import android.os.Build;
 /**
  * SOC 型号检测与配置映射
  * 天玑9300/9400/9500全系列、骁龙8gen1/2/3、8Elite(第一代) → 配置A
- * 第五代8Elite (SM8850) → 配置B
+ * 第五代8Elite (SM8850)、8s至尊版 (SM8845) → 配置B
  */
 public class SocInfo {
 
@@ -30,6 +30,7 @@ public class SocInfo {
     private static final String[][] MAP = {
             // platform, code, marketing, shortName, vendor, config
             {"sm8850", "SM8850", "骁龙 8 至尊版（第五代 8 Elite）", "8 Elite G5", "Qualcomm", "b"},
+            {"sm8845", "SM8845", "骁龙 8s 至尊版（8s Elite）", "8s Elite", "Qualcomm", "b"},
             {"sm8750", "SM8750", "骁龙 8 至尊版（8 Elite）", "8 Elite", "Qualcomm", "a"},
             {"sm8650", "SM8650", "骁龙 8 Gen 3", "8 Gen 3", "Qualcomm", "a"},
             {"sm8550", "SM8550", "骁龙 8 Gen 2", "8 Gen 2", "Qualcomm", "a"},

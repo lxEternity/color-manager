@@ -166,16 +166,27 @@ public class ThemeActivity extends ThemedActivity {
         pb2.leftMargin = dp(3);
         btns.addView(clearBtn, pb2);
         imageGroup.addView(btns);
+        // 开关打开即显示选图区（无论是否已有图片，保证能进入选择图片）
+        imageGroup.setVisibility(View.VISIBLE);
         card2.addView(imageGroup);
 
-        pickBtn.setOnClickListener(v ->
-                startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT), REQ_PICK));
+        pickBtn.setOnClickListener(v -> {
+            Intent it = new Intent(Intent.ACTION_GET_CONTENT);
+            it.addCategory(Intent.CATEGORY_OPENABLE);
+            it.setType("image/*");
+            try {
+                startActivityForResult(Intent.createChooser(it, "选择背景图片"), REQ_PICK);
+            } catch (Exception e) {
+                Toast.makeText(this, "未找到可用的图片选择器", Toast.LENGTH_SHORT).show();
+            }
+        });
         clearBtn.setOnClickListener(v -> {
             File f = ThemeStore.bgFile(this);
             if (f.exists() && f.delete()) {
                 ThemeStore.setImageBg(this, false);
                 ThemeStore.invalidate();
                 ThemeStore.applyBackground(this);
+                swImage.setChecked(false);
                 refreshPreview();
                 Toast.makeText(this, "已清除背景图片", Toast.LENGTH_SHORT).show();
             }
@@ -258,6 +269,7 @@ public class ThemeActivity extends ThemedActivity {
                 ThemeStore.setImageBg(this, true);
                 ThemeStore.invalidate();
                 ThemeStore.applyBackground(this);
+                swImage.setChecked(true);   // 触发监听器同步选图区显示
                 refreshPreview();
                 Toast.makeText(this, "背景已更新", Toast.LENGTH_SHORT).show();
             });
@@ -303,17 +315,30 @@ public class ThemeActivity extends ThemedActivity {
         refreshPreview();
     }
 
+    /** 刷新选图区状态：无图显示占位符，始终保留"选择图片"入口 */
     private void refreshPreview() {
-        boolean has = ThemeStore.bgFile(this).exists();
-        imageGroup.setVisibility(has ? View.VISIBLE : View.GONE);
+        File f = ThemeStore.bgFile(this);
+        boolean has = f.exists();
+        // 开关打开或已有图片时显示选图区
+        imageGroup.setVisibility(has || swImage.isChecked() ? View.VISIBLE : View.GONE);
+        clearBtn.setVisibility(has ? View.VISIBLE : View.GONE);
         if (has) {
-            File f = ThemeStore.bgFile(this);
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inSampleSize = 4;
             Bitmap bmp = BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+            preview.clearColorFilter();
+            preview.setBackgroundResource(0);
             preview.setImageBitmap(bmp);
         } else {
-            preview.setImageDrawable(null);
+            // 占位符：浅底圆角 + 相册图标，提示可点下方按钮选择
+            GradientDrawable ph = new GradientDrawable();
+            ph.setCornerRadius(dp(12));
+            ph.setColor(getResources().getColor(R.color.bgInput));
+            ph.setStroke(dp(1), getResources().getColor(R.color.bgInputStroke));
+            preview.setBackground(ph);
+            preview.setImageResource(android.R.drawable.ic_menu_gallery);
+            preview.setColorFilter(getResources().getColor(R.color.textDim),
+                    android.graphics.PorterDuff.Mode.SRC_ATOP);
         }
     }
 

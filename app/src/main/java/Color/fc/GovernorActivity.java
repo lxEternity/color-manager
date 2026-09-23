@@ -366,16 +366,50 @@ public class GovernorActivity extends Activity {
                 if (r.ok()) ok++;
                 else err.append(FILES[i]).append(": ").append(r.err).append('\n');
             }
+            // 写后 1.5 秒回读校验，发现被外部回滚立即提示（而不是下次进页面静默回显默认值）
+            String verify = "";
+            if (ok == 4) {
+                try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
+                int bad = verifySaved();
+                if (bad > 0) verify = " · " + bad + " 个文件回读不符(被外部修改?)";
+            }
             final int okF = ok;
             final String errF = err.toString();
+            final String verifyF = verify;
             runOnUiThread(() -> {
                 if (okF == 4) {
-                    Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "保存成功" + verifyF, Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(this, "保存 " + okF + "/4，失败：" + errF, Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
+    }
+
+    /** 回读 4 个脚本并与内存配置比对，返回不一致的文件数（null=读取失败也算不一致） */
+    private int verifySaved() {
+        int bad = 0;
+        for (int i = 0; i < 4; i++) {
+            String back = RootShell.readFile(RootShell.GOV_DIR + "/" + FILES[i]);
+            GovernorConfig.Gov b = GovernorConfig.parse(back, i == 0);
+            if (b == null || !sameGov(b, govs[i], i)) bad++;
+        }
+        return bad;
+    }
+
+    /** 逐字段比较回读配置与保存时的配置 */
+    private boolean sameGov(GovernorConfig.Gov a, GovernorConfig.Gov b, int idx) {
+        if (!a.governor.equals(b.governor)) return false;
+        if (idx == 0) {
+            if (!a.upThreshold.equals(b.upThreshold)) return false;
+            if (!a.downThreshold.equals(b.downThreshold)) return false;
+            if (!a.freqStep.equals(b.freqStep)) return false;
+            if (!a.samplingRate.equals(b.samplingRate)) return false;
+        }
+        if (idx == 1 || idx == 2) {
+            if (!a.targetLoads.equals(b.targetLoads)) return false;
+        }
+        return java.util.Arrays.equals(a.cores, b.cores);
     }
 
     // ==================== color.lax 导入导出（4 个模式全部参数） ====================

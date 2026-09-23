@@ -19,12 +19,13 @@ public class GovernorConfig {
         public final boolean[] cores = {true, true, true, true, true, true, true, true};
     }
 
-    private static final Pattern P_GOV = Pattern.compile("echo \"([^\"]+)\" > \\S*cpu\\d+/cpufreq/scaling_governor");
-    private static final Pattern P_UP = Pattern.compile("echo \"(\\S+)\" > \\S*conservative/up_threshold");
-    private static final Pattern P_DOWN = Pattern.compile("echo \"(\\S+)\" > \\S*conservative/down_threshold");
-    private static final Pattern P_STEP = Pattern.compile("echo \"(\\S+)\" > \\S*conservative/freq_step");
-    private static final Pattern P_RATE = Pattern.compile("echo \"(\\S+)\" > \\S*conservative/sampling_rate");
-    private static final Pattern P_LOADS = Pattern.compile("echo \"(\\S+)\" > \\S*scx/target_loads");
+    /** 引号可选 + 兼容 cpu/policy 两种路径写法，避免生成的与外部脚本格式不一致导致解析失败 */
+    private static final Pattern P_GOV = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*(?:cpu\\d+/cpufreq|cpufreq/policy\\d+)/scaling_governor");
+    private static final Pattern P_UP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*conservative/up_threshold");
+    private static final Pattern P_DOWN = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*conservative/down_threshold");
+    private static final Pattern P_STEP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*conservative/freq_step");
+    private static final Pattern P_RATE = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*conservative/sampling_rate");
+    private static final Pattern P_LOADS = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*scx/target_loads");
     /** 引号可选：兼容生成的无引号与外部脚本的有引号两种写法 */
     private static final Pattern P_ONLINE = Pattern.compile("echo \\\"?([01])\\\"? > \\S*cpu(\\d+)/online");
 
@@ -86,28 +87,26 @@ public class GovernorConfig {
         }
     }
 
-    /** 生成 conservative.sh（应用全部 CPU0-7） */
+    /** 生成 conservative.sh（应用全部 CPU0-7）。参数行无条件写入：
+     *  即使调速器不是 conservative 也保留参数行，保证界面回显不丢失（echo 失败仅跳过该行） */
     public static String generateConservative(Gov g) {
         StringBuilder sb = new StringBuilder();
         appendCoreOn(sb, g.cores);
-        boolean isCons = "conservative".equals(g.governor);
         for (int i = 0; i < 8; i++) {
             String base = "/sys/devices/system/cpu/cpu" + i + "/cpufreq/";
             sb.append("chmod 777 ").append(base).append("scaling_governor\n");
             sb.append("echo \"").append(g.governor).append("\" > ").append(base).append("scaling_governor\n");
-            if (isCons) {
-                sb.append("echo \"").append(g.upThreshold).append("\" > ").append(base).append("conservative/up_threshold\n");
-                sb.append("echo \"").append(g.downThreshold).append("\" > ").append(base).append("conservative/down_threshold\n");
-                sb.append("echo \"").append(g.freqStep).append("\" > ").append(base).append("conservative/freq_step\n");
-                sb.append("echo \"").append(g.samplingRate).append("\" > ").append(base).append("conservative/sampling_rate\n");
-            }
+            sb.append("echo \"").append(g.upThreshold).append("\" > ").append(base).append("conservative/up_threshold\n");
+            sb.append("echo \"").append(g.downThreshold).append("\" > ").append(base).append("conservative/down_threshold\n");
+            sb.append("echo \"").append(g.freqStep).append("\" > ").append(base).append("conservative/freq_step\n");
+            sb.append("echo \"").append(g.samplingRate).append("\" > ").append(base).append("conservative/sampling_rate\n");
             sb.append('\n');
         }
         appendCoreOff(sb, g.cores);
         return sb.toString();
     }
 
-    /** 生成 scx1.sh / scx2.sh（CPU 0/3/5/7） */
+    /** 生成 scx1.sh / scx2.sh（CPU 0/3/5/7）。负载行无条件写入（非 scx 时节点不存在则跳过该行，不影响回显） */
     public static String generateScx(Gov g) {
         StringBuilder sb = new StringBuilder();
         appendCoreOn(sb, g.cores);
@@ -121,11 +120,9 @@ public class GovernorConfig {
             String base = "/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/";
             sb.append("echo \"").append(g.governor).append("\" > ").append(base).append("scaling_governor\n");
         }
-        if ("scx".equals(g.governor)) {
-            for (int cpu : cpus) {
-                String base = "/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/";
-                sb.append("echo \"").append(g.targetLoads).append("\" > ").append(base).append("scx/target_loads\n");
-            }
+        for (int cpu : cpus) {
+            String base = "/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/";
+            sb.append("echo \"").append(g.targetLoads).append("\" > ").append(base).append("scx/target_loads\n");
         }
         appendCoreOff(sb, g.cores);
         return sb.toString();

@@ -108,7 +108,7 @@ public class ThemeActivity extends ThemedActivity {
         card2.addView(l2);
 
         // 全透明背景
-        LinearLayout rowT = row("全透明背景", "不绘制任何底色，直接透出系统壁纸");
+        LinearLayout rowT = row("全透明背景", "不绘制任何底色，直接透出后面的桌面");
         swTransparent = new Switch(this);
         rowT.addView(swTransparent);
         card2.addView(rowT);

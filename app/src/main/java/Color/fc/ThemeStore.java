@@ -150,42 +150,51 @@ public class ThemeStore {
         Window w = a.getWindow();
         boolean dark = dark(a);
         boolean img = imageBg(a) && bgFile(a).exists();
-        // 两种背景模式互斥：自定义图优先，同时开启时忽略透壁纸
+        // 两种背景模式互斥：自定义图优先，同时开启时忽略透桌面
         boolean transp = transparentBg(a) && !img;
         boolean immersive = img || transp;
+        // API 30+：沉浸时窗口铺满整块物理屏幕，背景图与屏幕像素级对齐，
+        // 系统栏区域由背景像素接管，不残留任何没盖到的缝隙
+        boolean edge = android.os.Build.VERSION.SDK_INT >= 30;
+        if (edge) setEdgeToEdge(w, immersive);
 
         if (img) {
-            // 背景图渲染时已按透明度叠加在 App 底色上，窗口保持全实心，
-            // 不再向窗口设置透明度——半透明窗口会露出后面的桌面
+            // 背景图渲染时已按透明度叠加在 App 底色上，窗口保持全实心
             BitmapDrawable d = new BitmapDrawable(a.getResources(), renderBg(a, dark));
             w.setBackgroundDrawable(d);
-            w.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         } else if (transp) {
+            // 全局透明：直接透出后面的桌面（不加壁纸标志，避免 ROM 壁纸层排序异常）
             w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-            w.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         } else {
             int solid = dark ? 0xFF0D1220 : 0xFFF5F7FC;
             w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(solid));
-            w.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         }
+        // 统一不使用壁纸层
+        w.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
 
-        if (transp) {
-            // 透壁纸：系统栏透明 + 壁纸标志，壁纸顶到屏幕边缘
+        if (immersive && edge) {
+            // 窗口已铺满全屏：系统栏透明，背景像素直接延伸到屏幕边缘
             w.setStatusBarColor(Color.TRANSPARENT);
             w.setNavigationBarColor(Color.TRANSPARENT);
-            setLightStatusIcons(w, !dark);
+            if (img) {
+                // 背景图：系统栏图标颜色按图片上缘亮度取深浅
+                setLightStatusIcons(w, cachedTopBar != 0 ? isLightColor(cachedTopBar) : !dark);
+            } else {
+                setLightStatusIcons(w, !dark);
+            }
         } else if (img) {
-            // 背景图：系统栏颜色从图片上下边缘采样，视觉上图片延伸进系统栏
-            w.setStatusBarColor(cachedTopBar != 0 ? cachedTopBar : (dark ? 0xFF0D1220 : 0xFFF5F7FC));
-            w.setNavigationBarColor(cachedBotBar != 0 ? cachedBotBar : (dark ? 0xFF0D1220 : 0xFFF5F7FC));
-            setLightStatusIcons(w, cachedTopBar != 0 && isLightColor(cachedTopBar));
+            // 旧系统（无 edge-to-edge）：系统栏用图片边缘采样色衔接
+            int fb = dark ? 0xFF0D1220 : 0xFFF5F7FC;
+            w.setStatusBarColor(cachedTopBar != 0 ? cachedTopBar : fb);
+            w.setNavigationBarColor(cachedBotBar != 0 ? cachedBotBar : fb);
+            setLightStatusIcons(w, cachedTopBar != 0 ? isLightColor(cachedTopBar) : !dark);
         } else {
             int bar = dark ? 0xFF0D1220 : 0xFFF5F7FC;
             w.setStatusBarColor(bar);
             w.setNavigationBarColor(bar);
             setLightStatusIcons(w, !dark);
         }
-        // 沉浸模式：全局控件玻璃化——卡片/输入框等圆角背景半透明透出壁纸/背景图
+        // 沉浸模式：全局控件玻璃化——卡片/输入框等圆角背景半透明透出背景
         walkGlass(w.getDecorView(), immersive ? Math.round(glassAlpha(a) * 2.55f) : 255);
     }
 
@@ -193,6 +202,42 @@ public class ThemeStore {
     private static boolean isLightColor(int color) {
         int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
         return (0.299 * r + 0.587 * g + 0.114 * b) > 128;
+    }
+
+    /** 记录内容区原始 padding 的 tag key */
+    private static final int TAG_BASE_PADDING = 0x51EED0F5;
+
+    /**
+     * API 30+ edge-to-edge：窗口铺满物理屏幕，内容区补上系统栏/输入法 insets，
+     * 关闭时恢复系统默认 insets 处理
+     */
+    private static void setEdgeToEdge(Window w, boolean on) {
+        View content = w.getDecorView().findViewById(android.R.id.content);
+        if (content == null) return;
+        if (on) {
+            w.setDecorFitsSystemWindows(false);
+            if (content.getTag(TAG_BASE_PADDING) == null) {
+                content.setTag(TAG_BASE_PADDING, new int[]{
+                        content.getPaddingLeft(), content.getPaddingTop(),
+                        content.getPaddingRight(), content.getPaddingBottom()});
+            }
+            content.setOnApplyWindowInsetsListener((v, ins) -> {
+                int[] base = (int[]) v.getTag(TAG_BASE_PADDING);
+                android.graphics.Insets sys = ins.getInsets(android.view.WindowInsets.Type.systemBars());
+                android.graphics.Insets ime = ins.getInsets(android.view.WindowInsets.Type.ime());
+                // 内容避开状态栏/导航栏/输入法
+                v.setPadding(base[0] + sys.left, base[1] + sys.top, base[2] + sys.right,
+                        base[3] + Math.max(sys.bottom, ime.bottom));
+                return ins;
+            });
+        } else {
+            w.setDecorFitsSystemWindows(true);
+            content.setOnApplyWindowInsetsListener(null);
+            int[] base = (int[]) content.getTag(TAG_BASE_PADDING);
+            if (base != null) {
+                content.setPadding(base[0], base[1], base[2], base[3]);
+            }
+        }
     }
 
     /** 递归遍历控件树，把 GradientDrawable（shape 背景）调成玻璃透明度 */

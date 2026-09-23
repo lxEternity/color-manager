@@ -29,6 +29,7 @@ public class SocInfo {
 
     private static final String[][] MAP = {
             // platform, code, marketing, shortName, vendor, config
+            {"sm8975", "SM8975", "骁龙 8 至尊版 Gen 6（一加16 等）", "8 Elite G6", "Qualcomm", "b"},
             {"sm8875", "SM8875", "骁龙 8 至尊版 Gen 5（一加15/小米17 等）", "8 Elite G5", "Qualcomm", "b"},
             {"sm8850", "SM8850", "骁龙 8 至尊版（第五代 8 Elite）", "8 Elite G5", "Qualcomm", "b"},
             {"sm8845", "SM8845", "骁龙 8s 至尊版（8s Elite）", "8s Elite", "Qualcomm", "b"},

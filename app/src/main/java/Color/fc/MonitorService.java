@@ -23,6 +23,9 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -43,34 +46,53 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 迷你悬浮窗监视器（收纳帧率录制，原独立录制悬浮窗已合并）：
- * - 头部按钮：● 录制开关 · ⚙ 单项配置 · ✕ 关闭
- * - 监测行：功耗 / CPU / GPU / CPU温度+SOC温度 / 帧率
- * - 长按（或 ⚙）进入单项配置：点按各行单独开/关监测项（持久化），✓ 完成
- * - ● 单击开始录制（屏幕帧率 + CPU 总占用 + 每核心负载，500ms 采样），再次单击停止并保存曲线图 PNG
- * - 功耗计算与主页同步（电芯模式），顺带写入功耗历史记录
+ * 迷你悬浮窗监视器（菜单 + 独立窗架构）：
+ * - ≡ 胶囊：点击展开悬浮窗菜单；菜单内逐项开/关独立悬浮窗（位置独立、可拖动、✕ 单独关闭）
+ * - 独立窗：功耗（仅实时功耗）/ CPU / GPU / 温度 / 帧率（含 ● 录制，最短 3 秒）
+ * - 功耗 500ms 快速刷新（与主页电芯模式同步），GPU/温度 2s 慢速扫描
+ * - 菜单底部 "✕ 关闭监视器" 可停止服务；通知栏也可关闭
  */
 public class MonitorService extends Service {
 
     /** 主页开关状态同步用 */
     public static volatile boolean running = false;
+    /** 录制最短时长 */
+    private static final long MIN_REC_MS = 3000;
 
     private WindowManager wm;
-    private LinearLayout box;
-    private TextView tvRec, tvGear, tvClose, tvCfgHint, tvDetail;
-    /** 监测行: 0功耗 1CPU 2GPU 3温度 4帧率 */
-    private TextView[] rowViews;
-    private final boolean[] rowsOn = new boolean[5];
-    private static final int[] ROW_COLORS = {0xFF00E5FF, 0xFFE6EDF3, 0xFFE6EDF3, 0xFFE6EDF3, 0xFF8B949E};
-    private static final String[] ROW_KEYS = {"mon_power", "mon_cpu", "mon_gpu", "mon_temp", "mon_hz"};
-    private WindowManager.LayoutParams lp;
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private boolean detailed = false;
-    private boolean configMode = false;
     /** 电芯模式（与主页同步）：0=自动校准 1=强制单电芯 2=强制双电芯 */
     private int cellMode = 0;
 
-    // CPU 占用差分基准（UI 2s 循环）
+    // ===== 菜单胶囊与菜单 =====
+    private TextView pill;
+    private LinearLayout menu;
+    private WindowManager.LayoutParams pillLp, menuLp;
+    private TextView menuClose, menuQuit;
+    private final TextView[] menuRows = new TextView[5];
+    private boolean menuOpen = false;
+
+    // ===== 5 个独立悬浮窗: 0功耗 1CPU 2GPU 3温度 4帧率 =====
+    private static final String[] WIN_KEYS = {"win_power", "win_cpu", "win_gpu", "win_temp", "win_fps"};
+    private static final String[] WIN_LABELS = {"功耗", "CPU", "GPU", "温度", "帧率"};
+    private static final int[] WIN_COLORS = {0xFF00E5FF, 0xFFE6EDF3, 0xFFE6EDF3, 0xFFE6EDF3, 0xFF8B949E};
+    private final boolean[] winOpen = new boolean[5];
+    private final LinearLayout[] winBox = new LinearLayout[5];
+    private final TextView[] winText = new TextView[5];
+    private final WindowManager.LayoutParams[] winLp = new WindowManager.LayoutParams[5];
+    /** 帧率窗的录制按钮 */
+    private TextView tvRec;
+
+    // ===== 显示缓存（工作线程写 / UI 读） =====
+    private volatile double cW = -1;       // 功耗 W（已按电芯模式修正）
+    private volatile double cBusy = -1;    // CPU 总占用 %
+    private volatile double cCpuM = 0;     // CPU 最高频 MHz
+    private volatile double cGpuM = 0;     // GPU 频率 MHz
+    private volatile double cCpuT = 0, cSocT = 0, cBatT = 0;
+    private volatile float cHz = 0;
+    private volatile long recShown = 0;     // 录制已进行时长 ms
+
+    // CPU 占用差分基准（快速循环）
     private long lastIdle = -1, lastTotal = -1;
     // 录制 500ms 循环基准
     private long recLastIdle = -1, recLastTotal = -1;
@@ -121,179 +143,93 @@ public class MonitorService extends Service {
     public void onCreate() {
         super.onCreate();
         running = true;
-        // 与主页共享电芯模式 + 单项开关持久化
         SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
         cellMode = p.getInt("cellMode", 0);
-        for (int i = 0; i < rowsOn.length; i++) rowsOn[i] = p.getBoolean(ROW_KEYS[i], true);
+        for (int i = 0; i < winOpen.length; i++) winOpen[i] = p.getBoolean(WIN_KEYS[i], i == 0);
         startForeground(1, notif());
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        buildView();
-        ui.postDelayed(this::sample, 300);
+        buildPill();
+        for (int i = 0; i < winOpen.length; i++) {
+            if (winOpen[i]) addWindow(i);
+        }
+        ui.postDelayed(this::fastLoop, 200);
+        ui.postDelayed(this::slowLoop, 800);
     }
 
     @Override
     public void onDestroy() {
         running = false;
         ui.removeCallbacksAndMessages(null);
-        // 录制中被关闭 → 保存数据避免丢失
-        if (recording && ts.size() >= 4) stopRec(false);
-        if (box != null) {
+        if (recording) stopRec(false);
+        closeMenu();
+        for (int i = 0; i < winOpen.length; i++) {
+            if (winOpen[i]) {
+                try {
+                    wm.removeView(winBox[i]);
+                } catch (Exception ignored) {
+                }
+                winOpen[i] = false;
+            }
+        }
+        if (pill != null) {
             try {
-                wm.removeView(box);
+                wm.removeView(pill);
             } catch (Exception ignored) {
             }
         }
         super.onDestroy();
     }
 
-    private void buildView() {
-        box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xD9101820);
-        bg.setStroke(1, 0x6600E5FF);
-        bg.setCornerRadius(dp(10));
-        box.setBackground(bg);
-        int pad = dp(10);
-        box.setPadding(pad, dp(4), pad, dp(8));
+    // ==================== 通用拖动+点击触摸 ====================
 
-        // 头部：● 录制 · ⚙ 配置 · 弹簧 · ✕ 关闭
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        tvRec = new TextView(this);
-        tvRec.setTextColor(0xFF00E5FF);
-        tvRec.setTextSize(12);
-        tvRec.setText("●");
-        tvRec.setPadding(dp(4), dp(2), dp(2), dp(2));
-        head.addView(tvRec, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        tvGear = new TextView(this);
-        tvGear.setTextColor(0xFF8B949E);
-        tvGear.setTextSize(12);
-        tvGear.setText("⚙");
-        tvGear.setPadding(dp(2), dp(2), dp(2), dp(2));
-        head.addView(tvGear, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        View spring = new View(this);
-        head.addView(spring, new LinearLayout.LayoutParams(0, 1, 1f));
-        tvClose = new TextView(this);
-        tvClose.setTextColor(0xFF8B949E);
-        tvClose.setTextSize(11);
-        tvClose.setText("✕");
-        tvClose.setPadding(dp(6), dp(2), dp(2), dp(2));
-        head.addView(tvClose, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        box.addView(head);
-
-        // 配置模式提示（默认隐藏）
-        tvCfgHint = row(0xFF6B7785, 10);
-        tvCfgHint.setText("点按各行开关 · 点 ✓ 完成");
-        tvCfgHint.setVisibility(View.GONE);
-
-        rowViews = new TextView[rowsOn.length];
-        rowViews[0] = row(ROW_COLORS[0], 13);
-        rowViews[1] = row(ROW_COLORS[1], 11);
-        rowViews[2] = row(ROW_COLORS[2], 11);
-        rowViews[3] = row(ROW_COLORS[3], 11);
-        rowViews[4] = row(ROW_COLORS[4], 11);
-        tvDetail = row(0xFF8B949E, 11);
-        tvDetail.setVisibility(View.GONE);
-        applyRowStates();
-
-        lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.START;
-        lp.x = dp(24);
-        lp.y = dp(260);
-
-        box.setOnTouchListener(new View.OnTouchListener() {
-            float sx, sy, dx, dy;
-            long downAt;
-            boolean moved = false, longFired = false;
-            final Runnable longPress = new Runnable() {
-                @Override
-                public void run() {
-                    if (moved || longFired) return;
-                    longFired = true;
-                    toggleConfig();
-                }
-            };
-
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
-                switch (e.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        sx = e.getRawX();
-                        sy = e.getRawY();
-                        dx = sx - lp.x;
-                        dy = sy - lp.y;
-                        downAt = System.currentTimeMillis();
-                        moved = false;
-                        longFired = false;
-                        ui.postDelayed(longPress, 550);
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        if (Math.abs(e.getRawX() - sx) > dp(12) || Math.abs(e.getRawY() - sy) > dp(12)) {
-                            moved = true;
-                            ui.removeCallbacks(longPress);
-                        }
-                        lp.x = (int) (e.getRawX() - dx);
-                        lp.y = (int) (e.getRawY() - dy);
-                        try {
-                            wm.updateViewLayout(box, lp);
-                        } catch (Exception ignored) {
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                        ui.removeCallbacks(longPress);
-                        if (longFired) return true;   // 长按已处理
-                        if (Math.abs(e.getRawX() - sx) < dp(12)
-                                && Math.abs(e.getRawY() - sy) < dp(12)
-                                && System.currentTimeMillis() - downAt < 350) {
-                            if (hit(tvClose, e)) {
-                                stopSelf();
-                                return true;
-                            }
-                            if (hit(tvRec, e)) {
-                                toggleRec();
-                                return true;
-                            }
-                            if (hit(tvGear, e)) {
-                                toggleConfig();
-                                return true;
-                            }
-                            if (configMode) {
-                                toggleRowAt(e);
-                                return true;
-                            }
-                            detailed = !detailed;
-                            applyRowStates();
-                        }
-                        return true;
-                }
-                return false;
-            }
-        });
-
-        wm.addView(box, lp);
+    private interface Tap {
+        void tap(MotionEvent e);
     }
 
-    /** 宽度撑满，便于整行点击命中 */
-    private TextView row(int color, float sizeSp) {
-        TextView tv = new TextView(this);
-        tv.setTextColor(color);
-        tv.setTextSize(sizeSp);
-        tv.setTypeface(Typeface.MONOSPACE);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        p.bottomMargin = dp(2);
-        box.addView(tv, p);
-        return tv;
+    /** 拖动 + 单击（可选拖动回调） */
+    private class DragTouch implements View.OnTouchListener {
+        private final WindowManager.LayoutParams lp;
+        private final Tap tap;
+        private final Runnable onMoved;
+        private float sx, sy, dx, dy;
+        private long downAt;
+        private boolean moved = false;
+
+        DragTouch(WindowManager.LayoutParams lp, Tap tap, Runnable onMoved) {
+            this.lp = lp;
+            this.tap = tap;
+            this.onMoved = onMoved;
+        }
+
+        @Override
+        public boolean onTouch(View v, MotionEvent e) {
+            switch (e.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    sx = e.getRawX();
+                    sy = e.getRawY();
+                    dx = sx - lp.x;
+                    dy = sy - lp.y;
+                    downAt = System.currentTimeMillis();
+                    moved = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(e.getRawX() - sx) > dp(12) || Math.abs(e.getRawY() - sy) > dp(12)) {
+                        if (!moved && onMoved != null) onMoved.run();
+                        moved = true;
+                    }
+                    lp.x = (int) (e.getRawX() - dx);
+                    lp.y = (int) (e.getRawY() - dy);
+                    try {
+                        wm.updateViewLayout(v, lp);
+                    } catch (Exception ignored) {
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!moved && System.currentTimeMillis() - downAt < 350 && tap != null) tap.tap(e);
+                    return true;
+            }
+            return false;
+        }
     }
 
     private boolean hit(TextView v, MotionEvent e) {
@@ -303,45 +239,224 @@ public class MonitorService extends Service {
                 && e.getRawY() >= loc[1] && e.getRawY() <= loc[1] + v.getHeight();
     }
 
-    /** 进入/退出单项配置模式 */
-    private void toggleConfig() {
-        configMode = !configMode;
-        tvCfgHint.setVisibility(configMode ? View.VISIBLE : View.GONE);
-        tvGear.setText(configMode ? "✓" : "⚙");
-        tvGear.setTextColor(configMode ? 0xFF10B981 : 0xFF8B949E);
-        if (!configMode) saveRows();
-        applyRowStates();
+    // ==================== 菜单胶囊 ====================
+
+    private void buildPill() {
+        pill = new TextView(this);
+        pill.setTextColor(0xFF00E5FF);
+        pill.setTextSize(13);
+        pill.setText("≡");
+        GradientDrawable bg = winBg(dp(14));
+        pill.setBackground(bg);
+        pill.setPadding(dp(9), dp(2), dp(9), dp(3));
+        pillLp = overlayLp();
+        pillLp.x = dp(12);
+        pillLp.y = dp(120);
+        pill.setOnTouchListener(new DragTouch(pillLp, e -> toggleMenu(), this::closeMenu));
+        wm.addView(pill, pillLp);
     }
 
-    /** 配置模式点按行 → 开/关对应监测项 */
-    private void toggleRowAt(MotionEvent e) {
-        for (int i = 0; i < rowViews.length; i++) {
-            if (hit(rowViews[i], e)) {
-                rowsOn[i] = !rowsOn[i];
-                applyRowStates();
+    private void toggleMenu() {
+        if (menuOpen) closeMenu();
+        else openMenu();
+    }
+
+    private void openMenu() {
+        if (menuOpen) return;
+        if (menu == null) buildMenu();
+        menuLp = overlayLp();
+        menuLp.x = pillLp.x;
+        menuLp.y = pillLp.y + dp(44);
+        wm.addView(menu, menuLp);
+        menuOpen = true;
+        updateMenu();
+    }
+
+    private void closeMenu() {
+        if (!menuOpen || menu == null) return;
+        try {
+            wm.removeView(menu);
+        } catch (Exception ignored) {
+        }
+        menuOpen = false;
+    }
+
+    private void buildMenu() {
+        menu = new LinearLayout(this);
+        menu.setOrientation(LinearLayout.VERTICAL);
+        menu.setBackground(winBg(dp(10)));
+        menu.setPadding(dp(9), dp(3), dp(9), dp(5));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        TextView title = new TextView(this);
+        title.setTextColor(0xFF6B7785);
+        title.setTextSize(10);
+        title.setText("悬浮窗菜单");
+        head.addView(title, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        View spring = new View(this);
+        head.addView(spring, new LinearLayout.LayoutParams(0, 1, 1f));
+        menuClose = new TextView(this);
+        menuClose.setTextColor(0xFF8B949E);
+        menuClose.setTextSize(11);
+        menuClose.setText("✕");
+        menuClose.setPadding(dp(5), dp(1), dp(1), dp(1));
+        head.addView(menuClose, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        menu.addView(head);
+
+        for (int i = 0; i < menuRows.length; i++) {
+            menuRows[i] = new TextView(this);
+            menuRows[i].setTextSize(11);
+            menuRows[i].setTypeface(Typeface.MONOSPACE);
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            p.topMargin = dp(2);
+            menu.addView(menuRows[i], p);
+        }
+
+        View div = new View(this);
+        LinearLayout.LayoutParams dp2 = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 1);
+        dp2.topMargin = dp(5);
+        menu.addView(div, dp2);
+
+        menuQuit = new TextView(this);
+        menuQuit.setTextColor(0xFFEF4444);
+        menuQuit.setTextSize(10);
+        menuQuit.setText("✕ 关闭监视器");
+        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        qp.topMargin = dp(4);
+        menu.addView(menuQuit, qp);
+
+        menu.setOnTouchListener(new DragTouch(menuLp == null ? overlayLp() : menuLp, e -> {
+            if (hit(menuClose, e)) {
+                closeMenu();
                 return;
             }
-        }
-    }
-
-    /** 应用各行显示状态：配置模式全显(关闭项置灰)，正常模式隐藏关闭项 */
-    private void applyRowStates() {
-        for (int i = 0; i < rowViews.length; i++) {
-            TextView v = rowViews[i];
-            if (configMode) {
-                v.setVisibility(View.VISIBLE);
-                v.setTextColor(rowsOn[i] ? ROW_COLORS[i] : 0xFF4B5563);
-            } else {
-                v.setVisibility(rowsOn[i] ? View.VISIBLE : View.GONE);
-                v.setTextColor(ROW_COLORS[i]);
+            if (hit(menuQuit, e)) {
+                stopSelf();
+                return;
             }
-        }
-        tvDetail.setVisibility(!configMode && detailed ? View.VISIBLE : View.GONE);
+            for (int i = 0; i < menuRows.length; i++) {
+                if (hit(menuRows[i], e)) {
+                    toggleWindow(i);
+                    return;
+                }
+            }
+        }, null));
     }
 
-    private void saveRows() {
+    /** 菜单行状态刷新 */
+    private void updateMenu() {
+        if (!menuOpen) return;
+        for (int i = 0; i < menuRows.length; i++) {
+            menuRows[i].setText((winOpen[i] ? "✓ " : "✗ ") + WIN_LABELS[i]);
+            menuRows[i].setTextColor(winOpen[i] ? WIN_COLORS[i] : 0xFF4B5563);
+        }
+    }
+
+    // ==================== 独立悬浮窗 ====================
+
+    private GradientDrawable winBg(int radius) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xC0101820);
+        bg.setStroke(1, 0x5000E5FF);
+        bg.setCornerRadius(radius);
+        return bg;
+    }
+
+    private WindowManager.LayoutParams overlayLp() {
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.START;
+        return lp;
+    }
+
+    private void toggleWindow(int i) {
+        if (winOpen[i]) closeWindow(i);
+        else openWindow(i);
+    }
+
+    private void openWindow(int i) {
+        if (winOpen[i]) return;
+        addWindow(i);
+        winOpen[i] = true;
+        saveWins();
+        updateMenu();
+        updateAll();
+    }
+
+    private void closeWindow(int i) {
+        if (!winOpen[i]) return;
+        if (i == 4 && recording) stopRec(false);   // 关闭帧率窗时结束录制
+        try {
+            wm.removeView(winBox[i]);
+        } catch (Exception ignored) {
+        }
+        winOpen[i] = false;
+        saveWins();
+        updateMenu();
+    }
+
+    private void addWindow(int i) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setBackground(winBg(dp(10)));
+        box.setPadding(dp(8), dp(3), dp(6), dp(3));
+
+        final TextView close = new TextView(this);
+        if (i == 4) {
+            tvRec = new TextView(this);
+            tvRec.setTextColor(0xFF00E5FF);
+            tvRec.setTextSize(11);
+            tvRec.setText("●");
+            tvRec.setPadding(dp(1), dp(1), dp(4), dp(1));
+            box.addView(tvRec, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+        winText[i] = new TextView(this);
+        winText[i].setTextColor(WIN_COLORS[i]);
+        winText[i].setTextSize(11);
+        winText[i].setTypeface(Typeface.MONOSPACE);
+        box.addView(winText[i], new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        View spring = new View(this);
+        box.addView(spring, new LinearLayout.LayoutParams(0, 1, 1f));
+        close.setTextColor(0xFF8B949E);
+        close.setTextSize(11);
+        close.setText("✕");
+        close.setPadding(dp(5), dp(1), dp(1), dp(1));
+        box.addView(close, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        winLp[i] = overlayLp();
+        winLp[i].x = dp(16) + i * dp(6);
+        winLp[i].y = dp(170) + i * dp(46);
+        final int idx = i;
+        box.setOnTouchListener(new DragTouch(winLp[idx], e -> {
+            if (hit(close, e)) {
+                closeWindow(idx);
+                return;
+            }
+            if (idx == 4 && hit(tvRec, e)) toggleRec();
+        }, null));
+        winBox[i] = box;
+        wm.addView(box, winLp[i]);
+        winText[i].setText(WIN_LABELS[i] + " --");
+    }
+
+    private void saveWins() {
         SharedPreferences.Editor ed = getSharedPreferences("colorfc", MODE_PRIVATE).edit();
-        for (int i = 0; i < rowsOn.length; i++) ed.putBoolean(ROW_KEYS[i], rowsOn[i]);
+        for (int i = 0; i < winOpen.length; i++) ed.putBoolean(WIN_KEYS[i], winOpen[i]);
         ed.apply();
     }
 
@@ -349,75 +464,135 @@ public class MonitorService extends Service {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
-    // ==================== 常规采样（2s） ====================
+    // ==================== 界面刷新 ====================
 
-    private void sample() {
-        new Thread(() -> {
-            String out = "";
-            try {
-                RootShell.Result r = RootShell.exec(SCAN);
-                if (r.ok() && r.out != null) out = r.out;
-            } catch (Exception ignored) {
-            }
-            PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
-            // 功耗历史记录（内部节流）
-            if (st != null) PowerHistoryManager.record(this, st);
-            double busy = readCpuBusy();
-            double gpuHz = parseGpu(out);
-            double cpuMaxK = parseFreq(out);
-            double cpuT = parseZoneTemp(out, "cpu", st != null ? st.tempC : 0);
-            double socT = parseZoneTemp(out, "soc", cpuT);
-            float hz = refreshRate();
-            final PowerMonitor.BatteryStat fst = st;
-            final double fbusy = busy, fgpu = gpuHz, fcpu = cpuMaxK, fcput = cpuT, fsoct = socT;
-            final float fhz = hz;
-            ui.post(() -> updateUi(fst, fbusy, fgpu, fcpu, fcput, fsoct, fhz));
-            ui.postDelayed(this::sample, 2000);
-        }).start();
+    /** 追加一个着色片段，非首个片段前自动加 " · " 分隔 */
+    private void item(SpannableStringBuilder b, String txt, int color) {
+        if (b.length() > 0) {
+            int s = b.length();
+            b.append(" · ");
+            b.setSpan(new ForegroundColorSpan(0xFF566373), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        int s = b.length();
+        b.append(txt);
+        b.setSpan(new ForegroundColorSpan(color), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
-    private void updateUi(PowerMonitor.BatteryStat st, double busy, double gpuHz,
-                          double cpuMaxK, double cpuT, double socT, float hz) {
-        if (st != null) {
-            // 与主页一致的电芯模式修正
-            int cells = cellMode == 0 ? st.cells : cellMode;
-            boolean up = cells >= 2 && st.cells < 2;
-            double amps = up ? st.amps * 2 : st.amps;
-            double w = up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
-            rowViews[0].setText(String.format(Locale.US, "功耗 %.2fW", w));
-            if (detailed) {
-                tvDetail.setText(String.format(Locale.US, "%.2fV %.2fA · %d%% %s",
-                        st.volts, Math.abs(amps), st.level,
-                        st.tempC > 0 ? String.format(Locale.US, "电%.0f℃", st.tempC) : ""));
+    /** 温度着色：≥75 红 ≥60 橙 其余白 */
+    private static int tColor(double t) {
+        return t >= 75 ? 0xFFEF4444 : t >= 60 ? 0xFFF59E0B : 0xFFE6EDF3;
+    }
+
+    private void updateAll() {
+        if (winOpen[0]) winText[0].setText(cW >= 0
+                ? String.format(Locale.US, "功耗 %.2fW", cW) : "功耗 --");
+        if (winOpen[1]) {
+            SpannableStringBuilder b = new SpannableStringBuilder();
+            item(b, "CPU " + (cBusy >= 0 ? String.format(Locale.US, "%.0f%%", cBusy) : "--"), 0xFFE6EDF3);
+            if (cCpuM > 0) item(b, String.format(Locale.US, "%.0fMHz", cCpuM), 0xFF8B949E);
+            winText[1].setText(b);
+        }
+        if (winOpen[2]) winText[2].setText(cGpuM > 0
+                ? String.format(Locale.US, "GPU %.0fMHz", cGpuM) : "GPU --");
+        if (winOpen[3]) {
+            SpannableStringBuilder b = new SpannableStringBuilder();
+            item(b, String.format(Locale.US, "CPU温度 %.1f℃", cCpuT), tColor(cCpuT));
+            item(b, String.format(Locale.US, "SOC温度 %.1f℃", cSocT), tColor(cSocT));
+            winText[3].setText(b);
+        }
+        if (winOpen[4]) {
+            if (recording) {
+                SpannableStringBuilder b = new SpannableStringBuilder();
+                item(b, String.format(Locale.US, "● %02d:%02d", recShown / 60000, (recShown / 1000) % 60), 0xFFEF4444);
+                item(b, String.format(Locale.US, "%.0fHz", cHz), 0xFF8B949E);
+                winText[4].setText(b);
+            } else {
+                winText[4].setText(cHz > 0 ? String.format(Locale.US, "%.0fHz", cHz) : "--Hz");
             }
+        }
+    }
+
+    // ==================== 快速循环（500ms：功耗/CPU/帧率 实时） ====================
+
+    private void fastLoop() {
+        boolean needPower = winOpen[0];
+        boolean needCpu = winOpen[1] || recording;
+        boolean needHz = winOpen[4] || recording;
+        if (needPower || needCpu || needHz) {
+            new Thread(() -> {
+                if (needPower) {
+                    PowerMonitor.BatteryStat st = null;
+                    try {
+                        st = PowerMonitor.readOnce();
+                    } catch (Exception ignored) {
+                    }
+                    if (st != null) {
+                        // 与主页一致的电芯模式修正
+                        int cells = cellMode == 0 ? st.cells : cellMode;
+                        boolean up = cells >= 2 && st.cells < 2;
+                        double amps = up ? st.amps * 2 : st.amps;
+                        cW = up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
+                        cBatT = st.tempC;
+                        // 功耗历史记录（内部节流）
+                        PowerHistoryManager.record(this, st);
+                    } else {
+                        cW = -1;
+                    }
+                }
+                if (needCpu) cBusy = readCpuBusy();
+                if (needHz && !recording) cHz = refreshRate();
+                ui.post(this::updateAll);
+                ui.postDelayed(this::fastLoop, 500);
+            }).start();
         } else {
-            rowViews[0].setText("功耗 --W");
-        }
-        String cpu = "CPU ";
-        cpu += busy >= 0 ? String.format(Locale.US, "%.0f%%", busy) : "--";
-        if (cpuMaxK > 0) cpu += String.format(Locale.US, " · %.0fMHz", cpuMaxK / 1000);
-        rowViews[1].setText(cpu);
-        rowViews[2].setText(gpuHz > 0 ? String.format(Locale.US, "GPU %.0fMHz", gpuHz / 1e6) : "GPU --");
-        rowViews[3].setText(String.format(Locale.US, "CPU温度 %.1f℃ SOC温度 %.1f℃", cpuT, socT));
-        // 录制中该行由录制循环刷新（● mm:ss · Hz）
-        if (!recording) {
-            rowViews[4].setText(hz > 0 ? String.format(Locale.US, "%.0fHz", hz) : "--Hz");
+            ui.postDelayed(this::fastLoop, 500);
         }
     }
 
-    // ==================== 帧率录制（500ms） ====================
+    // ==================== 慢速循环（2s：GPU/CPU 频率/温度） ====================
+
+    private void slowLoop() {
+        if (winOpen[1] || winOpen[2] || winOpen[3]) {
+            new Thread(() -> {
+                String out = "";
+                try {
+                    RootShell.Result r = RootShell.exec(SCAN);
+                    if (r.ok() && r.out != null) out = r.out;
+                } catch (Exception ignored) {
+                }
+                double gpuHz = parseGpu(out);
+                cGpuM = gpuHz > 0 ? gpuHz / 1e6 : 0;
+                cCpuM = parseFreq(out) / 1000;
+                double cpuT = parseZoneTemp(out, "cpu", cBatT);
+                cCpuT = cpuT;
+                cSocT = parseZoneTemp(out, "soc", cpuT);
+                ui.post(this::updateAll);
+                ui.postDelayed(this::slowLoop, 2000);
+            }).start();
+        } else {
+            ui.postDelayed(this::slowLoop, 2000);
+        }
+    }
+
+    // ==================== 帧率录制（500ms，最短 3 秒） ====================
 
     private void toggleRec() {
         if (!recording) {
             recording = true;
             recStart = System.currentTimeMillis();
+            recShown = 0;
             ts.clear();
             fps.clear();
             cpuTot.clear();
             cores.clear();
-            tvRec.setText("■");
-            tvRec.setTextColor(0xFFEF4444);
-            Toast.makeText(this, "开始录制：帧率 / CPU 负载", Toast.LENGTH_SHORT).show();
+            recLastIdle = -1;
+            recLastTotal = -1;
+            lastCoreIdle = null;
+            if (tvRec != null) {
+                tvRec.setText("■");
+                tvRec.setTextColor(0xFFEF4444);
+            }
+            Toast.makeText(this, "开始录制（至少 3 秒）", Toast.LENGTH_SHORT).show();
             recSample();
         } else {
             stopRec(true);
@@ -426,11 +601,14 @@ public class MonitorService extends Service {
 
     private void stopRec(boolean toast) {
         recording = false;
-        tvRec.setText("●");
-        tvRec.setTextColor(0xFF00E5FF);
+        if (tvRec != null) {
+            tvRec.setText("●");
+            tvRec.setTextColor(0xFF00E5FF);
+        }
+        long dur = System.currentTimeMillis() - recStart;
         int n = ts.size();
-        if (n < 4) {
-            if (toast) Toast.makeText(this, "录制时间太短，未保存", Toast.LENGTH_SHORT).show();
+        if (dur < MIN_REC_MS || n < 4) {
+            if (toast) Toast.makeText(this, "录制不足 3 秒，未保存", Toast.LENGTH_SHORT).show();
             return;
         }
         if (toast) Toast.makeText(this, "录制完成，正在生成曲线图…", Toast.LENGTH_SHORT).show();
@@ -452,13 +630,9 @@ public class MonitorService extends Service {
                 cpuTot.add(busy.floatValue());
                 cores.add(coreBusy);
             }
-            long dur = now - recStart;
-            ui.post(() -> {
-                if (recording) {
-                    rowViews[4].setText(String.format(Locale.US, "● %02d:%02d · %.0fHz",
-                            dur / 60000, (dur / 1000) % 60, hz));
-                }
-            });
+            cHz = hz;
+            recShown = now - recStart;
+            ui.post(this::updateAll);
             ui.postDelayed(this::recSample, 500);
         }).start();
     }
@@ -777,7 +951,7 @@ public class MonitorService extends Service {
 
     // ==================== 常规解析工具 ====================
 
-    /** /proc/stat 首行差分 → CPU 总占用 %（UI 循环） */
+    /** /proc/stat 首行差分 → CPU 总占用 %（快速循环） */
     private double readCpuBusy() {
         try {
             BufferedReader r = new BufferedReader(new FileReader("/proc/stat"));
@@ -876,7 +1050,7 @@ public class MonitorService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, "monitor")
                 .setContentTitle("迷你监视器运行中")
-                .setContentText("长按单项开关 · ● 帧率录制 · 单击详细 · ✕ 关闭")
+                .setContentText("≡ 打开悬浮窗菜单 · 各窗 ✕ 独立关闭")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .addAction(new Notification.Action.Builder(null, "关闭", close).build())
                 .setOngoing(true)

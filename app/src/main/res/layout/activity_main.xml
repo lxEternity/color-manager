@@ -10,14 +10,14 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="18dp"
-        android:paddingEnd="18dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="10dp">
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="8dp">
 
         <ImageView
-            android:layout_width="30dp"
-            android:layout_height="30dp"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
             android:src="@mipmap/ic_launcher"
             android:contentDescription="@string/app_name" />
 
@@ -25,10 +25,10 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="10dp"
+            android:layout_marginStart="9dp"
             android:text="@string/app_name"
             android:textColor="@color/textPrimary"
-            android:textSize="18sp"
+            android:textSize="16sp"
             android:textStyle="bold" />
 
         <TextView
@@ -36,13 +36,13 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:background="@drawable/bg_tab"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
             android:text="ROOT 检测中"
             android:textColor="@color/textSecondary"
-            android:textSize="11sp" />
+            android:textSize="10sp" />
     </LinearLayout>
 
     <ScrollView
@@ -56,9 +56,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="24dp">
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="20dp">
 
             <!-- SOC 卡片 -->
             <LinearLayout
@@ -67,7 +67,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="14dp">
+                android:padding="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -77,14 +77,14 @@
 
                     <Color.fc.view.ChipView
                         android:id="@+id/chipView"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp" />
+                        android:layout_width="56dp"
+                        android:layout_height="56dp" />
 
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginStart="13dp"
+                        android:layout_marginStart="12dp"
                         android:orientation="vertical">
 
                         <TextView
@@ -93,25 +93,25 @@
                             android:layout_height="wrap_content"
                             android:text="检测中…"
                             android:textColor="@color/textPrimary"
-                            android:textSize="17sp"
+                            android:textSize="16sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:id="@+id/socPlatform"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="3dp"
+                            android:layout_marginTop="2dp"
                             android:text="platform: --"
                             android:textColor="@color/textSecondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
                     </LinearLayout>
                 </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginTop="10dp"
-                    android:layout_marginBottom="9dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="7dp"
                     android:background="@color/divider" />
 
                 <LinearLayout
@@ -130,16 +130,16 @@
                             android:layout_height="wrap_content"
                             android:text="CPU 核心数"
                             android:textColor="@color/textDim"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
 
                         <TextView
                             android:id="@+id/cpuCount"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="--"
                             android:textColor="@color/textPrimary"
-                            android:textSize="15sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -154,16 +154,16 @@
                             android:layout_height="wrap_content"
                             android:text="电量"
                             android:textColor="@color/textDim"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
 
                         <TextView
                             android:id="@+id/batteryLevel"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="--"
                             android:textColor="@color/textPrimary"
-                            android:textSize="15sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -178,29 +178,40 @@
                             android:layout_height="wrap_content"
                             android:text="电池温度"
                             android:textColor="@color/textDim"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
 
                         <TextView
                             android:id="@+id/batteryTemp"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="--"
                             android:textColor="@color/textPrimary"
-                            android:textSize="15sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
 
+            <!-- 分组: 实时监视 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="2dp"
+                android:text="实时监视"
+                android:textColor="@color/textDim"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
             <!-- 功耗卡片 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="14dp">
+                android:padding="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -214,27 +225,27 @@
                         android:layout_weight="1"
                         android:text="实时功耗"
                         android:textColor="@color/textSecondary"
-                        android:textSize="14sp" />
+                        android:textSize="13sp" />
 
                     <TextView
                         android:id="@+id/cellBadge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:background="@drawable/bg_tab"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
                         android:paddingTop="2dp"
                         android:paddingBottom="2dp"
                         android:text="电芯校准中"
                         android:textColor="@color/textSecondary"
-                        android:textSize="10sp" />
+                        android:textSize="9sp" />
                 </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="4dp"
                     android:gravity="center_vertical|bottom">
 
                     <TextView
@@ -243,17 +254,17 @@
                         android:layout_height="wrap_content"
                         android:text="--"
                         android:textColor="@color/accent"
-                        android:textSize="36sp"
+                        android:textSize="30sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:layout_marginBottom="6dp"
+                        android:layout_marginStart="5dp"
+                        android:layout_marginBottom="4dp"
                         android:text="W"
                         android:textColor="@color/textSecondary"
-                        android:textSize="14sp" />
+                        android:textSize="12sp" />
 
                     <View
                         android:layout_width="0dp"
@@ -264,23 +275,23 @@
                         android:id="@+id/powerStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="5dp"
                         android:text="--"
                         android:textColor="@color/textSecondary"
-                        android:textSize="13sp" />
+                        android:textSize="12sp" />
                 </LinearLayout>
 
                 <Color.fc.view.SparkView
                     android:id="@+id/sparkView"
                     android:layout_width="match_parent"
-                    android:layout_height="70dp"
-                    android:layout_marginTop="6dp" />
+                    android:layout_height="46dp"
+                    android:layout_marginTop="4dp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="8dp">
+                    android:layout_marginTop="6dp">
 
                     <LinearLayout
                         android:layout_width="0dp"
@@ -293,16 +304,16 @@
                             android:layout_height="wrap_content"
                             android:text="电流"
                             android:textColor="@color/textDim"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
 
                         <TextView
                             android:id="@+id/currentValue"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="-- mA"
                             android:textColor="@color/textPrimary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -317,16 +328,16 @@
                             android:layout_height="wrap_content"
                             android:text="电压"
                             android:textColor="@color/textDim"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
 
                         <TextView
                             android:id="@+id/voltageValue"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="-- V"
                             android:textColor="@color/textPrimary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -341,210 +352,19 @@
                             android:layout_height="wrap_content"
                             android:text="峰值"
                             android:textColor="@color/textDim"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
 
                         <TextView
                             android:id="@+id/peakValue"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="-- W"
                             android:textColor="@color/textPrimary"
-                            android:textSize="14sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </LinearLayout>
-            </LinearLayout>
-
-            <!-- 功耗记录卡片 -->
-            <LinearLayout
-                android:id="@+id/menuPowerHistory"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="13dp">
-
-                <View
-                    android:layout_width="4dp"
-                    android:layout_height="32dp"
-                    android:background="#22D3EE" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="12dp"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="功耗记录"
-                        android:textColor="@color/textPrimary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/powerHistorySummary"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="统计中…"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_right"
-                    android:tint="#22D3EE"
-                    android:contentDescription="功耗记录" />
-            </LinearLayout>
-
-            <!-- 功能菜单 -->
-            <LinearLayout
-                android:id="@+id/menuSchedule"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="13dp">
-
-                <View
-                    android:layout_width="4dp"
-                    android:layout_height="32dp"
-                    android:background="@color/accent" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="12dp"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="调度参数"
-                        android:textColor="@color/textPrimary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="省电 / 均衡 / 性能 / 极速 模式参数编辑"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_right"
-                    android:tint="@color/accent"
-                    android:contentDescription="调度参数" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/menuGovernor"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="13dp">
-
-                <View
-                    android:layout_width="4dp"
-                    android:layout_height="32dp"
-                    android:background="@color/magenta" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="12dp"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="调速器配置"
-                        android:textColor="@color/textPrimary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="省电 / 均衡 / 性能 / 极速 模式调速器编辑"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_right"
-                    android:tint="@color/magenta"
-                    android:contentDescription="调速器配置" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/menuMode"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="13dp">
-
-                <View
-                    android:layout_width="4dp"
-                    android:layout_height="32dp"
-                    android:background="@color/green" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="12dp"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="应用策略"
-                        android:textColor="@color/textPrimary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="按应用自动切换调度模式"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_right"
-                    android:tint="@color/green"
-                    android:contentDescription="调度接管" />
             </LinearLayout>
 
             <!-- 迷你悬浮窗开关 -->
@@ -552,22 +372,22 @@
                 android:id="@+id/menuMonitor"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
+                android:layout_marginTop="8dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:background="@drawable/bg_card"
-                android:padding="13dp">
+                android:padding="10dp">
 
                 <View
-                    android:layout_width="4dp"
-                    android:layout_height="32dp"
+                    android:layout_width="3dp"
+                    android:layout_height="22dp"
                     android:background="#F59E0B" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="12dp"
+                    android:layout_marginStart="10dp"
                     android:orientation="vertical">
 
                     <TextView
@@ -575,16 +395,16 @@
                         android:layout_height="wrap_content"
                         android:text="迷你悬浮窗"
                         android:textColor="@color/textPrimary"
-                        android:textSize="15sp"
+                        android:textSize="14sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="实时监视 · 长按单项开关 · ● 帧率录制"
+                        android:layout_marginTop="1dp"
+                        android:text="≡ 菜单 · 功耗/CPU/GPU/温度/帧率独立悬浮窗"
                         android:textColor="@color/textSecondary"
-                        android:textSize="12sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
 
                 <Switch
@@ -598,22 +418,22 @@
                 android:id="@+id/menuFrameRecords"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="11dp"
+                android:layout_marginTop="8dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:background="@drawable/bg_card"
-                android:padding="13dp">
+                android:padding="10dp">
 
                 <View
-                    android:layout_width="4dp"
-                    android:layout_height="32dp"
+                    android:layout_width="3dp"
+                    android:layout_height="22dp"
                     android:background="#EF4444" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="12dp"
+                    android:layout_marginStart="10dp"
                     android:orientation="vertical">
 
                     <TextView
@@ -621,25 +441,229 @@
                         android:layout_height="wrap_content"
                         android:text="帧率录制记录"
                         android:textColor="@color/textPrimary"
-                        android:textSize="15sp"
+                        android:textSize="14sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:id="@+id/frameRecordsSummary"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="暂无录制 · 在悬浮窗点 ● 开始"
+                        android:layout_marginTop="1dp"
+                        android:text="暂无录制 · 在帧率悬浮窗点 ● 开始"
                         android:textColor="@color/textSecondary"
-                        android:textSize="12sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
                     android:src="@drawable/ic_arrow_right"
                     android:tint="#EF4444"
                     android:contentDescription="帧率录制记录" />
+            </LinearLayout>
+
+            <!-- 功耗记录卡片 -->
+            <LinearLayout
+                android:id="@+id/menuPowerHistory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="10dp">
+
+                <View
+                    android:layout_width="3dp"
+                    android:layout_height="22dp"
+                    android:background="#22D3EE" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="功耗记录"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/powerHistorySummary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="统计中…"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    android:tint="#22D3EE"
+                    android:contentDescription="功耗记录" />
+            </LinearLayout>
+
+            <!-- 分组: 调度功能 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="2dp"
+                android:text="调度功能"
+                android:textColor="@color/textDim"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <!-- 调度参数 -->
+            <LinearLayout
+                android:id="@+id/menuSchedule"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="10dp">
+
+                <View
+                    android:layout_width="3dp"
+                    android:layout_height="22dp"
+                    android:background="@color/accent" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="调度参数"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="省电 / 均衡 / 性能 / 极速 模式参数编辑"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    android:tint="@color/accent"
+                    android:contentDescription="调度参数" />
+            </LinearLayout>
+
+            <!-- 调速器配置 -->
+            <LinearLayout
+                android:id="@+id/menuGovernor"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="10dp">
+
+                <View
+                    android:layout_width="3dp"
+                    android:layout_height="22dp"
+                    android:background="@color/magenta" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="调速器配置"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="各模式调速器编辑"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    android:tint="@color/magenta"
+                    android:contentDescription="调速器配置" />
+            </LinearLayout>
+
+            <!-- 应用策略 -->
+            <LinearLayout
+                android:id="@+id/menuMode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="10dp">
+
+                <View
+                    android:layout_width="3dp"
+                    android:layout_height="22dp"
+                    android:background="@color/green" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="应用策略"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="按应用自动切换调度模式"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    android:tint="@color/green"
+                    android:contentDescription="应用策略" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

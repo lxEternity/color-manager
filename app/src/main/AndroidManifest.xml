@@ -45,14 +45,5 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="floating_monitor" />
         </service>
-
-        <service
-            android:name=".FrameRecService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="frame_recorder" />
-        </service>
     </application>
 </manifest>

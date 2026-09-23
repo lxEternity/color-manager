@@ -582,7 +582,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="CPU / GPU / 温度 / 功耗 / 帧率实时监视"
+                        android:text="实时监视 · 长按单项开关 · ● 帧率录制"
                         android:textColor="@color/textSecondary"
                         android:textSize="12sp" />
                 </LinearLayout>
@@ -593,9 +593,9 @@
                     android:layout_height="wrap_content" />
             </LinearLayout>
 
-            <!-- 帧率录制悬浮窗开关 -->
+            <!-- 帧率录制记录 -->
             <LinearLayout
-                android:id="@+id/menuFrameRec"
+                android:id="@+id/menuFrameRecords"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="11dp"
@@ -619,24 +619,27 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="帧率录制悬浮窗"
+                        android:text="帧率录制记录"
                         android:textColor="@color/textPrimary"
                         android:textSize="15sp"
                         android:textStyle="bold" />
 
                     <TextView
+                        android:id="@+id/frameRecordsSummary"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
-                        android:text="单击开始录制帧率/CPU负载 · 再次单击保存曲线图"
+                        android:text="暂无录制 · 在悬浮窗点 ● 开始"
                         android:textColor="@color/textSecondary"
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <Switch
-                    android:id="@+id/frameRecSwitch"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_right"
+                    android:tint="#EF4444"
+                    android:contentDescription="帧率录制记录" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

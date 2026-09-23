@@ -3,7 +3,8 @@ package Color.fc;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
-import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -13,10 +14,15 @@ import android.provider.Settings;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.InputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 import Color.fc.view.ChipView;
@@ -43,8 +49,7 @@ public class MainActivity extends Activity {
     private Switch monitorSwitch;
     private boolean suppressSwitch = false;
     private TextView powerHistorySummary;
-    private Switch frameRecSwitch;
-    private boolean suppressFrameSwitch = false;
+    private TextView frameRecordsSummary;
     private int powerTick = 0;
 
     static SocInfo cachedSoc;
@@ -92,12 +97,10 @@ public class MainActivity extends Activity {
         findViewById(R.id.menuPowerHistory).setOnClickListener(v -> showHistoryDialog());
         refreshHistorySummary();
 
-        // 帧率录制悬浮窗开关
-        frameRecSwitch = findViewById(R.id.frameRecSwitch);
-        frameRecSwitch.setOnCheckedChangeListener((btn, on) -> {
-            if (suppressFrameSwitch) return;
-            toggleFrameRec(on);
-        });
+        // 帧率录制记录卡片
+        frameRecordsSummary = findViewById(R.id.frameRecordsSummary);
+        findViewById(R.id.menuFrameRecords).setOnClickListener(v -> showFrameRecords());
+        refreshRecordsSummary();
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         cellBadge.setOnClickListener(v -> showCellDialog());
@@ -174,9 +177,6 @@ public class MainActivity extends Activity {
         suppressSwitch = true;
         if (monitorSwitch != null) monitorSwitch.setChecked(MonitorService.running);
         suppressSwitch = false;
-        suppressFrameSwitch = true;
-        if (frameRecSwitch != null) frameRecSwitch.setChecked(FrameRecService.running);
-        suppressFrameSwitch = false;
     }
 
     /** 迷你悬浮窗开关：权限检查 + 启停前台服务 */
@@ -192,22 +192,6 @@ public class MainActivity extends Activity {
             startForegroundService(new Intent(this, MonitorService.class));
         } else {
             stopService(new Intent(this, MonitorService.class));
-        }
-    }
-
-    /** 帧率录制悬浮窗开关：权限检查 + 启停前台服务 */
-    private void toggleFrameRec(boolean on) {
-        if (on) {
-            if (!Settings.canDrawOverlays(this)) {
-                frameRecSwitch.setChecked(false);
-                Toast.makeText(this, "请先授予悬浮窗权限后重试", Toast.LENGTH_LONG).show();
-                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName())));
-                return;
-            }
-            startForegroundService(new Intent(this, FrameRecService.class));
-        } else {
-            stopService(new Intent(this, FrameRecService.class));
         }
     }
 
@@ -236,6 +220,100 @@ public class MainActivity extends Activity {
                     })
                     .show());
         }).start();
+    }
+
+    /** 刷新帧率录制记录卡片摘要 */
+    private void refreshRecordsSummary() {
+        new Thread(() -> {
+            final String s = FrameRecordStore.summary(this);
+            runOnUiThread(() -> {
+                if (frameRecordsSummary != null) frameRecordsSummary.setText(s);
+            });
+        }).start();
+    }
+
+    /** 帧率录制记录列表：点击条目查看曲线图 */
+    private void showFrameRecords() {
+        new Thread(() -> {
+            final List<FrameRecordStore.Rec> recs = FrameRecordStore.list(this);
+            final String[] items = new String[recs.size()];
+            SimpleDateFormat df = new SimpleDateFormat("MM-dd HH:mm", Locale.US);
+            for (int i = 0; i < recs.size(); i++) {
+                FrameRecordStore.Rec r = recs.get(i);
+                items[i] = String.format(Locale.US, "%s · %d:%02d · 均%.0fHz · CPU峰%.0f%%",
+                        df.format(new Date(r.t)), r.dur / 60000, (r.dur / 1000) % 60,
+                        r.avgFps, r.maxCpu);
+            }
+            runOnUiThread(() -> {
+                if (recs.isEmpty()) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("帧率录制记录")
+                            .setMessage("暂无录制\n\n开启迷你悬浮窗后，点击悬浮窗上的 ● 开始录制，"
+                                    + "再次点击停止并自动保存曲线图（帧率 / CPU线程负载 / CPU使用率）")
+                            .setPositiveButton("关闭", null)
+                            .show();
+                    return;
+                }
+                new AlertDialog.Builder(this)
+                        .setTitle("帧率录制记录")
+                        .setItems(items, (d, w) -> showRecordImage(recs.get(w)))
+                        .setNeutralButton("清空", (d, w) -> confirmClearRecords())
+                        .setPositiveButton("关闭", null)
+                        .show();
+            });
+        }).start();
+    }
+
+    /** 展开查看录制曲线图 */
+    private void showRecordImage(FrameRecordStore.Rec r) {
+        new Thread(() -> {
+            Bitmap bmp = null;
+            try {
+                if (r.ref != null && r.ref.startsWith("content://")) {
+                    try (InputStream is = getContentResolver().openInputStream(Uri.parse(r.ref))) {
+                        bmp = BitmapFactory.decodeStream(is);
+                    }
+                } else if (r.ref != null) {
+                    bmp = BitmapFactory.decodeFile(r.ref);
+                }
+            } catch (Exception ignored) {
+            }
+            final Bitmap fb = bmp;
+            runOnUiThread(() -> {
+                if (fb == null) {
+                    Toast.makeText(this, "曲线图已被删除或无法读取", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                ImageView iv = new ImageView(this);
+                iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                iv.setAdjustViewBounds(true);
+                iv.setImageBitmap(fb);
+                ScrollView sv = new ScrollView(this);
+                sv.addView(iv);
+                new AlertDialog.Builder(this)
+                        .setTitle(String.format(Locale.US, "录制 %d:%02d · 均%.0fHz",
+                                r.dur / 60000, (r.dur / 1000) % 60, r.avgFps))
+                        .setView(sv)
+                        .setPositiveButton("关闭", null)
+                        .show();
+            });
+        }).start();
+    }
+
+    /** 清空帧率录制记录（含图片） */
+    private void confirmClearRecords() {
+        new AlertDialog.Builder(this)
+                .setTitle("清空录制记录")
+                .setMessage("将删除全部录制记录及曲线图，确定？")
+                .setPositiveButton("清空", (d, w) -> new Thread(() -> {
+                    FrameRecordStore.clear(this);
+                    runOnUiThread(() -> {
+                        refreshRecordsSummary();
+                        Toast.makeText(this, "已清空录制记录", Toast.LENGTH_SHORT).show();
+                    });
+                }).start())
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 电芯模式切换：并联双电芯机型电压 4.4V 与单芯无异，只能手动指定 */

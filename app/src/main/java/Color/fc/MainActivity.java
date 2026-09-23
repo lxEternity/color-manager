@@ -5,13 +5,17 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.Locale;
 
@@ -36,6 +40,8 @@ public class MainActivity extends Activity {
     private TextView powerValue, powerStatus, currentValue, voltageValue, peakValue, cellBadge;
     private TextView cpuCount, batteryLevel, batteryTemp;
     private SparkView sparkView;
+    private Switch monitorSwitch;
+    private boolean suppressSwitch = false;
 
     static SocInfo cachedSoc;
 
@@ -69,6 +75,13 @@ public class MainActivity extends Activity {
         detectSoc();
         detectRoot();
         startPowerLoop();
+
+        // 迷你悬浮窗开关
+        monitorSwitch = findViewById(R.id.monitorSwitch);
+        monitorSwitch.setOnCheckedChangeListener((btn, on) -> {
+            if (suppressSwitch) return;
+            toggleMonitor(on);
+        });
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         cellBadge.setOnClickListener(v -> showCellDialog());
@@ -135,6 +148,26 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         updateCellModeFromPrefs();
+        // 回到前台时同步悬浮窗开关状态（服务可能已被通知栏关闭）
+        suppressSwitch = true;
+        if (monitorSwitch != null) monitorSwitch.setChecked(MonitorService.running);
+        suppressSwitch = false;
+    }
+
+    /** 迷你悬浮窗开关：权限检查 + 启停前台服务 */
+    private void toggleMonitor(boolean on) {
+        if (on) {
+            if (!Settings.canDrawOverlays(this)) {
+                monitorSwitch.setChecked(false);
+                Toast.makeText(this, "请先授予悬浮窗权限后重试", Toast.LENGTH_LONG).show();
+                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName())));
+                return;
+            }
+            startForegroundService(new Intent(this, MonitorService.class));
+        } else {
+            stopService(new Intent(this, MonitorService.class));
+        }
     }
 
     /** 电芯模式切换：并联双电芯机型电压 4.4V 与单芯无异，只能手动指定 */

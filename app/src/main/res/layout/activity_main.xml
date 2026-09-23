@@ -31,6 +31,21 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
+        <!-- 主题按钮：移到主页顶栏 -->
+        <TextView
+            android:id="@+id/menuTheme"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="7dp"
+            android:background="@drawable/bg_tab"
+            android:paddingStart="9dp"
+            android:paddingEnd="9dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:text="🎨"
+            android:textSize="13sp"
+            android:contentDescription="主题设置" />
+
         <TextView
             android:id="@+id/rootBadge"
             android:layout_width="wrap_content"
@@ -67,7 +82,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="12dp">
+                android:padding="10dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -77,14 +92,14 @@
 
                     <Color.fc.view.ChipView
                         android:id="@+id/chipView"
-                        android:layout_width="56dp"
-                        android:layout_height="56dp" />
+                        android:layout_width="42dp"
+                        android:layout_height="42dp" />
 
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginStart="12dp"
+                        android:layout_marginStart="9dp"
                         android:orientation="vertical">
 
                         <TextView
@@ -93,25 +108,25 @@
                             android:layout_height="wrap_content"
                             android:text="检测中…"
                             android:textColor="@color/textPrimary"
-                            android:textSize="16sp"
+                            android:textSize="13.5sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:id="@+id/socPlatform"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="1dp"
                             android:text="platform: --"
                             android:textColor="@color/textSecondary"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
                     </LinearLayout>
                 </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="7dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="5dp"
                     android:background="@color/divider" />
 
                 <LinearLayout
@@ -130,7 +145,7 @@
                             android:layout_height="wrap_content"
                             android:text="CPU 核心数"
                             android:textColor="@color/textDim"
-                            android:textSize="10sp" />
+                            android:textSize="9sp" />
 
                         <TextView
                             android:id="@+id/cpuCount"
@@ -139,7 +154,7 @@
                             android:layout_marginTop="1dp"
                             android:text="--"
                             android:textColor="@color/textPrimary"
-                            android:textSize="14sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -154,7 +169,7 @@
                             android:layout_height="wrap_content"
                             android:text="电量"
                             android:textColor="@color/textDim"
-                            android:textSize="10sp" />
+                            android:textSize="9sp" />
 
                         <TextView
                             android:id="@+id/batteryLevel"
@@ -163,7 +178,7 @@
                             android:layout_marginTop="1dp"
                             android:text="--"
                             android:textColor="@color/textPrimary"
-                            android:textSize="14sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -178,7 +193,7 @@
                             android:layout_height="wrap_content"
                             android:text="电池温度"
                             android:textColor="@color/textDim"
-                            android:textSize="10sp" />
+                            android:textSize="9sp" />
 
                         <TextView
                             android:id="@+id/batteryTemp"
@@ -187,7 +202,7 @@
                             android:layout_marginTop="1dp"
                             android:text="--"
                             android:textColor="@color/textPrimary"
-                            android:textSize="14sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </LinearLayout>
@@ -493,30 +508,6 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="SOC温度"
-                            android:textColor="@color/textDim"
-                            android:textSize="9.5sp" />
-
-                        <TextView
-                            android:id="@+id/hwSocTemp"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="1dp"
-                            android:text="--"
-                            android:textColor="@color/textPrimary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
                             android:text="CPU频率"
                             android:textColor="@color/textDim"
                             android:textSize="9.5sp" />
@@ -656,7 +647,7 @@
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
-            <!-- 功能入口 2×2 紧凑网格 -->
+            <!-- 功能入口：单行紧凑芯片（横向收纳，可换行扩展） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -668,42 +659,28 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginEnd="3dp"
-                    android:orientation="vertical"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:background="@drawable/bg_card"
-                    android:padding="10dp">
+                    android:padding="8dp">
 
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:id="@+id/badgeSchedule"
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
-                            android:gravity="center"
-                            android:text="调"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="7dp"
-                            android:text="调度参数"
-                            android:textColor="@color/textPrimary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/badgeSchedule"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:gravity="center"
+                        android:text="调"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="省电/均衡/性能/极速 编辑"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="9.5sp" />
+                        android:layout_marginStart="6dp"
+                        android:text="调度参数"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -711,138 +688,58 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="3dp"
-                    android:orientation="vertical"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:background="@drawable/bg_card"
-                    android:padding="10dp">
+                    android:padding="8dp">
 
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:id="@+id/badgeGovernor"
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
-                            android:gravity="center"
-                            android:text="速"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="7dp"
-                            android:text="调速器配置"
-                            android:textColor="@color/textPrimary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/badgeGovernor"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:gravity="center"
+                        android:text="速"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="各模式调速器编辑"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="9.5sp" />
+                        android:layout_marginStart="6dp"
+                        android:text="调速器"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:orientation="horizontal">
 
                 <LinearLayout
                     android:id="@+id/menuMode"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginEnd="3dp"
-                    android:orientation="vertical"
-                    android:background="@drawable/bg_card"
-                    android:padding="10dp">
-
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:id="@+id/badgeMode"
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
-                            android:gravity="center"
-                            android:text="策"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="7dp"
-                            android:text="应用策略"
-                            android:textColor="@color/textPrimary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="按应用自动切换模式"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="9.5sp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/menuTheme"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:layout_marginStart="3dp"
-                    android:orientation="vertical"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:background="@drawable/bg_card"
-                    android:padding="10dp">
+                    android:padding="8dp">
 
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:id="@+id/badgeTheme"
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
-                            android:gravity="center"
-                            android:text="主"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="7dp"
-                            android:text="主题"
-                            android:textColor="@color/textPrimary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/badgeMode"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:gravity="center"
+                        android:text="策"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="日夜间/透明背景/自定义背景"
-                        android:textColor="@color/textSecondary"
-                        android:textSize="9.5sp" />
+                        android:layout_marginStart="6dp"
+                        android:text="应用策略"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

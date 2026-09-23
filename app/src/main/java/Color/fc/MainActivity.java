@@ -19,8 +19,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -56,7 +54,7 @@ public class MainActivity extends ThemedActivity {
     private int powerTick = 0;
 
     // ===== 硬件实时状态（主页 2s 扫描） =====
-    private TextView hwCpuBusy, hwCpuTemp, hwGpuFreq, hwGpuTemp, hwSocTemp, hwCpuFreq;
+    private TextView hwCpuBusy, hwCpuTemp, hwGpuFreq, hwGpuTemp, hwCpuFreq;
     private boolean hwRunning = false;
     private long hwIdle = -1, hwTotal = -1;
     /** 电池温度（CPU 温区兜底用，功耗循环更新） */
@@ -91,46 +89,37 @@ public class MainActivity extends ThemedActivity {
         hwCpuTemp = findViewById(R.id.hwCpuTemp);
         hwGpuFreq = findViewById(R.id.hwGpuFreq);
         hwGpuTemp = findViewById(R.id.hwGpuTemp);
-        hwSocTemp = findViewById(R.id.hwSocTemp);
         hwCpuFreq = findViewById(R.id.hwCpuFreq);
 
         // 自调度硬件扫描任务（2s 循环，onResume 启动 / onPause 停止）
         hwTick = () -> {
             if (!hwRunning) return;
             new Thread(() -> {
-                // CPU 占用：/proc/stat 差分（无需 root）
-                double busy = -1;
-                try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
-                    String l = r.readLine();
-                    if (l != null && l.startsWith("cpu ")) {
-                        String[] p = l.split("\\s+");
-                        long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
-                        long total = 0;
-                        for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
-                        if (hwIdle >= 0 && total > hwTotal) {
-                            busy = Math.max(0, Math.min(100,
-                                    100.0 * (total - hwTotal - (idle - hwIdle)) / (total - hwTotal)));
-                        }
-                        hwIdle = idle;
-                        hwTotal = total;
-                    }
-                } catch (Exception ignored) {
-                }
-                // GPU/CPU 频率 + 温区：一次 root 扫描多字段解析
-                double gpuHz = 0, cpuKHz = 0, cpuT = 0, socT = 0, gpuT = 0;
+                double busy = -1, gpuHz = 0, cpuKHz = 0, cpuT = 0, gpuT = 0;
                 try {
                     RootShell.Result r = RootShell.exec(HardwareMonitor.SCAN, 8);
                     if (r.ok() && r.out != null) {
+                        // CPU 占用：/proc/stat 差分（root 读取，应用直读被 SELinux 拦截）
+                        long[] it = HardwareMonitor.procStat(r.out);
+                        if (it != null) {
+                            if (hwIdle >= 0 && it[1] > hwTotal) {
+                                busy = Math.max(0, Math.min(100,
+                                        100.0 * (it[1] - hwTotal - (it[0] - hwIdle)) / (it[1] - hwTotal)));
+                            }
+                            hwIdle = it[0];
+                            hwTotal = it[1];
+                        }
                         gpuHz = HardwareMonitor.gpuHz(r.out);
                         cpuKHz = HardwareMonitor.cpuMaxKHz(r.out);
+                        // 温区兜底链：cpu→电池温度；soc 仅作 gpu 的兜底（不再展示）
                         cpuT = HardwareMonitor.zoneTemp(r.out, "cpu", batTempC);
-                        socT = HardwareMonitor.zoneTemp(r.out, "soc", cpuT);
+                        double socT = HardwareMonitor.zoneTemp(r.out, "soc", cpuT);
                         gpuT = HardwareMonitor.zoneTemp(r.out, "gpu", socT);
                     }
                 } catch (Exception ignored) {
                 }
-                final double b = busy, g = gpuHz, ck = cpuKHz, ct = cpuT, st = socT, gt = gpuT;
-                runOnUiThread(() -> updateHardware(b, ck, g, ct, st, gt));
+                final double b = busy, g = gpuHz, ck = cpuKHz, ct = cpuT, gt = gpuT;
+                runOnUiThread(() -> updateHardware(b, ck, g, ct, gt));
                 if (hwRunning) handler.postDelayed(hwTick, 2000);
             }).start();
         };
@@ -187,8 +176,7 @@ public class MainActivity extends ThemedActivity {
         int[][] pairs = {
                 {R.id.badgeSchedule, R.color.accent},
                 {R.id.badgeGovernor, R.color.magenta},
-                {R.id.badgeMode, R.color.green},
-                {R.id.badgeTheme, R.color.orange}
+                {R.id.badgeMode, R.color.green}
         };
         for (int[] p : pairs) {
             TextView badge = findViewById(p[0]);
@@ -487,8 +475,7 @@ public class MainActivity extends ThemedActivity {
         return t > 0 ? String.format(Locale.US, "%.1f℃", t) : "--";
     }
 
-    private void updateHardware(double busy, double cpuKHz, double gpuHz,
-                                double cpuT, double socT, double gpuT) {
+    private void updateHardware(double busy, double cpuKHz, double gpuHz, double cpuT, double gpuT) {
         if (hwCpuBusy != null) {
             hwCpuBusy.setText(busy >= 0 ? String.format(Locale.US, "%.0f%%", busy) : "--");
             hwCpuBusy.setTextColor(busy >= 85 ? 0xFFEF4444
@@ -504,10 +491,6 @@ public class MainActivity extends ThemedActivity {
         if (hwGpuTemp != null) {
             hwGpuTemp.setText(fmtTemp(gpuT));
             hwGpuTemp.setTextColor(tempColor(gpuT));
-        }
-        if (hwSocTemp != null) {
-            hwSocTemp.setText(fmtTemp(socT));
-            hwSocTemp.setTextColor(tempColor(socT));
         }
         if (hwCpuFreq != null) {
             hwCpuFreq.setText(cpuKHz > 0 ? String.format(Locale.US, "%.0fMHz", cpuKHz / 1000) : "--");

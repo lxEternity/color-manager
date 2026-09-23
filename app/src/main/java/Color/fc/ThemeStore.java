@@ -267,6 +267,9 @@ public class ThemeStore {
         android.graphics.drawable.Drawable bg = v.getBackground();
         if (bg instanceof android.graphics.drawable.GradientDrawable) {
             bg.setAlpha(alpha);
+        } else if (bg instanceof android.graphics.drawable.LayerDrawable) {
+            // layer-list（如渐变保存按钮/胶囊）整体半透明，修复保存按钮不同步玻璃化
+            bg.mutate().setAlpha(alpha);
         }
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;

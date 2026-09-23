@@ -3,9 +3,9 @@
     <!-- 白底浅色系（背景保持白色） -->
     <color name="bg">#F5F7FC</color>
     <color name="bgCard">#FFFFFF</color>
-    <color name="bgCardStroke">#E4EBF4</color>
+    <color name="bgCardStroke">#C9D8EA</color>
     <color name="bgInput">#F7F9FD</color>
-    <color name="bgInputStroke">#DCE4F0</color>
+    <color name="bgInputStroke">#C4D2E6</color>
     <color name="textPrimary">#1B2540</color>
     <color name="textSecondary">#5D6B85</color>
     <color name="textDim">#9AA7BD</color>

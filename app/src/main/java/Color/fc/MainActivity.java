@@ -150,7 +150,8 @@ public class MainActivity extends Activity {
                 new Thread(() -> {
                     PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
                     if (st != null) {
-                        // 历史采样（内部 1 分钟节流）
+                        // 历史采样（内部 1 分钟节流），功耗按主页电芯模式修正后记录
+                        st.watts = PowerMonitor.applyCellMode(st, cellMode);
                         PowerHistoryManager.record(MainActivity.this, st);
                         // 每 15 秒刷新一次记录摘要
                         if (++powerTick % 15 == 0) refreshHistorySummary();

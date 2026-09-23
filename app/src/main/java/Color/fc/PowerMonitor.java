@@ -42,6 +42,17 @@ public class PowerMonitor {
         return st;
     }
 
+    /**
+     * 按主页电芯模式修正功耗（显示与记录统一使用）：
+     * 强制双电芯且节点只报单芯电流时 电流×2 重算，其余直接取节点功率
+     */
+    public static double applyCellMode(BatteryStat st, int cellMode) {
+        int cells = cellMode == 0 ? st.cells : cellMode;
+        boolean up = cells >= 2 && st.cells < 2;
+        double amps = up ? st.amps * 2 : st.amps;
+        return up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
+    }
+
     private static class Node {
         final String name;
         final double v;   // 已校准 V

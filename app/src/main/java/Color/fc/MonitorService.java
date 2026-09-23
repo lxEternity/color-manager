@@ -594,13 +594,11 @@ public class MonitorService extends Service {
                     } catch (Exception ignored) {
                     }
                     if (st != null) {
-                        // 与主页一致的电芯模式修正
-                        int cells = cellMode == 0 ? st.cells : cellMode;
-                        boolean up = cells >= 2 && st.cells < 2;
-                        double amps = up ? st.amps * 2 : st.amps;
-                        cW = up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
+                        // 与主页一致的电芯模式修正（显示与记录同步）
+                        cW = PowerMonitor.applyCellMode(st, cellMode);
                         cBatT = st.tempC;
-                        // 功耗历史记录（内部节流）
+                        // 功耗历史记录（内部节流），按修正后功耗写入
+                        st.watts = cW;
                         PowerHistoryManager.record(this, st);
                     } else {
                         cW = -1;
@@ -648,7 +646,11 @@ public class MonitorService extends Service {
             new Thread(() -> {
                 try {
                     PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
-                    if (st != null) PowerHistoryManager.record(this, st);
+                    if (st != null) {
+                        // 记录功耗按主页电芯模式修正（与显示一致）
+                        st.watts = PowerMonitor.applyCellMode(st, cellMode);
+                        PowerHistoryManager.record(this, st);
+                    }
                 } catch (Exception ignored) {
                 }
                 ui.postDelayed(this::historyLoop, 10_000);

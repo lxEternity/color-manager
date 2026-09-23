@@ -25,7 +25,8 @@ public class GovernorConfig {
     private static final Pattern P_STEP = Pattern.compile("echo \"(\\S+)\" > \\S*conservative/freq_step");
     private static final Pattern P_RATE = Pattern.compile("echo \"(\\S+)\" > \\S*conservative/sampling_rate");
     private static final Pattern P_LOADS = Pattern.compile("echo \"(\\S+)\" > \\S*scx/target_loads");
-    private static final Pattern P_ONLINE = Pattern.compile("echo \"([01])\" > \\S*cpu(\\d+)/online");
+    /** 引号可选：兼容生成的无引号与外部脚本的有引号两种写法 */
+    private static final Pattern P_ONLINE = Pattern.compile("echo \\\"?([01])\\\"? > \\S*cpu(\\d+)/online");
 
     /** 解析调速器脚本，内容为空返回 null */
     public static Gov parse(String content, boolean conservative) {

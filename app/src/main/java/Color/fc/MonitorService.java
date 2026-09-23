@@ -49,7 +49,8 @@ import java.util.Locale;
  * 迷你悬浮窗监视器（菜单 + 独立窗架构）：
  * - ≡ 胶囊：点击展开悬浮窗菜单；菜单内逐项开/关独立悬浮窗（位置独立、可拖动、✕ 单独关闭）
  * - 独立窗：功耗（仅实时功耗）/ CPU / GPU / 温度 / 帧率（含 ● 录制，最短 3 秒）
- * - 功耗 500ms 快速刷新（与主页电芯模式同步），GPU/温度 2s 慢速扫描
+ * - 菜单内 "位置锁定"：锁定后窗口不可拖动且隐藏菜单胶囊，点击任意窗口唤出菜单解锁
+ * - 功耗 500ms 快速刷新（与主页电芯模式同步），GPU/温度 2s 慢速扫描；功耗记录后台常采
  * - 菜单底部 "✕ 关闭监视器" 可停止服务；通知栏也可关闭
  */
 public class MonitorService extends Service {
@@ -68,9 +69,11 @@ public class MonitorService extends Service {
     private TextView pill;
     private LinearLayout menu;
     private WindowManager.LayoutParams pillLp, menuLp;
-    private TextView menuClose, menuQuit;
+    private TextView menuClose, menuQuit, menuLock;
     private final TextView[] menuRows = new TextView[5];
     private boolean menuOpen = false;
+    /** 位置锁定：锁定后窗口不可拖动且隐藏菜单胶囊，点击任意窗口唤出菜单 */
+    private boolean locked = false;
 
     // ===== 5 个独立悬浮窗: 0功耗 1CPU 2GPU 3温度 4帧率 =====
     private static final String[] WIN_KEYS = {"win_power", "win_cpu", "win_gpu", "win_temp", "win_fps"};
@@ -146,12 +149,14 @@ public class MonitorService extends Service {
         SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
         cellMode = p.getInt("cellMode", 0);
         for (int i = 0; i < winOpen.length; i++) winOpen[i] = p.getBoolean(WIN_KEYS[i], i == 0);
+        locked = p.getBoolean("win_locked", false);
         startForeground(1, notif());
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         buildPill();
         for (int i = 0; i < winOpen.length; i++) {
             if (winOpen[i]) addWindow(i);
         }
+        if (locked && anyWindowOpen()) hidePill();   // 锁定状态启动时隐藏菜单胶囊
         ui.postDelayed(this::fastLoop, 200);
         ui.postDelayed(this::slowLoop, 800);
         ui.postDelayed(this::historyLoop, 5000);
@@ -184,20 +189,22 @@ public class MonitorService extends Service {
     // ==================== 通用拖动+点击触摸 ====================
 
     private interface Tap {
-        void tap(MotionEvent e);
+        void tap(View v, MotionEvent e);
     }
 
-    /** 拖动 + 单击（可选拖动回调）；始终读取视图当前布局参数，避免参数错位 */
+    /** 拖动 + 单击（可选拖动回调）；lockable 的视图在锁定状态下不响应拖动但仍可点击 */
     private class DragTouch implements View.OnTouchListener {
         private final Tap tap;
         private final Runnable onMoved;
+        private final boolean lockable;
         private float sx, sy, dx, dy;
         private long downAt;
         private boolean moved = false;
 
-        DragTouch(Tap tap, Runnable onMoved) {
+        DragTouch(Tap tap, Runnable onMoved, boolean lockable) {
             this.tap = tap;
             this.onMoved = onMoved;
+            this.lockable = lockable;
         }
 
         @Override
@@ -217,6 +224,7 @@ public class MonitorService extends Service {
                         if (!moved && onMoved != null) onMoved.run();
                         moved = true;
                     }
+                    if (lockable && locked) return true;   // 锁定：位置不动
                     lp.x = (int) (e.getRawX() - dx);
                     lp.y = (int) (e.getRawY() - dy);
                     try {
@@ -225,7 +233,7 @@ public class MonitorService extends Service {
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
-                    if (!moved && System.currentTimeMillis() - downAt < 350 && tap != null) tap.tap(e);
+                    if (!moved && System.currentTimeMillis() - downAt < 350 && tap != null) tap.tap(v, e);
                     return true;
             }
             return false;
@@ -251,22 +259,23 @@ public class MonitorService extends Service {
         pillLp = overlayLp();
         pillLp.x = dp(12);
         pillLp.y = dp(120);
-        pill.setOnTouchListener(new DragTouch(e -> toggleMenu(), this::closeMenu));
+        pill.setOnTouchListener(new DragTouch((v, e) -> toggleMenu(), this::closeMenu, true));
         wm.addView(pill, pillLp);
     }
 
     private void toggleMenu() {
         if (menuOpen) closeMenu();
-        else openMenu();
+        else openMenuAt(pill);
     }
 
-    private void openMenu() {
+    /** 在锚点视图下方弹出菜单（锁定状态下由窗口点击唤起） */
+    private void openMenuAt(View anchor) {
         if (menuOpen) return;
         if (menu == null) buildMenu();
-        WindowManager.LayoutParams plp = (WindowManager.LayoutParams) pill.getLayoutParams();
+        WindowManager.LayoutParams alp = (WindowManager.LayoutParams) anchor.getLayoutParams();
         menuLp = overlayLp();
-        menuLp.x = plp.x;
-        menuLp.y = plp.y + dp(44);
+        menuLp.x = alp.x;
+        menuLp.y = alp.y + dp(44);
         wm.addView(menu, menuLp);
         menuOpen = true;
         updateMenu();
@@ -317,6 +326,15 @@ public class MonitorService extends Service {
             menu.addView(menuRows[i], p);
         }
 
+        menuLock = new TextView(this);
+        menuLock.setTextSize(11);
+        menuLock.setTypeface(Typeface.MONOSPACE);
+        LinearLayout.LayoutParams kl = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        kl.topMargin = dp(4);
+        menu.addView(menuLock, kl);
+
         menuQuit = new TextView(this);
         menuQuit.setTextColor(0xFFEF4444);
         menuQuit.setTextSize(10);
@@ -327,7 +345,7 @@ public class MonitorService extends Service {
         qp.topMargin = dp(9);
         menu.addView(menuQuit, qp);
 
-        menu.setOnTouchListener(new DragTouch(e -> {
+        menu.setOnTouchListener(new DragTouch((v, e) -> {
             if (hit(menuClose, e)) {
                 closeMenu();
                 return;
@@ -336,13 +354,17 @@ public class MonitorService extends Service {
                 stopSelf();
                 return;
             }
+            if (hit(menuLock, e)) {
+                toggleLock();
+                return;
+            }
             for (int i = 0; i < menuRows.length; i++) {
                 if (hit(menuRows[i], e)) {
                     toggleWindow(i);
                     return;
                 }
             }
-        }, null));
+        }, null, false));
     }
 
     /** 菜单行状态刷新：已开启 淡蓝色 / 未开启 暗红色 */
@@ -351,6 +373,44 @@ public class MonitorService extends Service {
         for (int i = 0; i < menuRows.length; i++) {
             menuRows[i].setText((winOpen[i] ? "✓ " : "✗ ") + WIN_LABELS[i]);
             menuRows[i].setTextColor(winOpen[i] ? 0xFF7DD3FC : 0xFFB91C1C);
+        }
+        menuLock.setText(locked ? "✓ 位置已锁定" : "✗ 位置未锁定");
+        menuLock.setTextColor(locked ? 0xFF7DD3FC : 0xFFB91C1C);
+    }
+
+    /** 锁定/解锁位置：锁定后窗口不可拖动并隐藏菜单胶囊，点击任意窗口唤出菜单 */
+    private void toggleLock() {
+        locked = !locked;
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit().putBoolean("win_locked", locked).apply();
+        if (locked) {
+            closeMenu();
+            if (anyWindowOpen()) hidePill();
+            Toast.makeText(this, "已锁定 · 点击任意悬浮窗唤出菜单", Toast.LENGTH_SHORT).show();
+        } else {
+            showPill();
+            updateMenu();
+            Toast.makeText(this, "已解锁，可自由拖动", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean anyWindowOpen() {
+        for (boolean b : winOpen) if (b) return true;
+        return false;
+    }
+
+    private void hidePill() {
+        if (pill == null) return;
+        try {
+            wm.removeView(pill);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void showPill() {
+        if (pill == null) return;
+        try {
+            wm.addView(pill, pill.getLayoutParams());
+        } catch (Exception ignored) {
         }
     }
 
@@ -405,6 +465,8 @@ public class MonitorService extends Service {
         winOpen[i] = false;
         saveWins();
         updateMenu();
+        // 锁定时关掉全部窗口则恢复菜单胶囊，避免无法唤出菜单
+        if (locked && !anyWindowOpen()) showPill();
     }
 
     private void addWindow(int i) {
@@ -442,13 +504,18 @@ public class MonitorService extends Service {
         winLp[i].x = dp(16) + i * dp(10);
         winLp[i].y = dp(170) + i * dp(40);
         final int idx = i;
-        box.setOnTouchListener(new DragTouch(e -> {
+        box.setOnTouchListener(new DragTouch((v, e) -> {
             if (hit(close, e)) {
                 closeWindow(idx);
                 return;
             }
-            if (idx == 4 && hit(tvRec, e)) toggleRec();
-        }, null));
+            if (idx == 4 && hit(tvRec, e)) {
+                toggleRec();
+                return;
+            }
+            // 锁定状态下点击窗口主体唤出菜单（可解锁/开关其他窗）
+            if (locked) openMenuAt(v);
+        }, null, true));
         winBox[i] = box;
         wm.addView(box, winLp[i]);
         winText[i].setText(WIN_LABELS[i] + " --");
@@ -1067,7 +1134,7 @@ public class MonitorService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, "monitor")
                 .setContentTitle("迷你监视器运行中")
-                .setContentText("≡ 打开悬浮窗菜单 · 各窗 ✕ 独立关闭")
+                .setContentText("≡ 菜单 · 锁定后点击任意悬浮窗唤出菜单")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .addAction(new Notification.Action.Builder(null, "关闭", close).build())
                 .setOngoing(true)

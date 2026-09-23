@@ -95,6 +95,29 @@ public class RootShell {
         }
     }
 
+    /** 批量写入多个 root 目标文件（一次 su 调用完成全部 cp+chmod，全部成功返回 true） */
+    public static boolean writeFiles(File cacheDir, String[] contents, String[] targets) {
+        File[] tmps = new File[contents.length];
+        try {
+            StringBuilder cmd = new StringBuilder();
+            for (int i = 0; i < contents.length; i++) {
+                tmps[i] = new File(cacheDir, "colorfc_" + System.currentTimeMillis() + "_" + i + ".sh");
+                Writer w = new OutputStreamWriter(new FileOutputStream(tmps[i]), "UTF-8");
+                w.write(contents[i]);
+                w.flush();
+                w.close();
+                cmd.append("cp '").append(tmps[i].getAbsolutePath()).append("' '").append(targets[i])
+                        .append("' && chmod 755 '").append(targets[i]).append("' && ");
+            }
+            cmd.append("true");
+            return exec(cmd.toString()).ok();
+        } catch (Exception e) {
+            return false;
+        } finally {
+            for (File t : tmps) if (t != null) t.delete();
+        }
+    }
+
     /**
      * 读取系统属性（多级回退，任一可用即返回）：
      * 1. 反射 SystemProperties（无需进程，最可靠）

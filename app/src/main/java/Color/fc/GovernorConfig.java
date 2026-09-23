@@ -153,7 +153,7 @@ public class GovernorConfig {
         return sb.toString();
     }
 
-    /** 生成 scx3.sh（全部 CPU0-7，仅切换调速器） */
+    /** 生成 scx3.sh（全部 CPU0-7，切换调速器 + 负载。负载行无条件写入，非 scx 时节点不存在则跳过该行） */
     public static String generateScx3(Gov g) {
         StringBuilder sb = new StringBuilder();
         appendCoreOn(sb, g.cores);
@@ -165,6 +165,10 @@ public class GovernorConfig {
         for (int i = 0; i < 8; i++) {
             String base = "/sys/devices/system/cpu/cpu" + i + "/cpufreq/";
             sb.append("echo \"").append(g.governor).append("\" > ").append(base).append("scaling_governor\n");
+        }
+        for (int i = 0; i < 8; i++) {
+            String base = "/sys/devices/system/cpu/cpu" + i + "/cpufreq/";
+            sb.append("echo \"").append(g.targetLoads).append("\" > ").append(base).append("scx/target_loads\n");
         }
         appendCoreOff(sb, g.cores);
         return sb.toString();

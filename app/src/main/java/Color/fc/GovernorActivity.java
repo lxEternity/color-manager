@@ -54,13 +54,13 @@ public class GovernorActivity extends Activity {
             {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate"},
             {"governor", "targetLoads"},
             {"governor", "targetLoads"},
-            {"governor"}
+            {"governor", "targetLoads"}
     };
     private static final String[][] DEFAULTS = {
             {"conservative", "98", "93", "1", "14000"},
             {"scx", "90"},
             {"scx", "70"},
-            {"scx"}
+            {"scx", "70"}
     };
     /** 模块可能用于恢复 A/ 脚本的镜像位置（类似 conf 模板机制），保存时三重写入 */
     private static final String[] MIRROR_DIRS = {
@@ -367,39 +367,36 @@ public class GovernorActivity extends Activity {
                     GovernorConfig.generateScx(govs[2]),
                     GovernorConfig.generateScx3(govs[3])
             };
-            int ok = 0;
-            StringBuilder err = new StringBuilder();
-            for (int i = 0; i < 4; i++) {
-                RootShell.Result r = RootShell.writeFile(getCacheDir(), contents[i],
-                        RootShell.GOV_DIR + "/" + FILES[i]);
-                if (r.ok()) ok++;
-                else err.append(FILES[i]).append(": ").append(r.err).append('\n');
-            }
-            // 三重写入：同步覆盖模块可能用于恢复的镜像位置（best-effort，失败不影响保存结果）
-            for (String dir : MIRROR_DIRS) {
-                RootShell.exec("mkdir -p '" + dir + "'");
-                for (int i = 0; i < 4; i++) {
-                    try {
-                        RootShell.writeFile(getCacheDir(), contents[i], dir + "/" + FILES[i]);
-                    } catch (Exception ignored) {
+            String[] targets = new String[4];
+            for (int i = 0; i < 4; i++) targets[i] = RootShell.GOV_DIR + "/" + FILES[i];
+            // 一次 su 完成 4 个主文件写入
+            boolean ok = RootShell.writeFiles(getCacheDir(), contents, targets);
+            // 一次 su 完成镜像位置同步（best-effort，失败不影响保存结果）
+            if (ok) {
+                StringBuilder mc = new StringBuilder();
+                for (String dir : MIRROR_DIRS) {
+                    mc.append("mkdir -p '").append(dir).append("'; ");
+                    for (int i = 0; i < 4; i++) {
+                        mc.append("cp '").append(targets[i]).append("' '")
+                                .append(dir).append("/").append(FILES[i]).append("'; ");
                     }
                 }
+                RootShell.exec(mc.toString());
             }
-            // 写后 1.5 秒回读校验，发现被外部回滚立即提示（而不是下次进页面静默回显默认值）
+            // 写后回读校验，发现被外部回滚立即提示（而不是下次进页面静默回显默认值）
             String verify = "";
-            if (ok == 4) {
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
+            if (ok) {
+                try { Thread.sleep(800); } catch (InterruptedException ignored) { }
                 int bad = verifySaved();
                 if (bad > 0) verify = " · " + bad + " 个文件回读不符(被外部修改?)";
             }
-            final int okF = ok;
-            final String errF = err.toString();
+            final boolean okF = ok;
             final String verifyF = verify;
             runOnUiThread(() -> {
-                if (okF == 4) {
+                if (okF) {
                     Toast.makeText(this, "保存成功" + verifyF, Toast.LENGTH_SHORT).show();
                 } else {
-                    Toast.makeText(this, "保存 " + okF + "/4，失败：" + errF, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "保存失败：脚本写入不成功，请重试", Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
@@ -420,7 +417,7 @@ public class GovernorActivity extends Activity {
                     o.put("down", g.downThreshold);
                     o.put("step", g.freqStep);
                     o.put("rate", g.samplingRate);
-                } else if (i < 3) {
+                } else {
                     o.put("loads", g.targetLoads);
                 }
                 StringBuilder cs = new StringBuilder();
@@ -450,7 +447,7 @@ public class GovernorActivity extends Activity {
                     if (o.has("down")) g.downThreshold = o.getString("down");
                     if (o.has("step")) g.freqStep = o.getString("step");
                     if (o.has("rate")) g.samplingRate = o.getString("rate");
-                } else if (i < 3) {
+                } else {
                     if (o.has("loads")) g.targetLoads = o.getString("loads");
                 }
                 String cs = o.optString("cores", "");
@@ -479,7 +476,7 @@ public class GovernorActivity extends Activity {
             o.samplingRate = pick(script == null ? null : script.samplingRate,
                     mirror == null ? null : mirror.samplingRate);
         }
-        if (idx == 1 || idx == 2) {
+        if (idx > 0) {
             o.targetLoads = pick(script == null ? null : script.targetLoads,
                     mirror == null ? null : mirror.targetLoads);
         }
@@ -493,12 +490,27 @@ public class GovernorActivity extends Activity {
         return a != null && !a.isEmpty() ? a : b;
     }
 
-    /** 回读 4 个脚本并与内存配置比对，返回不一致的文件数（null=读取失败也算不一致） */
+    /** 一次 su 批量回读 4 个脚本并比对，返回不一致的文件数 */
     private int verifySaved() {
+        StringBuilder cmd = new StringBuilder();
+        for (int i = 0; i < 4; i++) {
+            cmd.append("echo '==CF=").append(FILES[i]).append("='; cat '")
+                    .append(RootShell.GOV_DIR).append("/").append(FILES[i]).append("'; ");
+        }
+        RootShell.Result r = RootShell.exec(cmd.toString());
+        if (!r.ok()) return 4;
         int bad = 0;
         for (int i = 0; i < 4; i++) {
-            String back = RootShell.readFile(RootShell.GOV_DIR + "/" + FILES[i]);
-            GovernorConfig.Gov b = GovernorConfig.parse(back, i == 0);
+            String marker = "==CF=" + FILES[i] + "=";
+            int s = r.out.indexOf(marker);
+            if (s < 0) {
+                bad++;
+                continue;
+            }
+            int from = s + marker.length();
+            int e = r.out.indexOf("==CF=", from);
+            String content = e < 0 ? r.out.substring(from) : r.out.substring(from, e);
+            GovernorConfig.Gov b = GovernorConfig.parse(content, i == 0);
             if (b == null || !sameGov(b, govs[i], i)) bad++;
         }
         return bad;
@@ -513,7 +525,7 @@ public class GovernorActivity extends Activity {
             if (!eqv(a.freqStep, b.freqStep)) return false;
             if (!eqv(a.samplingRate, b.samplingRate)) return false;
         }
-        if (idx == 1 || idx == 2) {
+        if (idx > 0) {
             if (!eqv(a.targetLoads, b.targetLoads)) return false;
         }
         return java.util.Arrays.equals(a.cores, b.cores);
@@ -542,7 +554,7 @@ public class GovernorActivity extends Activity {
                 block.put("gov.0.down", g.downThreshold);
                 block.put("gov.0.step", g.freqStep);
                 block.put("gov.0.rate", g.samplingRate);
-            } else if (i < 3) {
+            } else {
                 block.put("gov." + i + ".loads", g.targetLoads);
             }
             cs.setLength(0);
@@ -610,7 +622,7 @@ public class GovernorActivity extends Activity {
                     g.samplingRate = v;
                     n++;
                 }
-            } else if (i < 3) {
+            } else {
                 if ((v = map.get("gov." + i + ".loads")) != null && !v.isEmpty()) {
                     g.targetLoads = v;
                     n++;

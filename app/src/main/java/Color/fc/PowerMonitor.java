@@ -53,11 +53,19 @@ public class PowerMonitor {
         }
     }
 
-    /** fuel gauge / 计量芯片节点，与主 battery 是同一电芯，不能算独立电芯 */
-    private static boolean isGaugeNode(String name) {
+    /** 辅助/计量/电荷泵节点：与主 battery 是同一电芯或非电池侧数据，不能算独立电芯 */
+    private static boolean isAuxNode(String name) {
         String n = name.toLowerCase();
         return n.contains("bms") || n.contains("fg") || n.contains("gauge")
-                || n.contains("charger") || n.contains("fgauge");
+                || n.contains("charger") || n.contains("charge_pump")
+                || n.contains("chargepump") || n.contains("pump")
+                || n.contains("parallel") || n.contains("usb") || n.contains("dc");
+    }
+
+    /** 从节点路径取节点名 */
+    private static String nodeName(String path) {
+        if (path == null) return "";
+        return path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
     }
 
     private static BatteryStat fromSysfs() {
@@ -75,15 +83,36 @@ public class PowerMonitor {
 
             BatteryStat st = new BatteryStat();
 
+            // ===== 主节点优先：名字为 "battery" 的节点是系统主电池，
+            // 电压/电流/功率全部取自它，charge_pump/bms/fg 等辅助节点一律不参与 =====
+            String[] main = null;
+            for (String[] p : rows) {
+                if ("battery".equals(nodeName(p[0]))) { main = p; break; }
+            }
+            if (main == null) {
+                for (String[] p : rows) {
+                    if (!isAuxNode(nodeName(p[0]))) { main = p; break; }
+                }
+            }
+            if (main != null) {
+                st.volts = calibV(toD(main[1]));
+                st.amps = calibI(toD(main[2]));
+                double pn = toD(main[3]);
+                st.cells = st.volts > 5.5 ? 2 : 1;   // 总压超单体上限 → 串联双电芯
+                st.watts = pn != 0 ? calibW(pn) : st.volts * st.amps;
+                fillBasic(st, main);
+                if (st.volts == 0 && st.watts == 0 && st.level < 0 && st.tempC == 0) return null;
+                return st;
+            }
+
+            // ===== 回退：无主节点时的启发式（排除辅助节点） =====
             List<Node> live = new ArrayList<>();
             double pn = 0;
             for (String[] p : rows) {
                 double v = calibV(toD(p[1]));
                 double i = calibI(toD(p[2]));
                 if (v > 0 || i != 0) {
-                    String path = p[0] == null ? "" : p[0];
-                    String name = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
-                    live.add(new Node(name, v, i));
+                    live.add(new Node(nodeName(p[0]), v, i));
                 }
             }
             for (String[] p : rows) {
@@ -97,7 +126,7 @@ public class PowerMonitor {
             // ===== 电芯判定 =====
             boolean series = maxV > 5.5;                    // 电压超单体上限 → 串联双电芯
             int indep = 0;
-            for (Node n : live) if (!isGaugeNode(n.name)) indep++;
+            for (Node n : live) if (!isAuxNode(n.name)) indep++;
             boolean multi = !series && indep >= 2;          // 两个独立电池节点 → 双电芯
             st.cells = (series || multi) ? 2 : 1;
 
@@ -198,12 +227,12 @@ public class PowerMonitor {
         }
     }
 
-    /** 电压校准 → V（µV / mV / V） */
+    /** 电压校准 → V（µV / mV / V）。电池电压合理域 2.5V~9.2V（含串联总压） */
     private static double calibV(double v) {
         double a = Math.abs(v);
-        if (a > 1000000) return v / 1e6;
-        if (a > 10000) return v / 1000;
-        return v;
+        if (a > 1000000) return v / 1e6;          // µV（2.5M~9.2M）
+        if (a > 2500) return v / 1000;             // mV（2800~9200），单芯 mV 也覆盖
+        return v;                                   // 已是 V
     }
 
     /** 电流校准 → A（µA / mA） */
@@ -214,11 +243,11 @@ public class PowerMonitor {
         return i;
     }
 
-    /** 功率校准 → W（µW / mW） */
+    /** 功率校准 → W（µW / mW / W）。W 直接报可到 240（快充峰值）不误除 */
     private static double calibW(double w) {
         double a = Math.abs(w);
         if (a > 100000) return w / 1e6;
-        if (a > 100) return w / 1000;
+        if (a > 500) return w / 1000;
         return w;
     }
 }

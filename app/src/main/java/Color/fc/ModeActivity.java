@@ -108,7 +108,8 @@ public class ModeActivity extends Activity {
 
     private void renderRules() {
         ruleBox.removeAllViews();
-        // moren 不再显示卡片(与全局模式切换功能重复), conf 中原值保留
+        // 全局默认行（moren）：紧凑单行，点击改模式
+        ruleBox.addView(morenRow());
         for (Map.Entry<String, String> e : rules.entrySet()) {
             ruleBox.addView(ruleRow(e.getKey(), appName(e.getKey()), e.getValue(), v ->
                     pickMode(mode -> {
@@ -116,6 +117,43 @@ public class ModeActivity extends Activity {
                         renderRules();
                     })));
         }
+    }
+
+    /** 全局默认（moren）行：未匹配应用时使用的模式 */
+    private View morenRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LayoutParams lp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(6);
+        row.setLayoutParams(lp);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFFE8F4F8);
+        bg.setCornerRadius(dp(10));
+        row.setBackground(bg);
+        row.setPadding(dp(12), dp(6), dp(12), dp(6));
+        row.setOnClickListener(v -> pickMode(mode -> {
+            moren = mode;
+            renderRules();
+            toast("全局默认已设为 " + modeName(mode) + "\n记得保存策略");
+        }));
+
+        TextView label = new TextView(this);
+        label.setText("全局默认");
+        label.setTextColor(0xFF1B2540);
+        label.setTextSize(13);
+        label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        LayoutParams llp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
+        label.setLayoutParams(llp);
+        row.addView(label);
+
+        TextView modeV = new TextView(this);
+        modeV.setText(modeName(moren));
+        modeV.setTextColor(0xFF0096C8);
+        modeV.setTextSize(13);
+        modeV.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        row.addView(modeV);
+        return row;
     }
 
     /** 一条规则行：点击整行改模式，右侧 × 删除 */

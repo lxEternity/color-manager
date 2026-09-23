@@ -137,22 +137,27 @@ public class ThemeStore {
     public static void invalidate() {
         rendered = null;
         renderKey = null;
+        cachedTopBar = cachedBotBar = 0;
     }
 
     private static Bitmap rendered;
     private static String renderKey;
+    /** 背景图上下边缘采样色，用于系统栏无缝衔接 */
+    private static int cachedTopBar, cachedBotBar;
 
     /** 应用窗口背景 + 状态栏/导航栏，实现全局沉浸。每个页面 onResume 时调用 */
     public static void applyBackground(Activity a) {
         Window w = a.getWindow();
         boolean dark = dark(a);
         boolean img = imageBg(a) && bgFile(a).exists();
-        boolean transp = transparentBg(a);
+        // 两种背景模式互斥：自定义图优先，同时开启时忽略透壁纸
+        boolean transp = transparentBg(a) && !img;
         boolean immersive = img || transp;
 
         if (img) {
+            // 背景图渲染时已按透明度叠加在 App 底色上，窗口保持全实心，
+            // 不再向窗口设置透明度——半透明窗口会露出后面的桌面
             BitmapDrawable d = new BitmapDrawable(a.getResources(), renderBg(a, dark));
-            d.setAlpha(Math.round(bgAlpha(a) * 2.55f));
             w.setBackgroundDrawable(d);
             w.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         } else if (transp) {
@@ -164,17 +169,30 @@ public class ThemeStore {
             w.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
         }
 
-        if (immersive) {
+        if (transp) {
+            // 透壁纸：系统栏透明 + 壁纸标志，壁纸顶到屏幕边缘
             w.setStatusBarColor(Color.TRANSPARENT);
             w.setNavigationBarColor(Color.TRANSPARENT);
+            setLightStatusIcons(w, !dark);
+        } else if (img) {
+            // 背景图：系统栏颜色从图片上下边缘采样，视觉上图片延伸进系统栏
+            w.setStatusBarColor(cachedTopBar != 0 ? cachedTopBar : (dark ? 0xFF0D1220 : 0xFFF5F7FC));
+            w.setNavigationBarColor(cachedBotBar != 0 ? cachedBotBar : (dark ? 0xFF0D1220 : 0xFFF5F7FC));
+            setLightStatusIcons(w, cachedTopBar != 0 && isLightColor(cachedTopBar));
         } else {
             int bar = dark ? 0xFF0D1220 : 0xFFF5F7FC;
             w.setStatusBarColor(bar);
             w.setNavigationBarColor(bar);
+            setLightStatusIcons(w, !dark);
         }
-        setLightStatusIcons(w, !dark);
         // 沉浸模式：全局控件玻璃化——卡片/输入框等圆角背景半透明透出壁纸/背景图
         walkGlass(w.getDecorView(), immersive ? Math.round(glassAlpha(a) * 2.55f) : 255);
+    }
+
+    /** 亮度判断：系统栏取浅色还是深色图标 */
+    private static boolean isLightColor(int color) {
+        int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 128;
     }
 
     /** 递归遍历控件树，把 GradientDrawable（shape 背景）调成玻璃透明度 */
@@ -216,7 +234,8 @@ public class ThemeStore {
                 .getDefaultDisplay().getRealSize(size);
         int sw = Math.max(1, size.x), sh = Math.max(1, size.y);
         String key = f.getAbsolutePath() + "|" + f.lastModified() + "|" + sw + "x" + sh
-                + "|" + bgScale(c) + "|" + bgOffX(c) + "|" + bgOffY(c) + "|" + dark;
+                + "|" + bgScale(c) + "|" + bgOffX(c) + "|" + bgOffY(c) + "|" + bgAlpha(c)
+                + "|" + dark;
         if (rendered != null && key.equals(renderKey)) return rendered;
 
         // 先读尺寸，按 2560 上限抽样解码，控制内存
@@ -245,9 +264,23 @@ public class ThemeStore {
 
         Bitmap out = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(out);
-        if (dark) cv.drawColor(0x59000000);   // 夜间模式叠加暗色蒙层保证文字可读
+        // 先铺 App 底色：图片调低透明度时是与底色混合，
+        // 而不是把窗口变透明（半透明窗口会露出后面的桌面）
+        cv.drawColor(dark ? 0xFF0D1220 : 0xFFF5F7FC);
+        // 图片透明度画进位图里，窗口保持全实心
         Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+        p.setAlpha(Math.round(bgAlpha(c) * 2.55f));
         cv.drawBitmap(src, m, p);
+        if (dark) cv.drawColor(0x59000000);   // 夜间模式叠加暗色蒙层保证文字可读
+        src.recycle();
+
+        // 采样图片上下边缘色，系统栏用同色衔接，视觉上背景延伸进系统栏
+        try {
+            cachedTopBar = out.getPixel(sw / 2, Math.max(0, (int) (sh * 0.02f)));
+            cachedBotBar = out.getPixel(sw / 2, Math.min(sh - 1, (int) (sh * 0.98f)));
+        } catch (Exception e) {
+            cachedTopBar = cachedBotBar = 0;
+        }
 
         rendered = out;
         renderKey = key;

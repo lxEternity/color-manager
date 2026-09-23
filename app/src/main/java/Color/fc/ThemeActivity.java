@@ -113,6 +113,11 @@ public class ThemeActivity extends ThemedActivity {
         rowT.addView(swTransparent);
         card2.addView(rowT);
         swTransparent.setOnCheckedChangeListener((b, on) -> {
+            if (on && swImage != null) {
+                // 与自定义背景互斥：开透壁纸自动关背景图
+                ThemeStore.setImageBg(this, false);
+                swImage.setChecked(false);
+            }
             ThemeStore.setTransparent(this, on);
             ThemeStore.applyBackground(this);
         });
@@ -136,6 +141,11 @@ public class ThemeActivity extends ThemedActivity {
         rowI.addView(swImage);
         card2.addView(rowI);
         swImage.setOnCheckedChangeListener((b, on) -> {
+            if (on && swTransparent != null) {
+                // 与全透明背景互斥：开背景图自动关透壁纸
+                ThemeStore.setTransparent(this, false);
+                swTransparent.setChecked(false);
+            }
             ThemeStore.setImageBg(this, on);
             ThemeStore.applyBackground(this);
             refreshPreview();
@@ -205,7 +215,7 @@ public class ThemeActivity extends ThemedActivity {
 
         // 透明度
         card2.addView(divider());
-        LinearLayout rowA = row("背景透明度", "数值越小图片越淡");
+        LinearLayout rowA = row("背景透明度", "越小图片越淡，与 App 底色混合，不透出桌面");
         alphaValue = val();
         rowA.addView(alphaValue);
         card2.addView(rowA);
@@ -317,8 +327,13 @@ public class ThemeActivity extends ThemedActivity {
         boolean dark = ThemeStore.dark(this);
         styleChip(chipDay, !dark);
         styleChip(chipNight, dark);
+        // 修复历史"两个背景同时开"的冲突状态：背景图优先，自动关透壁纸
+        boolean imgOn = ThemeStore.imageBg(this) && ThemeStore.bgFile(this).exists();
+        if (imgOn && ThemeStore.transparentBg(this)) {
+            ThemeStore.setTransparent(this, false);
+        }
         swTransparent.setChecked(ThemeStore.transparentBg(this));
-        swImage.setChecked(ThemeStore.imageBg(this) && ThemeStore.bgFile(this).exists());
+        swImage.setChecked(imgOn);
         alphaValue.setText(ThemeStore.bgAlpha(this) + "%");
         scaleValue.setText(ThemeStore.bgScale(this) + "%");
         offXValue.setText(ThemeStore.bgOffX(this) + "%");

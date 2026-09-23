@@ -9,14 +9,17 @@ import java.util.regex.Pattern;
 public class GovernorConfig {
 
     public static class Gov {
-        public String governor = "conservative"; // 调速器名称
-        public String upThreshold = "98";       // 升频阈值 %
-        public String downThreshold = "93";     // 降频阈值 %
-        public String freqStep = "1";           // 调频步进 %
-        public String samplingRate = "14000";   // 采样周期 µs
-        public String targetLoads = "90";       // scx 目标负载 %
-        /** 启用核心（索引0-7，true=online）。旧脚本无 online 行时全启用 */
+        /** 以下字段未在脚本中解析到时为 null，由调用方按 上次保存镜像/默认值 兜底 */
+        public String governor = null;       // 调速器名称
+        public String upThreshold = null;   // 升频阈值 %
+        public String downThreshold = null; // 降频阈值 %
+        public String freqStep = null;      // 调频步进 %
+        public String samplingRate = null;  // 采样周期 µs
+        public String targetLoads = null;   // scx 目标负载 %
+        /** 启用核心（索引0-7，true=online）。脚本无 online 行时保持全启用 */
         public final boolean[] cores = {true, true, true, true, true, true, true, true};
+        /** 脚本是否含 online 行（无则 cores 视为未指定） */
+        public boolean hasOnline = false;
     }
 
     /** 引号可选 + 兼容 cpu/policy 两种路径写法，避免生成的与外部脚本格式不一致导致解析失败 */
@@ -29,35 +32,57 @@ public class GovernorConfig {
     /** 引号可选：兼容生成的无引号与外部脚本的有引号两种写法 */
     private static final Pattern P_ONLINE = Pattern.compile("echo \\\"?([01])\\\"? > \\S*cpu(\\d+)/online");
 
-    /** 解析调速器脚本，内容为空返回 null */
+    /** 解析调速器脚本，内容为空或完全无可识别行返回 null。未匹配到的字段保持 null（由调用方兜底） */
     public static Gov parse(String content, boolean conservative) {
         if (content == null || content.trim().isEmpty()) return null;
         Gov g = new Gov();
+        int found = 0;
         try {
             Matcher mg = P_GOV.matcher(content);
-            if (mg.find()) g.governor = mg.group(1);
+            if (mg.find()) {
+                g.governor = mg.group(1);
+                found++;
+            }
             if (conservative) {
                 Matcher m = P_UP.matcher(content);
-                if (m.find()) g.upThreshold = m.group(1);
+                if (m.find()) {
+                    g.upThreshold = m.group(1);
+                    found++;
+                }
                 m = P_DOWN.matcher(content);
-                if (m.find()) g.downThreshold = m.group(1);
+                if (m.find()) {
+                    g.downThreshold = m.group(1);
+                    found++;
+                }
                 m = P_STEP.matcher(content);
-                if (m.find()) g.freqStep = m.group(1);
+                if (m.find()) {
+                    g.freqStep = m.group(1);
+                    found++;
+                }
                 m = P_RATE.matcher(content);
-                if (m.find()) g.samplingRate = m.group(1);
+                if (m.find()) {
+                    g.samplingRate = m.group(1);
+                    found++;
+                }
             } else {
                 Matcher m = P_LOADS.matcher(content);
-                if (m.find()) g.targetLoads = m.group(1);
+                if (m.find()) {
+                    g.targetLoads = m.group(1);
+                    found++;
+                }
             }
             // 核心启用状态（脚本含 online 行才覆盖默认全开）
             Matcher mo = P_ONLINE.matcher(content);
             while (mo.find()) {
+                g.hasOnline = true;
+                found++;
                 try {
                     int c = Integer.parseInt(mo.group(2));
                     if (c >= 0 && c < 8) g.cores[c] = "1".equals(mo.group(1));
                 } catch (Exception ignored) {
                 }
             }
+            if (found == 0) return null;
             return g;
         } catch (Exception e) {
             return null;

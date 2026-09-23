@@ -15,6 +15,9 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -59,6 +62,11 @@ public class GovernorActivity extends Activity {
             {"scx", "70"},
             {"scx"}
     };
+    /** 模块可能用于恢复 A/ 脚本的镜像位置（类似 conf 模板机制），保存时三重写入 */
+    private static final String[] MIRROR_DIRS = {
+            "/sdcard/Android/qingtd/A",
+            "/data/adb/modules/colorFC/qingtd/A"
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,11 +81,11 @@ public class GovernorActivity extends Activity {
         buildCards();
 
         new Thread(() -> {
+            GovernorConfig.Gov[] mirror = loadGovMirror();
             for (int i = 0; i < 4; i++) {
                 String content = RootShell.readFile(RootShell.GOV_DIR + "/" + FILES[i]);
                 GovernorConfig.Gov g = GovernorConfig.parse(content, i == 0);
-                if (g == null) g = new GovernorConfig.Gov();
-                govs[i] = g;
+                govs[i] = mergeGov(g, mirror[i], i);
             }
             runOnUiThread(() -> {
                 loading = false;
@@ -352,6 +360,7 @@ public class GovernorActivity extends Activity {
         collectInputs();
 
         new Thread(() -> {
+            saveGovMirror();
             String[] contents = {
                     GovernorConfig.generateConservative(govs[0]),
                     GovernorConfig.generateScx(govs[1]),
@@ -365,6 +374,16 @@ public class GovernorActivity extends Activity {
                         RootShell.GOV_DIR + "/" + FILES[i]);
                 if (r.ok()) ok++;
                 else err.append(FILES[i]).append(": ").append(r.err).append('\n');
+            }
+            // 三重写入：同步覆盖模块可能用于恢复的镜像位置（best-effort，失败不影响保存结果）
+            for (String dir : MIRROR_DIRS) {
+                RootShell.exec("mkdir -p '" + dir + "'");
+                for (int i = 0; i < 4; i++) {
+                    try {
+                        RootShell.writeFile(getCacheDir(), contents[i], dir + "/" + FILES[i]);
+                    } catch (Exception ignored) {
+                    }
+                }
             }
             // 写后 1.5 秒回读校验，发现被外部回滚立即提示（而不是下次进页面静默回显默认值）
             String verify = "";
@@ -386,6 +405,94 @@ public class GovernorActivity extends Activity {
         }).start();
     }
 
+    // ==================== 配置镜像（SharedPreferences，回显兜底） ====================
+
+    /** 保存当前 4 模式配置镜像，脚本读取失败/字段缺失时用它兜底回显 */
+    private void saveGovMirror() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (int i = 0; i < 4; i++) {
+                GovernorConfig.Gov g = govs[i];
+                JSONObject o = new JSONObject();
+                o.put("name", g.governor);
+                if (i == 0) {
+                    o.put("up", g.upThreshold);
+                    o.put("down", g.downThreshold);
+                    o.put("step", g.freqStep);
+                    o.put("rate", g.samplingRate);
+                } else if (i < 3) {
+                    o.put("loads", g.targetLoads);
+                }
+                StringBuilder cs = new StringBuilder();
+                for (boolean c : g.cores) cs.append(c ? '1' : '0');
+                o.put("cores", cs.toString());
+                arr.put(o);
+            }
+            getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                    .putString("govMirror", arr.toString()).commit();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 读取上次保存的配置镜像 */
+    private GovernorConfig.Gov[] loadGovMirror() {
+        GovernorConfig.Gov[] out = new GovernorConfig.Gov[4];
+        try {
+            JSONArray arr = new JSONArray(getSharedPreferences("colorfc", MODE_PRIVATE)
+                    .getString("govMirror", "[]"));
+            for (int i = 0; i < 4 && i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                GovernorConfig.Gov g = new GovernorConfig.Gov();
+                if (o.has("name")) g.governor = o.getString("name");
+                if (i == 0) {
+                    if (o.has("up")) g.upThreshold = o.getString("up");
+                    if (o.has("down")) g.downThreshold = o.getString("down");
+                    if (o.has("step")) g.freqStep = o.getString("step");
+                    if (o.has("rate")) g.samplingRate = o.getString("rate");
+                } else if (i < 3) {
+                    if (o.has("loads")) g.targetLoads = o.getString("loads");
+                }
+                String cs = o.optString("cores", "");
+                if (cs.length() == 8) {
+                    for (int c = 0; c < 8; c++) g.cores[c] = cs.charAt(c) == '1';
+                }
+                out[i] = g;
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    /** 脚本解析值优先，缺失字段用上次保存的镜像兜底（仍缺失则保持 null 由默认值兜底） */
+    private GovernorConfig.Gov mergeGov(GovernorConfig.Gov script, GovernorConfig.Gov mirror, int idx) {
+        GovernorConfig.Gov o = new GovernorConfig.Gov();
+        o.governor = pick(script == null ? null : script.governor,
+                mirror == null ? null : mirror.governor);
+        if (idx == 0) {
+            o.upThreshold = pick(script == null ? null : script.upThreshold,
+                    mirror == null ? null : mirror.upThreshold);
+            o.downThreshold = pick(script == null ? null : script.downThreshold,
+                    mirror == null ? null : mirror.downThreshold);
+            o.freqStep = pick(script == null ? null : script.freqStep,
+                    mirror == null ? null : mirror.freqStep);
+            o.samplingRate = pick(script == null ? null : script.samplingRate,
+                    mirror == null ? null : mirror.samplingRate);
+        }
+        if (idx == 1 || idx == 2) {
+            o.targetLoads = pick(script == null ? null : script.targetLoads,
+                    mirror == null ? null : mirror.targetLoads);
+        }
+        boolean[] src = script != null && script.hasOnline ? script.cores
+                : mirror != null ? mirror.cores : null;
+        if (src != null) System.arraycopy(src, 0, o.cores, 0, 8);
+        return o;
+    }
+
+    private String pick(String a, String b) {
+        return a != null && !a.isEmpty() ? a : b;
+    }
+
     /** 回读 4 个脚本并与内存配置比对，返回不一致的文件数（null=读取失败也算不一致） */
     private int verifySaved() {
         int bad = 0;
@@ -397,19 +504,23 @@ public class GovernorActivity extends Activity {
         return bad;
     }
 
-    /** 逐字段比较回读配置与保存时的配置 */
+    /** 逐字段比较回读配置与保存时的配置（null/缺失 视为不一致） */
     private boolean sameGov(GovernorConfig.Gov a, GovernorConfig.Gov b, int idx) {
-        if (!a.governor.equals(b.governor)) return false;
+        if (!eqv(a.governor, b.governor)) return false;
         if (idx == 0) {
-            if (!a.upThreshold.equals(b.upThreshold)) return false;
-            if (!a.downThreshold.equals(b.downThreshold)) return false;
-            if (!a.freqStep.equals(b.freqStep)) return false;
-            if (!a.samplingRate.equals(b.samplingRate)) return false;
+            if (!eqv(a.upThreshold, b.upThreshold)) return false;
+            if (!eqv(a.downThreshold, b.downThreshold)) return false;
+            if (!eqv(a.freqStep, b.freqStep)) return false;
+            if (!eqv(a.samplingRate, b.samplingRate)) return false;
         }
         if (idx == 1 || idx == 2) {
-            if (!a.targetLoads.equals(b.targetLoads)) return false;
+            if (!eqv(a.targetLoads, b.targetLoads)) return false;
         }
         return java.util.Arrays.equals(a.cores, b.cores);
+    }
+
+    private boolean eqv(String a, String b) {
+        return a != null && a.equals(b);
     }
 
     // ==================== color.lax 导入导出（4 个模式全部参数） ====================

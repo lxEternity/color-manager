@@ -42,6 +42,10 @@ public class MainActivity extends Activity {
     private SparkView sparkView;
     private Switch monitorSwitch;
     private boolean suppressSwitch = false;
+    private TextView powerHistorySummary;
+    private Switch frameRecSwitch;
+    private boolean suppressFrameSwitch = false;
+    private int powerTick = 0;
 
     static SocInfo cachedSoc;
 
@@ -81,6 +85,18 @@ public class MainActivity extends Activity {
         monitorSwitch.setOnCheckedChangeListener((btn, on) -> {
             if (suppressSwitch) return;
             toggleMonitor(on);
+        });
+
+        // 功耗记录卡片
+        powerHistorySummary = findViewById(R.id.powerHistorySummary);
+        findViewById(R.id.menuPowerHistory).setOnClickListener(v -> showHistoryDialog());
+        refreshHistorySummary();
+
+        // 帧率录制悬浮窗开关
+        frameRecSwitch = findViewById(R.id.frameRecSwitch);
+        frameRecSwitch.setOnCheckedChangeListener((btn, on) -> {
+            if (suppressFrameSwitch) return;
+            toggleFrameRec(on);
         });
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
@@ -123,13 +139,19 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    /** 实时功耗刷新（每秒） */
+    /** 实时功耗刷新（每秒），顺带写入功耗历史记录 */
     private void startPowerLoop() {
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
                 new Thread(() -> {
                     PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
+                    if (st != null) {
+                        // 历史采样（内部 1 分钟节流）
+                        PowerHistoryManager.record(MainActivity.this, st);
+                        // 每 15 秒刷新一次记录摘要
+                        if (++powerTick % 15 == 0) refreshHistorySummary();
+                    }
                     runOnUiThread(() -> {
                         if (st != null) updatePower(st);
                     });
@@ -148,10 +170,13 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         updateCellModeFromPrefs();
-        // 回到前台时同步悬浮窗开关状态（服务可能已被通知栏关闭）
+        // 回到前台时同步悬浮窗开关状态（服务可能已被通知栏/✕关闭）
         suppressSwitch = true;
         if (monitorSwitch != null) monitorSwitch.setChecked(MonitorService.running);
         suppressSwitch = false;
+        suppressFrameSwitch = true;
+        if (frameRecSwitch != null) frameRecSwitch.setChecked(FrameRecService.running);
+        suppressFrameSwitch = false;
     }
 
     /** 迷你悬浮窗开关：权限检查 + 启停前台服务 */
@@ -168,6 +193,49 @@ public class MainActivity extends Activity {
         } else {
             stopService(new Intent(this, MonitorService.class));
         }
+    }
+
+    /** 帧率录制悬浮窗开关：权限检查 + 启停前台服务 */
+    private void toggleFrameRec(boolean on) {
+        if (on) {
+            if (!Settings.canDrawOverlays(this)) {
+                frameRecSwitch.setChecked(false);
+                Toast.makeText(this, "请先授予悬浮窗权限后重试", Toast.LENGTH_LONG).show();
+                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName())));
+                return;
+            }
+            startForegroundService(new Intent(this, FrameRecService.class));
+        } else {
+            stopService(new Intent(this, FrameRecService.class));
+        }
+    }
+
+    /** 刷新功耗记录卡片摘要 */
+    private void refreshHistorySummary() {
+        new Thread(() -> {
+            final String s = PowerHistoryManager.todaySummary(this);
+            runOnUiThread(() -> {
+                if (powerHistorySummary != null) powerHistorySummary.setText(s);
+            });
+        }).start();
+    }
+
+    /** 功耗历史记录弹窗（充/放电会话） */
+    private void showHistoryDialog() {
+        new Thread(() -> {
+            final String text = PowerHistoryManager.historyText(this, 30);
+            runOnUiThread(() -> new AlertDialog.Builder(this)
+                    .setTitle("功耗历史记录")
+                    .setMessage(text)
+                    .setPositiveButton("关闭", null)
+                    .setNeutralButton("清空记录", (d, w) -> {
+                        PowerHistoryManager.clear(this);
+                        refreshHistorySummary();
+                        Toast.makeText(this, "已清空功耗记录", Toast.LENGTH_SHORT).show();
+                    })
+                    .show());
+        }).start();
     }
 
     /** 电芯模式切换：并联双电芯机型电压 4.4V 与单芯无异，只能手动指定 */

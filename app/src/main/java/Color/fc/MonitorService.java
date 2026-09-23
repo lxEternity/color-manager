@@ -26,9 +26,11 @@ import java.util.Locale;
 
 /**
  * 迷你悬浮窗监视器：
- * - 前台服务 + 悬浮窗（CPU 占用/最大频率、GPU 频率、温度、功耗、刷新率）
+ * - 前台服务 + 悬浮窗（右上角 ✕ 关闭；功耗/CPU温度/SOC温度 文字标签；CPU 频率 MHz）
+ * - 功耗计算与主页同步（电芯模式：自动校准 / 强制单 / 强制双）
  * - 拖动移动位置；单击切换 紧凑/详细 两档
  * - 采样：/proc/stat 直读（CPU 占用）+ 一条 su 脚本（GPU/温区/CPU 最大频）+ PowerMonitor（功耗）
+ * - 顺带写入功耗历史记录（1 分钟节流）
  */
 public class MonitorService extends Service {
 
@@ -37,10 +39,12 @@ public class MonitorService extends Service {
 
     private WindowManager wm;
     private LinearLayout box;
-    private TextView tvPower, tvCpu, tvGpu, tvTemp, tvHz, tvDetail;
+    private TextView tvClose, tvPower, tvCpu, tvGpu, tvTemp, tvHz, tvDetail;
     private WindowManager.LayoutParams lp;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean detailed = false;
+    /** 电芯模式（与主页同步）：0=自动校准 1=强制单电芯 2=强制双电芯 */
+    private int cellMode = 0;
 
     // CPU 占用差分基准
     private long lastIdle = -1, lastTotal = -1;
@@ -76,6 +80,8 @@ public class MonitorService extends Service {
     public void onCreate() {
         super.onCreate();
         running = true;
+        // 与主页共享电芯模式，保证功耗显示一致
+        cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         startForeground(1, notif());
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         buildView();
@@ -104,7 +110,22 @@ public class MonitorService extends Service {
         bg.setCornerRadius(dp(10));
         box.setBackground(bg);
         int pad = dp(10);
-        box.setPadding(pad, dp(8), pad, dp(8));
+        box.setPadding(pad, dp(4), pad, dp(8));
+
+        // 顶部关闭按钮行（右对齐 ✕）
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        View spring = new View(this);
+        head.addView(spring, new LinearLayout.LayoutParams(
+                0, 1, 1f));
+        tvClose = new TextView(this);
+        tvClose.setTextColor(0xFF8B949E);
+        tvClose.setTextSize(11);
+        tvClose.setText("✕");
+        tvClose.setPadding(dp(6), dp(2), dp(2), dp(2));
+        head.addView(tvClose, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.addView(head);
 
         tvPower = row(0xFF00E5FF, 13);
         tvCpu = row(0xFFE6EDF3, 11);
@@ -147,10 +168,18 @@ public class MonitorService extends Service {
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
-                        // 位移小 + 时间短 → 视为单击，切换 紧凑/详细
+                        // 位移小 + 时间短 → 视为单击
                         if (Math.abs(e.getRawX() - sx) < dp(12)
                                 && Math.abs(e.getRawY() - sy) < dp(12)
                                 && System.currentTimeMillis() - downAt < 350) {
+                            // 命中 ✕ → 关闭悬浮窗
+                            int[] loc = new int[2];
+                            tvClose.getLocationOnScreen(loc);
+                            if (e.getRawX() >= loc[0] && e.getRawX() <= loc[0] + tvClose.getWidth()
+                                    && e.getRawY() >= loc[1] && e.getRawY() <= loc[1] + tvClose.getHeight()) {
+                                stopSelf();
+                                return true;
+                            }
                             detailed = !detailed;
                             tvDetail.setVisibility(detailed ? View.VISIBLE : View.GONE);
                         }
@@ -189,38 +218,45 @@ public class MonitorService extends Service {
             } catch (Exception ignored) {
             }
             PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
+            // 功耗历史记录（内部节流）
+            if (st != null) PowerHistoryManager.record(this, st);
             double busy = readCpuBusy();
             double gpuHz = parseGpu(out);
             double cpuMaxK = parseFreq(out);
-            double temp = parseTemp(out, st);
+            double cpuT = parseZoneTemp(out, "cpu", st != null ? st.tempC : 0);
+            double socT = parseZoneTemp(out, "soc", cpuT);
             float hz = refreshRate();
             final PowerMonitor.BatteryStat fst = st;
-            final double fbusy = busy, fgpu = gpuHz, fcpu = cpuMaxK, ftemp = temp;
+            final double fbusy = busy, fgpu = gpuHz, fcpu = cpuMaxK, fcput = cpuT, fsoct = socT;
             final float fhz = hz;
-            ui.post(() -> updateUi(fst, fbusy, fgpu, fcpu, ftemp, fhz));
+            ui.post(() -> updateUi(fst, fbusy, fgpu, fcpu, fcput, fsoct, fhz));
             ui.postDelayed(this::sample, 2000);
         }).start();
     }
 
     private void updateUi(PowerMonitor.BatteryStat st, double busy, double gpuHz,
-                          double cpuMaxK, double temp, float hz) {
+                          double cpuMaxK, double cpuT, double socT, float hz) {
         if (st != null) {
-            double w = Math.abs(st.watts);
-            tvPower.setText(String.format(Locale.US, "\u26A1 %.2fW", w));
+            // 与主页一致的电芯模式修正
+            int cells = cellMode == 0 ? st.cells : cellMode;
+            boolean up = cells >= 2 && st.cells < 2;
+            double amps = up ? st.amps * 2 : st.amps;
+            double w = up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
+            tvPower.setText(String.format(Locale.US, "功耗 %.2fW", w));
             if (detailed) {
-                tvDetail.setText(String.format(Locale.US, "%.2fV %.2fA \u00b7 %d%% %s",
-                        st.volts, Math.abs(st.amps), st.level,
-                        st.tempC > 0 ? String.format(Locale.US, "\u7535%.0f\u2103", st.tempC) : ""));
+                tvDetail.setText(String.format(Locale.US, "%.2fV %.2fA · %d%% %s",
+                        st.volts, Math.abs(amps), st.level,
+                        st.tempC > 0 ? String.format(Locale.US, "电%.0f℃", st.tempC) : ""));
             }
         } else {
-            tvPower.setText("\u26A1 --W");
+            tvPower.setText("功耗 --W");
         }
         String cpu = "CPU ";
         cpu += busy >= 0 ? String.format(Locale.US, "%.0f%%", busy) : "--";
-        if (cpuMaxK > 0) cpu += String.format(Locale.US, " \u00b7 %.2fG", cpuMaxK / 1e6);
+        if (cpuMaxK > 0) cpu += String.format(Locale.US, " · %.0fMHz", cpuMaxK / 1000);
         tvCpu.setText(cpu);
-        tvGpu.setText(gpuHz > 0 ? String.format(Locale.US, "GPU %.0fM", gpuHz) : "GPU --");
-        tvTemp.setText(temp > 0 ? String.format(Locale.US, "\uD83D\uDD25 %.1f\u2103", temp) : "\uD83D\uDD25 --");
+        tvGpu.setText(gpuHz > 0 ? String.format(Locale.US, "GPU %.0fMHz", gpuHz / 1e6) : "GPU --");
+        tvTemp.setText(String.format(Locale.US, "CPU温度 %.1f℃ SOC温度 %.1f℃", cpuT, socT));
         tvHz.setText(hz > 0 ? String.format(Locale.US, "%.0fHz", hz) : "--Hz");
     }
 
@@ -277,8 +313,12 @@ public class MonitorService extends Service {
         return 0;
     }
 
-    /** 温度：cpu/gpu/soc 相关温区最大值，回退电池温度 */
-    private double parseTemp(String out, PowerMonitor.BatteryStat st) {
+    /**
+     * 分类温区最大值（℃）：
+     * - cpu: 含 cpu/apc/big 的温区，回退电池温度
+     * - soc: 含 soc 的温区，回退电池温度，再回退 CPU 温度
+     */
+    private double parseZoneTemp(String out, String kind, double fallback) {
         double max = 0;
         try {
             for (String line : out.split("\\n")) {
@@ -290,14 +330,14 @@ public class MonitorService extends Service {
                 double v = Double.parseDouble(body.substring(idx + 1).trim());
                 if (v > 1000) v = v / 1000.0;              // 毫摄氏度 → ℃
                 if (v <= 0 || v > 120) continue;
-                boolean related = ty.contains("cpu") || ty.contains("gpu") || ty.contains("soc")
-                        || ty.contains("apc") || ty.contains("ap") || ty.contains("big");
-                if (related) max = Math.max(max, v);
+                boolean hit = "cpu".equals(kind)
+                        ? (ty.contains("cpu") || ty.contains("apc") || ty.contains("big"))
+                        : ty.contains("soc");
+                if (hit) max = Math.max(max, v);
             }
         } catch (Exception ignored) {
         }
-        if (max > 0) return max;
-        return st != null ? st.tempC : 0;
+        return Math.max(max, fallback);
     }
 
     private float refreshRate() {
@@ -319,7 +359,7 @@ public class MonitorService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, "monitor")
                 .setContentTitle("迷你监视器运行中")
-                .setContentText("拖动移动 · 单击切换详细模式")
+                .setContentText("拖动移动 · 单击切换详细模式 · ✕ 关闭")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .addAction(new Notification.Action.Builder(null, "关闭", close).build())
                 .setOngoing(true)

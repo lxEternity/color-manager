@@ -153,17 +153,15 @@ public class ThemeStore {
         // 两种背景模式互斥：自定义图优先，同时开启时忽略透桌面
         boolean transp = transparentBg(a) && !img;
         boolean immersive = img || transp;
-        // API 30+：沉浸时窗口铺满整块物理屏幕，背景图与屏幕像素级对齐，
-        // 系统栏区域由背景像素接管，不残留任何没盖到的缝隙
-        boolean edge = android.os.Build.VERSION.SDK_INT >= 30;
-        if (edge) setEdgeToEdge(w, immersive);
+        // 沉浸时窗口铺满整块物理屏幕，背景像素接管系统栏区域
+        setEdgeToEdge(w, immersive);
 
         if (img) {
             // 背景图渲染时已按透明度叠加在 App 底色上，窗口保持全实心
             BitmapDrawable d = new BitmapDrawable(a.getResources(), renderBg(a, dark));
             w.setBackgroundDrawable(d);
         } else if (transp) {
-            // 全局透明：直接透出后面的桌面（不加壁纸标志，避免 ROM 壁纸层排序异常）
+            // 全局透明：直接透出后面的桌面
             w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         } else {
             int solid = dark ? 0xFF0D1220 : 0xFFF5F7FC;
@@ -172,22 +170,12 @@ public class ThemeStore {
         // 统一不使用壁纸层
         w.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
 
-        if (immersive && edge) {
-            // 窗口已铺满全屏：系统栏透明，背景像素直接延伸到屏幕边缘
+        if (immersive) {
+            // 系统栏全透明：窗口已铺满全屏，状态栏/导航栏直接透出背景像素
             w.setStatusBarColor(Color.TRANSPARENT);
             w.setNavigationBarColor(Color.TRANSPARENT);
-            if (img) {
-                // 背景图：系统栏图标颜色按图片上缘亮度取深浅
-                setLightStatusIcons(w, cachedTopBar != 0 ? isLightColor(cachedTopBar) : !dark);
-            } else {
-                setLightStatusIcons(w, !dark);
-            }
-        } else if (img) {
-            // 旧系统（无 edge-to-edge）：系统栏用图片边缘采样色衔接
-            int fb = dark ? 0xFF0D1220 : 0xFFF5F7FC;
-            w.setStatusBarColor(cachedTopBar != 0 ? cachedTopBar : fb);
-            w.setNavigationBarColor(cachedBotBar != 0 ? cachedBotBar : fb);
-            setLightStatusIcons(w, cachedTopBar != 0 ? isLightColor(cachedTopBar) : !dark);
+            // 背景图：系统栏图标颜色按图片上缘亮度取深浅
+            setLightStatusIcons(w, img && cachedTopBar != 0 ? isLightColor(cachedTopBar) : !dark);
         } else {
             int bar = dark ? 0xFF0D1220 : 0xFFF5F7FC;
             w.setStatusBarColor(bar);
@@ -208,14 +196,29 @@ public class ThemeStore {
     private static final int TAG_BASE_PADDING = 0x51EED0F5;
 
     /**
-     * API 30+ edge-to-edge：窗口铺满物理屏幕，内容区补上系统栏/输入法 insets，
-     * 关闭时恢复系统默认 insets 处理
+     * 窗口铺满物理屏幕（含系统栏区域），内容区补系统栏/输入法 insets；
+     * 关闭时恢复系统默认 insets 处理。兼容 API 26+ 全部系统
      */
     private static void setEdgeToEdge(Window w, boolean on) {
-        View content = w.getDecorView().findViewById(android.R.id.content);
+        View decor = w.getDecorView();
+        View content = decor.findViewById(android.R.id.content);
         if (content == null) return;
+        int api = android.os.Build.VERSION.SDK_INT;
+
         if (on) {
-            w.setDecorFitsSystemWindows(false);
+            // 关键：声明由窗口自己绘制系统栏背景，setStatusBarColor(透明)才会生效，
+            // 否则系统栏始终画主题默认色，看起来"不沉浸"
+            w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            if (api >= 30) {
+                w.setDecorFitsSystemWindows(false);
+            } else {
+                // Android 8-10：用布局标志把窗口铺到状态栏/导航栏后面
+                int vis = decor.getSystemUiVisibility()
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+                decor.setSystemUiVisibility(vis);
+            }
             if (content.getTag(TAG_BASE_PADDING) == null) {
                 content.setTag(TAG_BASE_PADDING, new int[]{
                         content.getPaddingLeft(), content.getPaddingTop(),
@@ -223,15 +226,34 @@ public class ThemeStore {
             }
             content.setOnApplyWindowInsetsListener((v, ins) -> {
                 int[] base = (int[]) v.getTag(TAG_BASE_PADDING);
-                android.graphics.Insets sys = ins.getInsets(android.view.WindowInsets.Type.systemBars());
-                android.graphics.Insets ime = ins.getInsets(android.view.WindowInsets.Type.ime());
+                int l, t, r, b;
+                if (api >= 30) {
+                    android.graphics.Insets sys = ins.getInsets(android.view.WindowInsets.Type.systemBars());
+                    android.graphics.Insets ime = ins.getInsets(android.view.WindowInsets.Type.ime());
+                    l = sys.left;
+                    t = sys.top;
+                    r = sys.right;
+                    b = Math.max(sys.bottom, ime.bottom);
+                } else {
+                    // 旧系统：系统栏+键盘都包含在 SystemWindowInsets（adjustResize）
+                    l = ins.getSystemWindowInsetLeft();
+                    t = ins.getSystemWindowInsetTop();
+                    r = ins.getSystemWindowInsetRight();
+                    b = ins.getSystemWindowInsetBottom();
+                }
                 // 内容避开状态栏/导航栏/输入法
-                v.setPadding(base[0] + sys.left, base[1] + sys.top, base[2] + sys.right,
-                        base[3] + Math.max(sys.bottom, ime.bottom));
+                v.setPadding(base[0] + l, base[1] + t, base[2] + r, base[3] + b);
                 return ins;
             });
         } else {
-            w.setDecorFitsSystemWindows(true);
+            if (api >= 30) {
+                w.setDecorFitsSystemWindows(true);
+            } else {
+                int vis = decor.getSystemUiVisibility()
+                        & ~(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+                decor.setSystemUiVisibility(vis);
+            }
             content.setOnApplyWindowInsetsListener(null);
             int[] base = (int[]) content.getTag(TAG_BASE_PADDING);
             if (base != null) {
@@ -265,8 +287,13 @@ public class ThemeStore {
                             | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
         } else {
             int vis = decor.getSystemUiVisibility();
-            if (lightBg) vis |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            else vis &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (lightBg) {
+                vis |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            } else {
+                vis &= ~(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+            }
             decor.setSystemUiVisibility(vis);
         }
     }

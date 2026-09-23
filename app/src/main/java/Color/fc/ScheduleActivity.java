@@ -19,7 +19,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 调度参数：自动检测 SOC，加载对应 a.all.sh / b.all.sh，
@@ -37,6 +39,10 @@ public class ScheduleActivity extends Activity {
     private final HashMap<String, SeekBar> seekBars = new HashMap<>();
     private boolean syncing = false;
     private TextView tabAV, tabBV, socTip, saveHint;
+
+    /** 调度参数字段（fillInputs / collectCurrent / lax 共用） */
+    private static final String[] FIELDS = {"opt2", "cpuMax", "cpuMin", "llcc", "uclampDisplay",
+            "uclampSsfg", "uclampTouch", "uclampMm", "uclampRt", "uclampTopApp", "walt1", "walt2"};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +70,8 @@ public class ScheduleActivity extends Activity {
         tab = soc.config; // 默认选中 SOC 对应配置
 
         findViewById(R.id.saveBtn).setOnClickListener(v -> saveConfig());
+        findViewById(R.id.btnImport).setOnClickListener(v -> importLax());
+        findViewById(R.id.btnExport).setOnClickListener(v -> exportLax());
 
         buildCards();
 
@@ -327,20 +335,15 @@ public class ScheduleActivity extends Activity {
         tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0077A8);
     }
 
-    /** 保存当前编辑的配置到对应文件 */
-    private void saveConfig() {
-        if (currentCfg() == null) {
-            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
-            return;
-        }
+    /** 把当前页签输入收集进配置（保存与导出共用，仅当前方案） */
+    private void collectCurrent() {
         AllConfig cfg = currentCfg();
+        if (cfg == null) return;
         AllConfig def = AllConfig.defaults();
         for (String mode : AllConfig.MODE_KEYS) {
             AllConfig.Mode m = cfg.modes.get(mode);
             AllConfig.Mode dm = def.modes.get(mode);
-            String[] fields = {"opt2", "cpuMax", "cpuMin", "llcc", "uclampDisplay",
-                    "uclampSsfg", "uclampTouch", "uclampMm", "uclampRt", "uclampTopApp", "walt1", "walt2"};
-            for (String f : fields) {
+            for (String f : FIELDS) {
                 EditText et = inputs.get(mode + "." + f);
                 if (et == null) continue;
                 String v = et.getText().toString().trim();
@@ -348,8 +351,17 @@ public class ScheduleActivity extends Activity {
                 assign(m, f, v);
             }
         }
+    }
+
+    /** 保存当前编辑的配置到对应文件 */
+    private void saveConfig() {
+        if (currentCfg() == null) {
+            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        collectCurrent();
         String path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
-        String content = AllConfig.generate(cfg);
+        String content = AllConfig.generate(currentCfg());
 
         new Thread(() -> {
             RootShell.Result r = RootShell.writeFile(getCacheDir(), content, path);
@@ -362,5 +374,83 @@ public class ScheduleActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    // ==================== color.lax 导入导出（方案1+方案2 全部模式） ====================
+
+    /** 导出方案1+方案2 全部模式的调度参数到 Download/color.lax */
+    private void exportLax() {
+        if (cfgA == null || cfgB == null) {
+            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        collectCurrent();   // 当前页签未保存的编辑也一并导出
+        LinkedHashMap<String, String> block = new LinkedHashMap<>();
+        putLaxCfg(block, "a", cfgA);
+        putLaxCfg(block, "b", cfgB);
+        new Thread(() -> {
+            RootShell.Result r = LaxStore.write(getCacheDir(), block);
+            runOnUiThread(() -> Toast.makeText(this, r.ok()
+                    ? "已导出方案1+2 到 Download/color.lax"
+                    : "导出失败：" + r.err, Toast.LENGTH_LONG).show());
+        }).start();
+    }
+
+    private void putLaxCfg(LinkedHashMap<String, String> block, String t, AllConfig cfg) {
+        for (String mode : AllConfig.MODE_KEYS) {
+            AllConfig.Mode m = cfg.modes.get(mode);
+            if (m == null) continue;
+            String p = "sch." + t + "." + mode + ".";
+            for (String f : FIELDS) block.put(p + f, value(m, f));
+        }
+    }
+
+    /** 从 Download/color.lax 导入调度参数（方案1+2 全部模式，导入后点保存生效） */
+    private void importLax() {
+        if (cfgA == null || cfgB == null) {
+            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new Thread(() -> {
+            LinkedHashMap<String, String> map = LaxStore.read();
+            runOnUiThread(() -> {
+                if (map.isEmpty()) {
+                    Toast.makeText(this, "未找到 Download/color.lax", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                int n = applyLax(map);
+                if (n == 0) {
+                    Toast.makeText(this, "文件中没有调度参数", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                fillInputs();
+                dirty = true;
+                Toast.makeText(this, "已导入 " + n + " 项（方案1+2），点击保存后生效",
+                        Toast.LENGTH_LONG).show();
+            });
+        }).start();
+    }
+
+    /** 应用 lax 中的 sch.* 到两份配置（缺失的项保持原值），返回应用项数 */
+    private int applyLax(Map<String, String> map) {
+        return applyLaxCfg(map, cfgA, "a") + applyLaxCfg(map, cfgB, "b");
+    }
+
+    private int applyLaxCfg(Map<String, String> map, AllConfig cfg, String t) {
+        if (cfg == null) return 0;
+        int n = 0;
+        for (String mode : AllConfig.MODE_KEYS) {
+            AllConfig.Mode m = cfg.modes.get(mode);
+            if (m == null) continue;
+            String p = "sch." + t + "." + mode + ".";
+            for (String f : FIELDS) {
+                String v = map.get(p + f);
+                if (v != null && !v.isEmpty()) {
+                    assign(m, f, v);
+                    n++;
+                }
+            }
+        }
+        return n;
     }
 }

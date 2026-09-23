@@ -16,6 +16,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 调速器配置：conservative.sh（省电）/ scx1.sh（均衡）/ scx2.sh（性能）/ scx3.sh（极速）
@@ -44,6 +46,19 @@ public class GovernorActivity extends Activity {
             "性能模式调速器参数（CPU 0/3/5/7）",
             "极速模式全核调速器参数（CPU0-7）"
     };
+    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用） */
+    private static final String[][] FIELDS = {
+            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate"},
+            {"governor", "targetLoads"},
+            {"governor", "targetLoads"},
+            {"governor"}
+    };
+    private static final String[][] DEFAULTS = {
+            {"conservative", "98", "93", "1", "14000"},
+            {"scx", "90"},
+            {"scx", "70"},
+            {"scx"}
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,6 +67,8 @@ public class GovernorActivity extends Activity {
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
         findViewById(R.id.saveBtn).setOnClickListener(v -> saveAll());
+        findViewById(R.id.btnImport).setOnClickListener(v -> importLax());
+        findViewById(R.id.btnExport).setOnClickListener(v -> exportLax());
 
         buildCards();
 
@@ -248,18 +265,6 @@ public class GovernorActivity extends Activity {
     }
 
     private void fillInputs() {
-        String[][] fields = {
-                {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate"},
-                {"governor", "targetLoads"},
-                {"governor", "targetLoads"},
-                {"governor"}
-        };
-        String[][] defaults = {
-                {"conservative", "98", "93", "1", "14000"},
-                {"scx", "90"},
-                {"scx", "70"},
-                {"scx"}
-        };
         for (int i = 0; i < 4; i++) {
             GovernorConfig.Gov g = govs[i];
             // 刷新核心芯片
@@ -270,11 +275,11 @@ public class GovernorActivity extends Activity {
                     styleChip(chips[c], g.cores[c]);
                 }
             }
-            for (int j = 0; j < fields[i].length; j++) {
-                String key = i + "." + fields[i][j];
-                String v = readField(g, fields[i][j]);
-                if (v == null || v.isEmpty()) v = defaults[i][j];
-                if ("governor".equals(fields[i][j])) {
+            for (int j = 0; j < FIELDS[i].length; j++) {
+                String key = i + "." + FIELDS[i][j];
+                String v = readField(g, FIELDS[i][j]);
+                if (v == null || v.isEmpty()) v = DEFAULTS[i][j];
+                if ("governor".equals(FIELDS[i][j])) {
                     TextView sp = spinners.get(key);
                     if (sp != null && v != null && !v.isEmpty()) sp.setText(v);
                     continue;
@@ -309,24 +314,8 @@ public class GovernorActivity extends Activity {
         }
     }
 
-    /** 保存 4 个调速器脚本 */
-    private void saveAll() {
-        if (loading || govs[0] == null) {
-            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        String[][] fields = {
-                {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate"},
-                {"governor", "targetLoads"},
-                {"governor", "targetLoads"},
-                {"governor"}
-        };
-        String[][] defaults = {
-                {"conservative", "98", "93", "1", "14000"},
-                {"scx", "90"},
-                {"scx", "70"},
-                {"scx"}
-        };
+    /** 把界面输入收集进 govs（保存与导出共用） */
+    private void collectInputs() {
         for (int i = 0; i < 4; i++) {
             // 芯片状态写回
             TextView[] chips = coreChips.get(String.valueOf(i));
@@ -336,8 +325,8 @@ public class GovernorActivity extends Activity {
                     govs[i].cores[c] = t == null || (Boolean) t;
                 }
             }
-            for (int j = 0; j < fields[i].length; j++) {
-                String f = fields[i][j];
+            for (int j = 0; j < FIELDS[i].length; j++) {
+                String f = FIELDS[i][j];
                 if ("governor".equals(f)) {
                     TextView sp = spinners.get(i + "." + f);
                     if (sp != null && sp.getText() != null && sp.getText().length() > 0) {
@@ -348,10 +337,19 @@ public class GovernorActivity extends Activity {
                 EditText et = inputs.get(i + "." + f);
                 if (et == null) continue;
                 String v = et.getText().toString().trim();
-                if (v.isEmpty()) v = defaults[i][j];
+                if (v.isEmpty()) v = DEFAULTS[i][j];
                 writeField(govs[i], f, v);
             }
         }
+    }
+
+    /** 保存 4 个调速器脚本 */
+    private void saveAll() {
+        if (loading || govs[0] == null) {
+            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        collectInputs();
 
         new Thread(() -> {
             String[] contents = {
@@ -378,5 +376,107 @@ public class GovernorActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    // ==================== color.lax 导入导出（4 个模式全部参数） ====================
+
+    /** 导出全部 4 个模式的调速器参数（名称/数值/核心开关）到 Download/color.lax */
+    private void exportLax() {
+        if (loading || govs[0] == null) {
+            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        collectInputs();
+        LinkedHashMap<String, String> block = new LinkedHashMap<>();
+        StringBuilder cs = new StringBuilder();
+        for (int i = 0; i < 4; i++) {
+            GovernorConfig.Gov g = govs[i];
+            block.put("gov." + i + ".name", g.governor);
+            if (i == 0) {
+                block.put("gov.0.up", g.upThreshold);
+                block.put("gov.0.down", g.downThreshold);
+                block.put("gov.0.step", g.freqStep);
+                block.put("gov.0.rate", g.samplingRate);
+            } else if (i < 3) {
+                block.put("gov." + i + ".loads", g.targetLoads);
+            }
+            cs.setLength(0);
+            for (boolean c : g.cores) cs.append(c ? '1' : '0');
+            block.put("gov." + i + ".cores", cs.toString());
+        }
+        new Thread(() -> {
+            RootShell.Result r = LaxStore.write(getCacheDir(), block);
+            runOnUiThread(() -> Toast.makeText(this, r.ok()
+                    ? "已导出 4 个模式到 Download/color.lax"
+                    : "导出失败：" + r.err, Toast.LENGTH_LONG).show());
+        }).start();
+    }
+
+    /** 从 Download/color.lax 导入调速器参数（全部模式，导入后点保存生效） */
+    private void importLax() {
+        if (loading || govs[0] == null) {
+            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new Thread(() -> {
+            LinkedHashMap<String, String> map = LaxStore.read();
+            runOnUiThread(() -> {
+                if (map.isEmpty()) {
+                    Toast.makeText(this, "未找到 Download/color.lax", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                int n = applyLax(map);
+                if (n == 0) {
+                    Toast.makeText(this, "文件中没有调速器参数", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                fillInputs();
+                Toast.makeText(this, "已导入 " + n + " 项（4 个模式），点击保存后生效",
+                        Toast.LENGTH_LONG).show();
+            });
+        }).start();
+    }
+
+    /** 应用 lax 中的 gov.* 到内存配置（缺失的项保持原值），返回应用项数 */
+    private int applyLax(Map<String, String> map) {
+        int n = 0;
+        for (int i = 0; i < 4; i++) {
+            GovernorConfig.Gov g = govs[i];
+            if (g == null) continue;
+            String v;
+            if ((v = map.get("gov." + i + ".name")) != null && !v.isEmpty()) {
+                g.governor = v;
+                n++;
+            }
+            if (i == 0) {
+                if ((v = map.get("gov.0.up")) != null && !v.isEmpty()) {
+                    g.upThreshold = v;
+                    n++;
+                }
+                if ((v = map.get("gov.0.down")) != null && !v.isEmpty()) {
+                    g.downThreshold = v;
+                    n++;
+                }
+                if ((v = map.get("gov.0.step")) != null && !v.isEmpty()) {
+                    g.freqStep = v;
+                    n++;
+                }
+                if ((v = map.get("gov.0.rate")) != null && !v.isEmpty()) {
+                    g.samplingRate = v;
+                    n++;
+                }
+            } else if (i < 3) {
+                if ((v = map.get("gov." + i + ".loads")) != null && !v.isEmpty()) {
+                    g.targetLoads = v;
+                    n++;
+                }
+            }
+            String cs = map.get("gov." + i + ".cores");
+            if (cs != null && cs.length() == 8) {
+                for (int c = 0; c < 8; c++) g.cores[c] = cs.charAt(c) == '1';
+                n++;
+            }
+        }
+        return n;
     }
 }

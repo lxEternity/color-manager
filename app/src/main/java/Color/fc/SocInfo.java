@@ -29,10 +29,11 @@ public class SocInfo {
 
     private static final String[][] MAP = {
             // platform, code, marketing, shortName, vendor, config
-            {"sm8975", "SM8975", "骁龙 8 至尊版 Gen 6（一加16 等）", "8 Elite G6", "Qualcomm", "b"},
-            {"sm8875", "SM8875", "骁龙 8 至尊版 Gen 5（一加15/小米17 等）", "8 Elite G5", "Qualcomm", "b"},
-            {"sm8850", "SM8850", "骁龙 8 至尊版（第五代 8 Elite）", "8 Elite G5", "Qualcomm", "b"},
-            {"sm8845", "SM8845", "骁龙 8s 至尊版（8s Elite）", "8s Elite", "Qualcomm", "b"},
+            {"sm8975", "SM8975", "骁龙 8 至尊版 Gen 6 超级至尊版（一加16 等）", "8 Elite G6 Ex", "Qualcomm", "b"},
+            {"sm8950", "SM8950", "骁龙 8 至尊版 Gen 6", "8 Elite G6", "Qualcomm", "b"},
+            {"sm8875", "SM8875", "骁龙 8 至尊版 Gen 5（一加15 等）", "8 Elite G5", "Qualcomm", "b"},
+            {"sm8850", "SM8850", "骁龙 8 至尊版 Gen 5（一加15T/小米17 等）", "8 Elite G5", "Qualcomm", "b"},
+            {"sm8845", "SM8845", "第五代骁龙 8（8 Gen 5）", "8 Gen 5", "Qualcomm", "b"},
             {"sm8750", "SM8750", "骁龙 8 至尊版（8 Elite）", "8 Elite", "Qualcomm", "a"},
             {"sm8650", "SM8650", "骁龙 8 Gen 3", "8 Gen 3", "Qualcomm", "a"},
             {"sm8550", "SM8550", "骁龙 8 Gen 2", "8 Gen 2", "Qualcomm", "a"},

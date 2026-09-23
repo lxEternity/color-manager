@@ -22,6 +22,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -48,9 +49,10 @@ import java.util.Locale;
 /**
  * 迷你悬浮窗监视器（菜单 + 独立窗架构）：
  * - ≡ 胶囊：点击展开悬浮窗菜单；菜单内逐项开/关独立悬浮窗（位置独立、可拖动、✕ 单独关闭）
- * - 独立窗：功耗（仅实时功耗）/ CPU / GPU / 温度 / 帧率（含 ● 录制，最短 3 秒）
+ * - 独立窗：功耗（仅实时功耗）/ CPU / GPU / 温度 / 实时帧率（含 ● 录制，最短 3 秒）
  * - 菜单内 "位置锁定"：锁定后窗口不可拖动且隐藏菜单胶囊，点击任意窗口唤出菜单解锁
  * - 功耗 500ms 快速刷新（与主页电芯模式同步），GPU/温度 2s 慢速扫描；功耗记录后台常采
+ * - 帧率：SurfaceFlinger 帧呈现时间戳 → 真实实时帧率（gfxinfo 帧数差分兜底）
  * - 菜单底部 "✕ 关闭监视器" 可停止服务；通知栏也可关闭
  */
 public class MonitorService extends Service {
@@ -100,6 +102,12 @@ public class MonitorService extends Service {
     // 录制 500ms 循环基准
     private long recLastIdle = -1, recLastTotal = -1;
     private long[] lastCoreIdle, lastCoreTotal;
+
+    // ===== 实时帧率采样缓存 =====
+    private String fpsLayer, fpsPkg;   // 前台应用图层（约 5s 刷新一次）
+    private long layerAt;
+    private long gfxFrames = -1;        // gfxinfo 最近总渲染帧数（差分基准）
+    private long gfxAt;
 
     // 帧率录制数据
     private boolean recording = false;
@@ -571,10 +579,10 @@ public class MonitorService extends Service {
             if (recording) {
                 SpannableStringBuilder b = new SpannableStringBuilder();
                 item(b, String.format(Locale.US, "● %02d:%02d", recShown / 60000, (recShown / 1000) % 60), 0xFFEF4444);
-                item(b, String.format(Locale.US, "%.0fHz", cHz), 0xFF8B949E);
+                item(b, String.format(Locale.US, "%.1ffps", cHz), 0xFF8B949E);
                 winText[4].setText(b);
             } else {
-                winText[4].setText(cHz > 0 ? String.format(Locale.US, "%.0fHz", cHz) : "--Hz");
+                winText[4].setText(cHz > 0 ? String.format(Locale.US, "%.1ffps", cHz) : "--fps");
             }
         }
     }
@@ -605,7 +613,7 @@ public class MonitorService extends Service {
                     }
                 }
                 if (needCpu) cBusy = readCpuBusy();
-                if (needHz && !recording) cHz = refreshRate();
+                if (needHz && !recording) cHz = realFps();
                 ui.post(this::updateAll);
                 ui.postDelayed(this::fastLoop, 500);
             }).start();
@@ -705,7 +713,7 @@ public class MonitorService extends Service {
     private void recSample() {
         if (!recording) return;
         new Thread(() -> {
-            float hz = refreshRate();
+            float hz = realFps();
             Double busy = recCpuTotal();
             float[] coreBusy = readCores();
             if (!recording) return;
@@ -879,7 +887,7 @@ public class MonitorService extends Service {
 
         // ===== 图1: 屏幕帧率 =====
         float y1 = 150;
-        c.drawText("屏幕帧率 (Hz)", x0, y1 + 34, hp);
+        c.drawText("实时帧率 (fps)", x0, y1 + 34, hp);
         c.drawText(fpsStats(), x0, y1 + 70, sp);
         drawSeries(c, x0, y1 + 90, w, 300,
                 new float[][]{toFloat(fps)}, new int[]{0xFF00E5FF},
@@ -1124,6 +1132,119 @@ public class MonitorService extends Service {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    // ==================== 实时帧率（真实渲染帧率，非面板刷新率） ====================
+
+    /**
+     * 实时帧率三级策略：
+     * 1. SurfaceFlinger --latency：前台图层的帧呈现时间戳 → 最近窗口真实 fps（游戏 SurfaceView 也计入）
+     * 2. dumpsys gfxinfo：前台应用总渲染帧数差分（部分系统移除了 --latency 时）
+     * 3. 面板刷新率兜底（旧行为）
+     */
+    private float realFps() {
+        Float f = sfFps();
+        if (f == null) f = gfxFps();
+        return f != null ? f : refreshRate();
+    }
+
+    /** 刷新前台应用图层缓存（约 5 秒一次）：前台包名 + SF 图层列表择优 */
+    private void refreshLayer() {
+        long now = SystemClock.elapsedRealtime();
+        if (fpsLayer != null && now - layerAt < 5000) return;
+        try {
+            RootShell.Result r = RootShell.exec(
+                    "f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
+                            + "p=$(echo \"$f\" | grep -oE '[a-z0-9_.]+/' | head -1);"
+                            + "echo \"P:${p%/}\";"
+                            + "dumpsys SurfaceFlinger --list 2>/dev/null", 8);
+            if (!r.ok() || r.out == null) return;
+            String[] lines = r.out.split("\\n");
+            String pkg = null;
+            int start = 0;
+            for (int i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith("P:")) {
+                    pkg = lines[i].substring(2).trim();
+                    start = i + 1;
+                    break;
+                }
+            }
+            if (pkg == null || pkg.isEmpty()) return;
+            // 择优：含包名的 SurfaceView 图层（游戏帧）优先，否则首个该应用图层
+            String best = null;
+            for (int i = start; i < lines.length; i++) {
+                String l = lines[i].trim();
+                if (l.isEmpty() || !l.contains(pkg)) continue;
+                if (l.contains("SurfaceView")) {
+                    best = l;
+                    break;
+                }
+                if (best == null) best = l;
+            }
+            if (best != null) {
+                fpsLayer = best;
+                fpsPkg = pkg;
+                layerAt = now;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * SurfaceFlinger --latency：读取图层最近呈现的帧时间戳（纳秒，环形缓冲约 127 帧），
+     * fps = 帧数 / 时间跨度。头部为刷新周期值、尾部为 0，用阈值过滤
+     */
+    private Float sfFps() {
+        refreshLayer();
+        if (fpsLayer == null) return null;
+        try {
+            String safe = fpsLayer.replace("'", "'\\''");
+            RootShell.Result r = RootShell.exec(
+                    "dumpsys SurfaceFlinger --latency '" + safe + "' 2>/dev/null", 8);
+            if (!r.ok() || r.out == null) return null;
+            long min = Long.MAX_VALUE, max = 0;
+            int n = 0;
+            for (String l : r.out.split("\\n")) {
+                l = l.trim();
+                if (l.length() < 10 || !l.matches("\\d+")) continue;
+                long t = Long.parseLong(l);
+                if (t < 1_000_000_000L) continue;   // 过滤刷新周期(µs/ms 级)与结尾 0
+                n++;
+                if (t < min) min = t;
+                if (t > max) max = t;
+            }
+            if (n >= 2 && max > min) {
+                double span = (max - min) / 1e9;
+                if (span >= 0.05) {
+                    return Math.max(1f, Math.min(240f, (float) ((n - 1) / span)));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** dumpsys gfxinfo 前台应用总渲染帧数差分 → 实时 fps（--latency 不可用时的兜底） */
+    private Float gfxFps() {
+        if (fpsPkg == null) return null;
+        try {
+            RootShell.Result r = RootShell.exec(
+                    "dumpsys gfxinfo " + fpsPkg + " 2>/dev/null | grep -m1 'Total frames rendered'", 8);
+            if (!r.ok() || r.out == null) return null;
+            int i = r.out.lastIndexOf(' ');
+            long cur = Long.parseLong(r.out.substring(i + 1).trim());
+            long now = SystemClock.uptimeMillis();
+            if (gfxFrames >= 0 && cur > gfxFrames) {
+                float fps = 1000f * (cur - gfxFrames) / Math.max(1, now - gfxAt);
+                gfxFrames = cur;
+                gfxAt = now;
+                return Math.max(1f, Math.min(240f, fps));
+            }
+            gfxFrames = cur;   // 首次或计数回绕：只记录基准
+            gfxAt = now;
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private Notification notif() {

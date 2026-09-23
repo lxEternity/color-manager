@@ -26,6 +26,8 @@ public class GovernorActivity extends Activity {
     private final GovernorConfig.Gov[] govs = new GovernorConfig.Gov[4];
     private final HashMap<String, EditText> inputs = new HashMap<>();
     private final HashMap<String, TextView> spinners = new HashMap<>();
+    /** 每模式的 8 个核心芯片（key=模式索引） */
+    private final HashMap<String, TextView[]> coreChips = new HashMap<>();
     private boolean loading = true;
 
     /** 预设调速器列表（不再支持手动输入） */
@@ -92,6 +94,7 @@ public class GovernorActivity extends Activity {
                 rotateArrow(arrow, expand);
             });
 
+            addCoreSelector(box, idx);
             addGovernorSelector(box, idx + ".governor",
                     "切换预设调速器（写入 scaling_governor）", i == 0 ? "conservative" : "scx");
             if (i == 0) {
@@ -105,6 +108,60 @@ public class GovernorActivity extends Activity {
             }
             container.addView(card);
         }
+    }
+
+    /** 启用核心选择行：8 个可点击芯片，选中=启用该核心 */
+    private void addCoreSelector(LinearLayout box, int idx) {
+        TextView label = new TextView(this);
+        label.setText("启用核心（点击开关，未选中=该模式下关闭此核）");
+        label.setTextSize(11);
+        label.setTextColor(0xFF5D6B85);
+        label.setPadding(dp(2), dp(4), dp(2), dp(4));
+        box.addView(label);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        row.setLayoutParams(rlp);
+
+        TextView[] chips = new TextView[8];
+        for (int c = 0; c < 8; c++) {
+            TextView chip = new TextView(this);
+            chip.setText(String.valueOf(c));
+            chip.setGravity(android.view.Gravity.CENTER);
+            chip.setTextSize(12);
+            chip.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(8));
+            chip.setBackground(bg);
+            chip.setTag(Boolean.TRUE);   // 默认启用，fillInputs 按脚本覆盖
+            styleChip(chip, true);
+            chip.setOnClickListener(v -> {
+                if (loading) return;
+                boolean on = !Boolean.TRUE.equals(chip.getTag());
+                chip.setTag(on);
+                styleChip(chip, on);
+            });
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(30), dp(30));
+            clp.rightMargin = dp(6);
+            chip.setLayoutParams(clp);
+            row.addView(chip);
+            chips[c] = chip;
+        }
+        coreChips.put(String.valueOf(idx), chips);
+        box.addView(row);
+    }
+
+    /** 芯片选中/未选样式 */
+    private void styleChip(TextView chip, boolean on) {
+        GradientDrawable bg = (GradientDrawable) chip.getBackground();
+        bg.setColor(on ? 0xFF0096C8 : 0xFFE2E8F0);
+        chip.setTextColor(on ? 0xFFFFFFFF : 0xFF8A94A8);
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     private void rotateArrow(ImageView arrow, boolean expand) {
@@ -205,6 +262,14 @@ public class GovernorActivity extends Activity {
         };
         for (int i = 0; i < 4; i++) {
             GovernorConfig.Gov g = govs[i];
+            // 刷新核心芯片
+            TextView[] chips = coreChips.get(String.valueOf(i));
+            if (chips != null && g != null) {
+                for (int c = 0; c < 8; c++) {
+                    chips[c].setTag(g.cores[c]);
+                    styleChip(chips[c], g.cores[c]);
+                }
+            }
             for (int j = 0; j < fields[i].length; j++) {
                 String key = i + "." + fields[i][j];
                 String v = readField(g, fields[i][j]);
@@ -263,6 +328,14 @@ public class GovernorActivity extends Activity {
                 {"scx"}
         };
         for (int i = 0; i < 4; i++) {
+            // 芯片状态写回
+            TextView[] chips = coreChips.get(String.valueOf(i));
+            if (chips != null && govs[i] != null) {
+                for (int c = 0; c < 8; c++) {
+                    Object t = chips[c].getTag();
+                    govs[i].cores[c] = t == null || (Boolean) t;
+                }
+            }
             for (int j = 0; j < fields[i].length; j++) {
                 String f = fields[i][j];
                 if ("governor".equals(f)) {

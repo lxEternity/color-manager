@@ -50,6 +50,7 @@
             android:id="@+id/btnExport"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:background="@drawable/bg_tab"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
@@ -58,6 +59,57 @@
             android:text="导出"
             android:textColor="@color/textSecondary"
             android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/btnReset"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_tab"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:text="默认"
+            android:textColor="@color/textSecondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- 方案1/方案2 页签：加载哪个方案，保存就写入哪个方案 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="10dp">
+
+        <TextView
+            android:id="@+id/tabA"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:background="@drawable/bg_tab_sel"
+            android:text="方案 1"
+            android:textColor="@color/accent"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="10dp"
+            android:layout_height="1dp" />
+
+        <TextView
+            android:id="@+id/tabB"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:background="@drawable/bg_tab"
+            android:text="方案 2"
+            android:textColor="@color/textSecondary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <ScrollView

@@ -7,16 +7,18 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.hardware.display.DisplayManager;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
@@ -42,18 +44,25 @@ import java.io.FileReader;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
- * 迷你悬浮窗监视器（菜单 + 独立窗架构）：
- * - ≡ 胶囊：点击展开悬浮窗菜单；菜单内逐项开/关独立悬浮窗（位置独立、可拖动、✕ 单独关闭）
- * - 独立窗：功耗（仅实时功耗）/ CPU / GPU / 温度 / 实时帧率（含 ● 录制，最短 3 秒）
- * - 菜单内 "位置锁定"：锁定后窗口不可拖动且隐藏菜单胶囊，点击任意窗口唤出菜单解锁
- * - 功耗 500ms 快速刷新（与主页电芯模式同步），GPU/温度 2s 慢速扫描；功耗记录后台常采
- * - 帧率：SurfaceFlinger 帧呈现时间戳 → 真实实时帧率（gfxinfo 帧数差分兜底）
- * - 菜单底部 "✕ 关闭监视器" 可停止服务；通知栏也可关闭
+ * Scene 款多监视器悬浮窗架构：
+ * - 状态栏药丸（置顶、可拖动、长按锁定）：点击展开"监视器功能"列表，收纳全部监视器开关
+ *   （负载监视器 / 帧率记录器 / 线程监视器 / 温度监视器 + 关闭监视器）
+ * - 负载监视器：三圆环（CPU/GPU/电池）+ 密集数据行 + 底部 #PWR 条；
+ *   单击 展开/折叠，双击 关闭窗口，长按 锁定/解锁位置
+ * - 帧率记录器：独立 FPS 窗口（不并入负载监视器），点击开始/停止录制并保存
+ * - 线程监视器：前台应用 CPU 占用最高的 6 条线程，点击关闭窗口
+ * - 温度监视器：CPU/SOC/BAT 温度，点击关闭窗口
+ * - 全部窗口可拖动（含状态栏上方，FLAG_LAYOUT_IN_SCREEN），长按锁定后不可拖
+ * - 帧率检测：单次 shell 合并调用 + 增量差分 + 瞬时失败保持上一有效值
+ * - 功耗 500ms 采样（与主页电芯模式同步），GPU/集群/温度 2s 扫描，线程 1s 采样
  */
 public class MonitorService extends Service {
 
@@ -62,79 +71,158 @@ public class MonitorService extends Service {
     /** 录制最短时长 */
     private static final long MIN_REC_MS = 3000;
 
+    // 监视器索引
+    private static final int M_LOAD = 0, M_FPS = 1, M_THR = 2, M_TEMP = 3, M_PWR = 4;
+    private static final String[] MON_KEYS = {"mon_load", "mon_fps", "mon_thr", "mon_temp", "mon_pwr"};
+    private static final String[] MON_LABELS = {"负载监视器", "帧率记录器", "线程监视器", "温度监视器", "功耗监视器"};
+
     private WindowManager wm;
     private final Handler ui = new Handler(Looper.getMainLooper());
     /** 电芯模式（与主页同步）：0=自动校准 1=强制单电芯 2=强制双电芯 */
     private int cellMode = 0;
 
-    // ===== 菜单胶囊与菜单 =====
+    // ===== 药丸 + 功能列表 =====
     private TextView pill;
-    private LinearLayout menu;
-    private WindowManager.LayoutParams pillLp, menuLp;
-    private TextView menuClose, menuQuit, menuLock;
-    private final TextView[] menuRows = new TextView[5];
-    private boolean menuOpen = false;
-    /** 位置锁定：锁定后窗口不可拖动且隐藏菜单胶囊，点击任意窗口唤出菜单 */
-    private boolean locked = false;
+    /** 菜单胶囊隐藏状态（长按胶囊隐藏，通知栏「显示菜单」恢复） */
+    private boolean pillHidden = false;
+    private LinearLayout listPanel;
+    private TextView listTitle, listQuit;
+    private final TextView[] listRows = new TextView[5];
+    private boolean listOpen = false;
 
-    // ===== 5 个独立悬浮窗: 0功耗 1CPU 2GPU 3温度 4帧率 =====
-    private static final String[] WIN_KEYS = {"win_power", "win_cpu", "win_gpu", "win_temp", "win_fps"};
-    private static final String[] WIN_LABELS = {"功耗", "CPU", "GPU", "温度", "帧率"};
-    private static final int[] WIN_COLORS = {0xFF00E5FF, 0xFFE6EDF3, 0xFFE6EDF3, 0xFFE6EDF3, 0xFF8B949E};
+    // ===== 各监视器窗口 =====
+    private final View[] win = new View[5];
+    private final WindowManager.LayoutParams[] wlp = new WindowManager.LayoutParams[5];
     private final boolean[] winOpen = new boolean[5];
-    private final LinearLayout[] winBox = new LinearLayout[5];
-    private final TextView[] winText = new TextView[5];
-    private final WindowManager.LayoutParams[] winLp = new WindowManager.LayoutParams[5];
-    /** 帧率窗的录制按钮 */
-    private TextView tvRec;
+    // 负载监视器
+    private RingsView rings;
+    private LinearLayout detailBox, clusterBox;
+    private TextView rowRam, rowCpu, rowGpu, rowBat;
+    private boolean expanded = false;
+    // 帧率记录器
+    private TextView fpsText;
+    // 功耗监视器
+    private TextView pwrBig;
+    // 线程监视器
+    private final TextView[] thrRows = new TextView[6];
+    // 温度监视器
+    private TextView tempText;
+
+    /** 长按锁定位置（全部窗口包括药丸共用；每次启动服务恢复可拖动） */
+    private boolean locked = false;
+    private long lastTapAt = 0;
+    private Runnable pendingTap;
 
     // ===== 显示缓存（工作线程写 / UI 读） =====
     private volatile double cW = -1;       // 功耗 W（已按电芯模式修正）
+    private volatile double cV = -1, cA = -1;   // 电压 V / 电流 A
     private volatile double cBusy = -1;    // CPU 总占用 %
-    private volatile double cCpuM = 0;     // CPU 最高频 MHz
-    private volatile double cGpuM = 0;     // GPU 频率 MHz
+    private volatile double cCpuM = 0;      // CPU 最高频 MHz
+    private volatile double cGpuM = 0;      // GPU 频率 MHz
     private volatile double cCpuT = 0, cSocT = 0, cBatT = 0;
-    private volatile float cHz = 0;
-    private volatile long recShown = 0;     // 录制已进行时长 ms
+    private volatile float cHz = 0;         // 实时帧率
+    private volatile float batPct = -1;     // 电量 %
+    private volatile float ramPct = -1, ramUsedG = 0;
+    private volatile float gpuLoad = -1;    // GPU 负载 %（不可读时 -1）
+    private double gpuMax = 0;              // GPU 最大频率 MHz
+    private volatile long recShown = 0;    // 录制已进行时长 ms
+
+    // CPU 集群（policy）
+    private static final int MAX_CL = 3;
+    private volatile int nCluster = 0;
+    private final double[] clFreq = new double[MAX_CL];
+    private final float[] clBusy = new float[MAX_CL];
+    private final String[] clLbl = new String[MAX_CL];
+    private int[][] clMap;                  // 集群 → 核心编号
+    private int rowsBuilt = 0;              // 已创建的集群行数
 
     // CPU 占用差分基准（快速循环）
     private long lastIdle = -1, lastTotal = -1;
     // 录制 500ms 循环基准
     private long recLastIdle = -1, recLastTotal = -1;
     private long[] lastCoreIdle, lastCoreTotal;
+    private int coreCount = 0;
 
-    // ===== 实时帧率采样缓存 =====
-    private String fpsLayer, fpsPkg;   // 前台应用图层（约 5s 刷新一次）
-    private long layerAt;
-    private long gfxFrames = -1;        // gfxinfo 最近总渲染帧数（差分基准）
+    // ===== 实时帧率 =====
+    private String fpsLayer, fpsPkg;   // 前台应用图层
+    private long sfPrevNewest = -1;     // SF latency 增量基准（最近帧时间戳 ns）
+    private long gfxFrames = -1;       // gfxinfo 总渲染帧数差分基准
     private long gfxAt;
+    // 瞬时检测失败时保持上一有效值，防止 "--fps" 闪烁
+    private float lastGoodHz = 0;
+    private long lastGoodAt = 0;
+    // 本机面板最高刷新率（帧率显示硬顶，检测失败时回退 240）
+    private float peakHz = 0;
 
-    // 帧率录制数据
+    // ===== 线程监视器 =====
+    private Map<Integer, long[]> thrPrev;   // tid → [utime]
+    private long thrLastAt = 0;
+    private double thrTck = 100;
+    private int thrPid = 0;          // 前台应用 pid 缓存
+    private long thrPidAt = 0;       // 上次解析 pid 的时间
+
+    // ===== 帧率录制 =====
     private boolean recording = false;
     private long recStart;
     private final ArrayList<Long> ts = new ArrayList<>();
     private final ArrayList<Float> fps = new ArrayList<>();
     private final ArrayList<Float> cpuTot = new ArrayList<>();
     private final ArrayList<float[]> cores = new ArrayList<>();
-    private int coreCount = 0;
 
     private static final int[] CORE_COLORS = {
             0xFF00E5FF, 0xFF22D3EE, 0xFF10B981, 0xFFF59E0B,
             0xFFEF4444, 0xFF8B5CF6, 0xFFEC4899, 0xFF84CC16
     };
 
+    // Scene 款配色：标签浅灰 / 数值纯白 / 次要信息暗灰
+    private static final int COL_LABEL = 0xFF98A2B3;
+    private static final int COL_VALUE = 0xFFF2F4F8;
+    private static final int COL_DIM = 0xFF7D8696;
+    private static final int COL_GREEN = 0xFF34C759;
+    private static final int COL_ORANGE = 0xFFFF9500;
+    private static final int COL_RED = 0xFFEF4444;
+
+    /** 慢速扫描：GPU 频率/负载/最高频、CPU 各集群频率、集群拓扑、温区 */
     private static final String SCAN =
             "g=$(cat /sys/class/kgsl/kgsl-3d0/gpuclk 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/devfreq/*qcom,gpu*/cur_freq 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/devfreq/*gpu*/cur_freq 2>/dev/null);"
                     + "echo \"G:$g\";"
-                    + "f=$(for p in /sys/devices/system/cpu/cpufreq/policy*; do "
-                    + "cat $p/scaling_cur_freq 2>/dev/null; done | sort -n | tail -1);"
-                    + "echo \"F:$f\";"
+                    + "gl=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/gpu_load 2>/dev/null);"
+                    + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null);"
+                    + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/gpuload 2>/dev/null);"
+                    + "echo \"GL:$gl\";"
+                    + "gm=$(cat /sys/class/kgsl/kgsl-3d0/max_gpuclk 2>/dev/null);"
+                    + "[ -n \"$gm\" ] || gm=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/max_freq 2>/dev/null);"
+                    + "[ -n \"$gm\" ] || gm=$(cat /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies 2>/dev/null | awk '{print $NF}');"
+                    + "echo \"GM:$gm\";"
+                    + "for q in /sys/devices/system/cpu/cpufreq/policy*; do "
+                    + "echo \"Q:$(cat $q/scaling_cur_freq 2>/dev/null)\"; done;"
+                    + "r=\"\"; for q in /sys/devices/system/cpu/cpufreq/policy*; do "
+                    + "r=\"$r$(cat $q/related_cpu 2>/dev/null);\"; done; echo \"R:$r\";"
                     + "for z in /sys/class/thermal/thermal_zone*; do "
                     + "[ -f \"$z/temp\" ] || continue; "
                     + "echo \"T:$(cat \"$z/type\" 2>/dev/null):$(cat \"$z/temp\" 2>/dev/null)\"; done";
+
+    /**
+     * 帧率检测合并为单次 shell 调用（降低 su 往返延迟与偶发失败）：
+     * P: 前台包名 → gfxinfo 总渲染帧数（纯数字行）→ L: 择优图层 → SF --latency 数据
+     */
+    private static final String FPS_CMD =
+            "f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
+                    + "p=$(echo \"$f\" | grep -oE '[A-Za-z0-9_.]+/' | head -1); p=${p%/};"
+                    + "echo \"P:$p\";"
+                    + "if [ -n \"$p\" ]; then"
+                    + " dumpsys gfxinfo \"$p\" 2>/dev/null | grep -m1 'Total frames rendered'"
+                    + " | grep -oE '[0-9]+' | tail -1;"
+                    + " ll=$(dumpsys SurfaceFlinger --list 2>/dev/null | grep -F \"$p\""
+                    + " | grep -viE 'StatusBar|NavigationBar|ColorFade|ScreenDecor|Wallpaper|Sprite|Cursor|Ink|Dim|Toast|InputMethod|SplashScreen|saveLayer|ripple|Screenshot|Effect|Blur');"
+                    + " l=$(echo \"$ll\" | grep -m1 'SurfaceView');"
+                    + " [ -n \"$l\" ] || l=$(echo \"$ll\" | head -1);"
+                    + " echo \"L:$l\";"
+                    + " [ -n \"$l\" ] && dumpsys SurfaceFlinger --latency \"$l\" 2>/dev/null;"
+                    + "fi";
 
     @Override
     public IBinder onBind(Intent i) {
@@ -147,6 +235,10 @@ public class MonitorService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (intent != null && "show_pill".equals(intent.getAction())) {
+            showPill();   // 通知栏「显示菜单」：恢复监视器菜单胶囊
+            return START_STICKY;
+        }
         return START_STICKY;
     }
 
@@ -156,18 +248,35 @@ public class MonitorService extends Service {
         running = true;
         SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
         cellMode = p.getInt("cellMode", 0);
-        for (int i = 0; i < winOpen.length; i++) winOpen[i] = p.getBoolean(WIN_KEYS[i], i == 0);
-        locked = p.getBoolean("win_locked", false);
+        expanded = p.getBoolean("mon_expanded", false);
+        pillHidden = p.getBoolean("mon_pill_hidden", false);
+        locked = false;   // 不再自动锁定位置：每次启动均为可拖动状态（长按锁定仅本次会话内生效）
+        for (int i = 0; i < 5; i++) winOpen[i] = p.getBoolean(MON_KEYS[i], i == M_LOAD);
         startForeground(1, notif());
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        buildPill();
-        for (int i = 0; i < winOpen.length; i++) {
-            if (winOpen[i]) addWindow(i);
+        try {   // 本机最高刷新率：所有显示设备支持模式的峰值
+            float pk = 0;
+            android.hardware.display.DisplayManager dm =
+                    (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
+            for (android.view.Display d : dm.getDisplays()) {
+                for (android.view.Display.Mode m : d.getSupportedModes()) {
+                    pk = Math.max(pk, m.getRefreshRate());
+                }
+            }
+            if (pk > 30) peakHz = pk;
+        } catch (Exception ignored) {
         }
-        if (locked && anyWindowOpen()) hidePill();   // 锁定状态启动时隐藏菜单胶囊
+        buildListPanel();
+        buildPill();
+        buildLoadWin();
+        buildFpsWin();
+        buildThrWin();
+        buildTempWin();
+        buildPwrWin();
+        for (int i = 0; i < 5; i++) if (winOpen[i]) addWin(i);
         ui.postDelayed(this::fastLoop, 200);
         ui.postDelayed(this::slowLoop, 800);
-        ui.postDelayed(this::historyLoop, 5000);
+        ui.postDelayed(this::threadLoop, 600);
     }
 
     @Override
@@ -175,14 +284,18 @@ public class MonitorService extends Service {
         running = false;
         ui.removeCallbacksAndMessages(null);
         if (recording) stopRec(false);
-        closeMenu();
-        for (int i = 0; i < winOpen.length; i++) {
-            if (winOpen[i]) {
+        for (int i = 0; i < 5; i++) {
+            if (win[i] != null && win[i].getParent() != null) {
                 try {
-                    wm.removeView(winBox[i]);
+                    wm.removeView(win[i]);
                 } catch (Exception ignored) {
                 }
-                winOpen[i] = false;
+            }
+        }
+        if (listPanel != null && listPanel.getParent() != null) {
+            try {
+                wm.removeView(listPanel);
+            } catch (Exception ignored) {
             }
         }
         if (pill != null) {
@@ -194,25 +307,440 @@ public class MonitorService extends Service {
         super.onDestroy();
     }
 
-    // ==================== 通用拖动+点击触摸 ====================
+    // ==================== 通用 ====================
 
-    private interface Tap {
-        void tap(View v, MotionEvent e);
+    private int dp(float v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
-    /** 拖动 + 单击（可选拖动回调）；lockable 的视图在锁定状态下不响应拖动但仍可点击 */
-    private class DragTouch implements View.OnTouchListener {
-        private final Tap tap;
-        private final Runnable onMoved;
-        private final boolean lockable;
+    /** Scene 式悬浮窗背景：深灰半透明（≈83%），无描边无阴影 */
+    private GradientDrawable winBg(int radius) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xD425272C);
+        bg.setCornerRadius(radius);
+        return bg;
+    }
+
+    private WindowManager.LayoutParams overlayLp(int gravity) {
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,   // 可拖到状态栏上
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = gravity;
+        return lp;
+    }
+
+    private TextView mkText(String s, int color, float sizeSp) {
+        TextView tv = new TextView(this);
+        tv.setTextColor(color);
+        tv.setTextSize(sizeSp);
+        tv.setTypeface(Typeface.MONOSPACE);
+        tv.setText(s);
+        return tv;
+    }
+
+    private LinearLayout mkBox(int radius, int padH, int padV) {
+        LinearLayout b = new LinearLayout(this);
+        b.setOrientation(LinearLayout.VERTICAL);
+        b.setBackground(winBg(radius));
+        b.setPadding(dp(padH), dp(padV), dp(padH), dp(padV));
+        return b;
+    }
+
+    private boolean hit(View v, MotionEvent e) {
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        return e.getRawX() >= loc[0] && e.getRawX() <= loc[0] + v.getWidth()
+                && e.getRawY() >= loc[1] && e.getRawY() <= loc[1] + v.getHeight();
+    }
+
+    // ==================== 窗口显隐 ====================
+
+    private void addWin(int idx) {
+        try {
+            wm.addView(win[idx], wlp[idx]);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void showWin(int idx) {
+        if (winOpen[idx]) return;
+        winOpen[idx] = true;
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                .putBoolean(MON_KEYS[idx], true).apply();
+        addWin(idx);
+        if (idx == M_THR) thrPrev = null;   // 线程基准重建
+        if (idx == M_LOAD) updateUi();
+        syncList();
+    }
+
+    private void hideWin(int idx) {
+        if (!winOpen[idx]) return;
+        winOpen[idx] = false;
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                .putBoolean(MON_KEYS[idx], false).apply();
+        try {
+            wm.removeView(win[idx]);
+        } catch (Exception ignored) {
+        }
+        if (idx == M_FPS && recording) stopRec(true);   // 窗口关闭时保存录制
+        if (idx == M_LOAD) {
+            // 负载监视器关闭：CPU 差分基准失效，避免重开后跨周期误算
+            lastIdle = -1;
+            lastTotal = -1;
+            lastCoreIdle = null;
+        }
+        syncList();
+    }
+
+    // ==================== 状态栏药丸（置顶、可拖动、长按锁定） + 功能列表 ====================
+
+    private void buildPill() {
+        pill = new TextView(this);
+        pill.setTypeface(Typeface.MONOSPACE);
+        pill.setTextSize(10);
+        pill.setTextColor(COL_VALUE);
+        pill.setText("监视器 ▾");
+        pill.setBackground(winBg(dp(12)));
+        pill.setPadding(dp(10), dp(3), dp(10), dp(3));
+        // 长按隐藏过的胶囊启动时不再显示（通知栏「显示菜单」恢复）
+        if (!pillHidden) {
+            wm.addView(pill, overlayLp(Gravity.TOP | Gravity.START));
+            pill.post(() -> {
+                try {
+                    WindowManager.LayoutParams p = (WindowManager.LayoutParams) pill.getLayoutParams();
+                    p.x = Math.max(0, (getResources().getDisplayMetrics().widthPixels - pill.getWidth()) / 2);
+                    p.y = dp(2);
+                    wm.updateViewLayout(pill, p);
+                } catch (Exception ignored) {
+                }
+            });
+        }
+        pill.setOnTouchListener(pillTouch);
+    }
+
+    /** 长按胶囊：隐藏监视器菜单（通知栏「显示菜单」恢复） */
+    private void hidePill() {
+        try {
+            wm.removeView(pill);
+        } catch (Exception ignored) {
+        }
+        pillHidden = true;
+        if (listOpen) toggleList();   // 同步收起功能列表
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                .putBoolean("mon_pill_hidden", true).apply();
+    }
+
+    /** 通知栏「显示菜单」：恢复胶囊（置顶状态栏居中） */
+    private void showPill() {
+        pillHidden = false;
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                .putBoolean("mon_pill_hidden", false).apply();
+        try {
+            if (pill.getParent() == null) {
+                pill.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                WindowManager.LayoutParams lp = overlayLp(Gravity.TOP | Gravity.START);
+                lp.x = Math.max(0, (getResources().getDisplayMetrics().widthPixels - pill.getMeasuredWidth()) / 2);
+                lp.y = dp(2);
+                wm.addView(pill, lp);
+            }
+        } catch (Exception ignored) {
+        }
+        Toast.makeText(this, "监视器菜单已恢复", Toast.LENGTH_SHORT).show();
+    }
+
+    /** 药丸触摸：可拖动 + 长按隐藏菜单 + 单击展开列表（与其他窗口手势一致） */
+    private final View.OnTouchListener pillTouch = new View.OnTouchListener() {
         private float sx, sy, dx, dy;
         private long downAt;
-        private boolean moved = false;
+        private boolean moved, longFired;
+        private final Runnable longRun = new Runnable() {
+            @Override
+            public void run() {
+                if (!moved) {
+                    longFired = true;
+                    hidePill();   // 长按胶囊：隐藏监视器菜单
+                }
+            }
+        };
 
-        DragTouch(Tap tap, Runnable onMoved, boolean lockable) {
-            this.tap = tap;
-            this.onMoved = onMoved;
-            this.lockable = lockable;
+        @Override
+        public boolean onTouch(View v, MotionEvent e) {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) v.getLayoutParams();
+            switch (e.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    sx = e.getRawX();
+                    sy = e.getRawY();
+                    dx = sx - lp.x;
+                    dy = sy - lp.y;
+                    downAt = System.currentTimeMillis();
+                    moved = false;
+                    longFired = false;
+                    ui.postDelayed(longRun, 500);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(e.getRawX() - sx) > dp(12) || Math.abs(e.getRawY() - sy) > dp(12)) {
+                        moved = true;
+                        ui.removeCallbacks(longRun);
+                    }
+                    if (!locked && !longFired) {
+                        lp.x = (int) (e.getRawX() - dx);
+                        lp.y = (int) (e.getRawY() - dy);
+                        try {
+                            wm.updateViewLayout(v, lp);
+                            if (listOpen) positionList();   // 列表跟随药丸移动
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    ui.removeCallbacks(longRun);
+                    if (longFired || moved) return true;
+                    if (System.currentTimeMillis() - downAt < 350) toggleList();
+                    return true;
+            }
+            return false;
+        }
+    };
+
+    private void toggleList() {
+        listOpen = !listOpen;
+        if (listOpen) {
+            syncList();
+            WindowManager.LayoutParams lp = overlayLp(Gravity.TOP | Gravity.START);
+            lp.x = dp(2);
+            lp.y = dp(2);
+            wm.addView(listPanel, lp);
+            positionList();   // 展开在药丸所在位置正下方
+        } else {
+            try {
+                wm.removeView(listPanel);
+            } catch (Exception ignored) {
+            }
+        }
+        pill.setText(listOpen ? "监视器 ▴" : "监视器 ▾");
+    }
+
+    /** 列表位置：药丸正下方（水平居中对齐药丸），越界自动夹回屏幕内 */
+    private void positionList() {
+        try {
+            WindowManager.LayoutParams pl = (WindowManager.LayoutParams) pill.getLayoutParams();
+            listPanel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int lw = listPanel.getMeasuredWidth(), lh = listPanel.getMeasuredHeight();
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            int sh = getResources().getDisplayMetrics().heightPixels;
+            int x = pl.x + pill.getWidth() / 2 - lw / 2;
+            if (x + lw > sw - dp(2)) x = sw - dp(2) - lw;
+            if (x < dp(2)) x = dp(2);
+            int y = pl.y + pill.getHeight() + dp(6);
+            if (y + lh > sh - dp(2)) y = Math.max(dp(2), sh - dp(2) - lh);
+            WindowManager.LayoutParams ll = (WindowManager.LayoutParams) listPanel.getLayoutParams();
+            ll.gravity = Gravity.TOP | Gravity.START;
+            ll.x = x;
+            ll.y = y;
+            wm.updateViewLayout(listPanel, ll);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void buildListPanel() {
+        listPanel = mkBox(dp(10), 10, 8);
+        listTitle = mkText("监视器功能", COL_VALUE, 10);
+        listTitle.setPadding(0, 0, 0, dp(2));
+        listPanel.addView(listTitle);
+        for (int i = 0; i < 5; i++) {
+            listRows[i] = mkText("", COL_VALUE, 10);
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            p.topMargin = dp(3);
+            listRows[i].setLayoutParams(p);
+            listPanel.addView(listRows[i]);
+        }
+        listQuit = mkText("关闭监视器", COL_RED, 10);
+        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        qp.topMargin = dp(5);
+        listQuit.setLayoutParams(qp);
+        listPanel.addView(listQuit);
+
+        listPanel.setOnTouchListener((v, e) -> {
+            if (e.getAction() != MotionEvent.ACTION_UP) return true;
+            if (hit(listTitle, e)) {
+                toggleList();
+                return true;
+            }
+            for (int i = 0; i < 5; i++) {
+                if (hit(listRows[i], e)) {
+                    if (winOpen[i]) hideWin(i);
+                    else showWin(i);
+                    return true;
+                }
+            }
+            if (hit(listQuit, e)) stopSelf();
+            return true;
+        });
+        syncList();
+    }
+
+    /** 功能列表状态同步：✓ 开启（纯白）/ ✗ 关闭（暗灰） */
+    private void syncList() {
+        for (int i = 0; i < 5; i++) {
+            String mark = winOpen[i] ? "✓ " : "✗ ";
+            SpannableStringBuilder b = new SpannableStringBuilder();
+            int s = b.length();
+            b.append(mark);
+            b.setSpan(new ForegroundColorSpan(winOpen[i] ? COL_GREEN : 0xFF566373),
+                    s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            s = b.length();
+            b.append(MON_LABELS[i]);
+            b.setSpan(new ForegroundColorSpan(winOpen[i] ? COL_VALUE : COL_DIM),
+                    s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            listRows[i].setText(b);
+        }
+    }
+
+    // ==================== 各监视器窗口构建 ====================
+
+    /** 负载监视器：三圆环 + 密集数据行 + 底部 #PWR 条（FPS 独立，不合并） */
+    private void buildLoadWin() {
+        LinearLayout root = mkBox(dp(14), 10, 8);
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.HORIZONTAL);
+        rings = new RingsView();
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        rp.rightMargin = dp(12);
+        body.addView(rings, rp);
+
+        detailBox = new LinearLayout(this);
+        detailBox.setOrientation(LinearLayout.VERTICAL);
+        rowRam = mkText("", COL_VALUE, 10);
+        rowCpu = mkText("", COL_VALUE, 10);
+        clusterBox = new LinearLayout(this);
+        clusterBox.setOrientation(LinearLayout.VERTICAL);
+        rowGpu = mkText("", COL_VALUE, 10);
+        rowBat = mkText("", COL_VALUE, 10);
+        detailBox.addView(rowRam);
+        detailBox.addView(rowCpu);
+        detailBox.addView(clusterBox);
+        detailBox.addView(rowGpu);
+        detailBox.addView(rowBat);
+        body.addView(detailBox);
+        root.addView(body);
+
+        applyExpanded();
+        win[M_LOAD] = root;
+        wlp[M_LOAD] = overlayLp(Gravity.TOP | Gravity.START);
+        wlp[M_LOAD].x = dp(14);
+        wlp[M_LOAD].y = dp(110);
+        root.setOnTouchListener(new WinTouch(M_LOAD));
+    }
+
+    private void applyExpanded() {
+        rings.setVertical(expanded);
+        detailBox.setVisibility(expanded ? View.VISIBLE : View.GONE);
+    }
+
+    private void setExpanded(boolean v) {
+        if (expanded == v) return;
+        expanded = v;
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                .putBoolean("mon_expanded", v).apply();
+        applyExpanded();
+        updateUi();
+    }
+
+    /** 帧率记录器：独立窗口，点击开始/停止录制 */
+    private void buildFpsWin() {
+        LinearLayout root = mkBox(dp(12), 10, 6);
+        fpsText = mkText("#FPS --", COL_VALUE, 11);
+        root.addView(fpsText);
+        win[M_FPS] = root;
+        wlp[M_FPS] = overlayLp(Gravity.TOP | Gravity.START);
+        wlp[M_FPS].x = dp(14);
+        wlp[M_FPS].y = dp(260);
+        root.setOnTouchListener(new WinTouch(M_FPS));
+    }
+
+    /** 线程监视器：前台应用 CPU 占用 TOP6 线程 */
+    private void buildThrWin() {
+        LinearLayout root = mkBox(dp(12), 10, 6);
+        TextView title = mkText("线程 TOP6", COL_LABEL, 9);
+        root.addView(title);
+        for (int i = 0; i < 6; i++) {
+            thrRows[i] = mkText("--", COL_VALUE, 10);
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            p.topMargin = dp(2);
+            thrRows[i].setLayoutParams(p);
+            root.addView(thrRows[i]);
+        }
+        win[M_THR] = root;
+        wlp[M_THR] = overlayLp(Gravity.TOP | Gravity.START);
+        wlp[M_THR].x = dp(14);
+        wlp[M_THR].y = dp(340);
+        root.setOnTouchListener(new WinTouch(M_THR));
+    }
+
+    /** 温度监视器：CPU/SOC/BAT 温度 */
+    private void buildTempWin() {
+        LinearLayout root = mkBox(dp(12), 10, 6);
+        tempText = mkText("--", COL_VALUE, 10);
+        root.addView(tempText);
+        win[M_TEMP] = root;
+        wlp[M_TEMP] = overlayLp(Gravity.TOP | Gravity.START);
+        wlp[M_TEMP].x = dp(14);
+        wlp[M_TEMP].y = dp(420);
+        root.setOnTouchListener(new WinTouch(M_TEMP));
+    }
+
+    /** 功耗监视器：仅显示 数字+W */
+    private void buildPwrWin() {
+        LinearLayout root = mkBox(dp(12), 10, 6);
+        pwrBig = mkText("--W", COL_VALUE, 11);
+        root.addView(pwrBig);
+        win[M_PWR] = root;
+        wlp[M_PWR] = overlayLp(Gravity.TOP | Gravity.START);
+        wlp[M_PWR].x = dp(14);
+        wlp[M_PWR].y = dp(500);
+        root.setOnTouchListener(new WinTouch(M_PWR));
+    }
+
+    // ==================== 窗口触摸：拖动 + 长按锁定 + 各自点击行为 ====================
+
+    /**
+     * 负载监视器：单击 展开/折叠，双击 关闭窗口
+     * 帧率记录器：单击 开始/停止录制
+     * 线程/温度/功耗监视器：单击无动作（关闭走功能列表）
+     * 所有窗口：可拖动（未锁定时），长按 锁定/解锁位置
+     */
+    private class WinTouch implements View.OnTouchListener {
+        private final int idx;
+        private float sx, sy, dx, dy;
+        private long downAt;
+        private boolean moved, longFired;
+        private final Runnable longRun = new Runnable() {
+            @Override
+            public void run() {
+                if (!moved) {
+                    longFired = true;
+                    toggleLock();
+                }
+            }
+        };
+
+        WinTouch(int idx) {
+            this.idx = idx;
         }
 
         @Override
@@ -226,445 +754,556 @@ public class MonitorService extends Service {
                     dy = sy - lp.y;
                     downAt = System.currentTimeMillis();
                     moved = false;
+                    longFired = false;
+                    ui.postDelayed(longRun, 500);
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     if (Math.abs(e.getRawX() - sx) > dp(12) || Math.abs(e.getRawY() - sy) > dp(12)) {
-                        if (!moved && onMoved != null) onMoved.run();
                         moved = true;
+                        ui.removeCallbacks(longRun);
                     }
-                    if (lockable && locked) return true;   // 锁定：位置不动
-                    lp.x = (int) (e.getRawX() - dx);
-                    lp.y = (int) (e.getRawY() - dy);
-                    try {
-                        wm.updateViewLayout(v, lp);
-                    } catch (Exception ignored) {
+                    if (!locked && !longFired) {
+                        lp.x = (int) (e.getRawX() - dx);
+                        lp.y = (int) (e.getRawY() - dy);
+                        try {
+                            wm.updateViewLayout(v, lp);
+                        } catch (Exception ignored) {
+                        }
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
-                    if (!moved && System.currentTimeMillis() - downAt < 350 && tap != null) tap.tap(v, e);
+                case MotionEvent.ACTION_CANCEL:
+                    ui.removeCallbacks(longRun);
+                    if (longFired || moved) return true;
+                    if (System.currentTimeMillis() - downAt < 350) onTap(e);
                     return true;
             }
             return false;
         }
-    }
 
-    private boolean hit(TextView v, MotionEvent e) {
-        int[] loc = new int[2];
-        v.getLocationOnScreen(loc);
-        return e.getRawX() >= loc[0] && e.getRawX() <= loc[0] + v.getWidth()
-                && e.getRawY() >= loc[1] && e.getRawY() <= loc[1] + v.getHeight();
-    }
-
-    // ==================== 菜单胶囊 ====================
-
-    private void buildPill() {
-        pill = new TextView(this);
-        pill.setTextColor(0xFF00E5FF);
-        pill.setTextSize(13);
-        pill.setText("≡");
-        pill.setBackground(winBg(dp(14)));
-        pill.setPadding(dp(9), dp(2), dp(9), dp(3));
-        pillLp = overlayLp();
-        pillLp.x = dp(12);
-        pillLp.y = dp(120);
-        pill.setOnTouchListener(new DragTouch((v, e) -> toggleMenu(), this::closeMenu, true));
-        wm.addView(pill, pillLp);
-    }
-
-    private void toggleMenu() {
-        if (menuOpen) closeMenu();
-        else openMenuAt(pill);
-    }
-
-    /** 在锚点视图下方弹出菜单（锁定状态下由窗口点击唤起） */
-    private void openMenuAt(View anchor) {
-        if (menuOpen) return;
-        if (menu == null) buildMenu();
-        WindowManager.LayoutParams alp = (WindowManager.LayoutParams) anchor.getLayoutParams();
-        menuLp = overlayLp();
-        menuLp.x = alp.x;
-        menuLp.y = alp.y + dp(44);
-        wm.addView(menu, menuLp);
-        menuOpen = true;
-        updateMenu();
-    }
-
-    private void closeMenu() {
-        if (!menuOpen || menu == null) return;
-        try {
-            wm.removeView(menu);
-        } catch (Exception ignored) {
-        }
-        menuOpen = false;
-    }
-
-    private void buildMenu() {
-        menu = new LinearLayout(this);
-        menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setBackground(menuBg());
-        menu.setPadding(dp(9), dp(3), dp(9), dp(5));
-
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        TextView title = new TextView(this);
-        title.setTextColor(0xFF6B7785);
-        title.setTextSize(10);
-        title.setText("悬浮窗菜单");
-        head.addView(title, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        menuClose = new TextView(this);
-        menuClose.setTextColor(0xFF8B949E);
-        menuClose.setTextSize(11);
-        menuClose.setText("✕");
-        menuClose.setPadding(dp(5), dp(1), dp(1), dp(1));
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        cp.leftMargin = dp(8);
-        head.addView(menuClose, cp);
-        menu.addView(head);
-
-        for (int i = 0; i < menuRows.length; i++) {
-            menuRows[i] = new TextView(this);
-            menuRows[i].setTextSize(11);
-            menuRows[i].setTypeface(Typeface.MONOSPACE);
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            p.topMargin = dp(2);
-            menu.addView(menuRows[i], p);
-        }
-
-        menuLock = new TextView(this);
-        menuLock.setTextSize(11);
-        menuLock.setTypeface(Typeface.MONOSPACE);
-        LinearLayout.LayoutParams kl = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        kl.topMargin = dp(4);
-        menu.addView(menuLock, kl);
-
-        menuQuit = new TextView(this);
-        menuQuit.setTextColor(0xFFEF4444);
-        menuQuit.setTextSize(10);
-        menuQuit.setText("✕ 关闭监视器");
-        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        qp.topMargin = dp(9);
-        menu.addView(menuQuit, qp);
-
-        menu.setOnTouchListener(new DragTouch((v, e) -> {
-            if (hit(menuClose, e)) {
-                closeMenu();
-                return;
-            }
-            if (hit(menuQuit, e)) {
-                stopSelf();
-                return;
-            }
-            if (hit(menuLock, e)) {
-                toggleLock();
-                return;
-            }
-            for (int i = 0; i < menuRows.length; i++) {
-                if (hit(menuRows[i], e)) {
-                    toggleWindow(i);
-                    return;
+        private void onTap(MotionEvent e) {
+            // 所有窗口统一：双击关闭，单击延迟 300ms 执行各自主行为（防止双击误触发）
+            long now = System.currentTimeMillis();
+            if (now - lastTapAt < 300) {
+                lastTapAt = 0;
+                if (pendingTap != null) {
+                    ui.removeCallbacks(pendingTap);
+                    pendingTap = null;
                 }
+                hideWin(idx);
+                return;
             }
-        }, null, false));
-    }
-
-    /** 菜单行状态刷新：已开启 淡蓝色 / 未开启 暗红色 */
-    private void updateMenu() {
-        if (!menuOpen) return;
-        for (int i = 0; i < menuRows.length; i++) {
-            menuRows[i].setText((winOpen[i] ? "✓ " : "✗ ") + WIN_LABELS[i]);
-            menuRows[i].setTextColor(winOpen[i] ? 0xFF7DD3FC : 0xFFB91C1C);
+            lastTapAt = now;
+            pendingTap = () -> {
+                pendingTap = null;
+                switch (idx) {
+                    case M_LOAD:   // 单击展开/折叠
+                        setExpanded(!expanded);
+                        break;
+                    case M_FPS:    // 单击开始/停止录制
+                        toggleRec();
+                        break;
+                    // M_THR / M_TEMP / M_PWR：单击无动作
+                }
+            };
+            ui.postDelayed(pendingTap, 300);
         }
-        menuLock.setText(locked ? "✓ 位置已锁定" : "✗ 位置未锁定");
-        menuLock.setTextColor(locked ? 0xFF7DD3FC : 0xFFB91C1C);
     }
 
-    /** 锁定/解锁位置：锁定后窗口不可拖动并隐藏菜单胶囊，点击任意窗口唤出菜单 */
+    /** 长按切换位置锁定（仅当前会话内生效，重启服务后恢复可拖动） */
     private void toggleLock() {
         locked = !locked;
-        getSharedPreferences("colorfc", MODE_PRIVATE).edit().putBoolean("win_locked", locked).apply();
-        if (locked) {
-            closeMenu();
-            if (anyWindowOpen()) hidePill();
-            Toast.makeText(this, "已锁定 · 点击任意悬浮窗唤出菜单", Toast.LENGTH_SHORT).show();
-        } else {
+        Toast.makeText(this, locked ? "位置已锁定 · 再次长按解锁" : "位置已解锁，可自由拖动",
+                Toast.LENGTH_SHORT).show();
+        // 解锁任意窗口时，若菜单胶囊处于隐藏状态则自动恢复
+        if (!locked && pillHidden) {
             showPill();
-            updateMenu();
-            Toast.makeText(this, "已解锁，可自由拖动", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private boolean anyWindowOpen() {
-        for (boolean b : winOpen) if (b) return true;
-        return false;
-    }
+    // ==================== Scene 款三圆环（CPU/GPU/电池） ====================
 
-    private void hidePill() {
-        if (pill == null) return;
-        try {
-            wm.removeView(pill);
-        } catch (Exception ignored) {
+    private class RingsView extends View {
+        RingsView() {
+            super(MonitorService.this);
         }
-    }
 
-    private void showPill() {
-        if (pill == null) return;
-        try {
-            wm.addView(pill, pill.getLayoutParams());
-        } catch (Exception ignored) {
+        private boolean vertical = false;
+        private float pC, pG, pB;
+        private String iC = "--", iG = "--", iB = "--";
+        private String sC = "--", sG = "--", sB = "--";
+        private final RectF rect = new RectF();
+
+        void setVertical(boolean v) {
+            vertical = v;
+            requestLayout();
         }
-    }
 
-    // ==================== 独立悬浮窗 ====================
-
-    /** 监视窗背景：半透明深色 + 青色描边 */
-    private GradientDrawable winBg(int radius) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xC0101820);
-        bg.setStroke(1, 0x5000E5FF);
-        bg.setCornerRadius(radius);
-        return bg;
-    }
-
-    /** 菜单背景 */
-    private GradientDrawable menuBg() {
-        return winBg(dp(10));
-    }
-
-    private WindowManager.LayoutParams overlayLp() {
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.START;
-        return lp;
-    }
-
-    private void toggleWindow(int i) {
-        if (winOpen[i]) closeWindow(i);
-        else openWindow(i);
-    }
-
-    private void openWindow(int i) {
-        if (winOpen[i]) return;
-        addWindow(i);
-        winOpen[i] = true;
-        saveWins();
-        updateMenu();
-        updateAll();
-    }
-
-    private void closeWindow(int i) {
-        if (!winOpen[i]) return;
-        if (i == 4 && recording) stopRec(false);   // 关闭帧率窗时结束录制
-        try {
-            wm.removeView(winBox[i]);
-        } catch (Exception ignored) {
+        void data(float c, String ic, String sc,
+                  float g, String ig, String sg,
+                  float b, String ib, String sb) {
+            pC = c; iC = ic; sC = sc;
+            pG = g; iG = ig; sG = sg;
+            pB = b; iB = ib; sB = sb;
+            invalidate();
         }
-        winOpen[i] = false;
-        saveWins();
-        updateMenu();
-        // 锁定时关掉全部窗口则恢复菜单胶囊，避免无法唤出菜单
-        if (locked && !anyWindowOpen()) showPill();
-    }
 
-    private void addWindow(int i) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.HORIZONTAL);
-        box.setBackground(winBg(dp(10)));
-        box.setPadding(dp(8), dp(3), dp(6), dp(3));
-
-        final TextView close = new TextView(this);
-        if (i == 4) {
-            tvRec = new TextView(this);
-            tvRec.setTextColor(0xFF00E5FF);
-            tvRec.setTextSize(11);
-            tvRec.setText("●");
-            tvRec.setPadding(dp(1), dp(1), dp(4), dp(1));
-            box.addView(tvRec, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        }
-        winText[i] = new TextView(this);
-        winText[i].setTextColor(WIN_COLORS[i]);
-        winText[i].setTextSize(11);
-        winText[i].setTypeface(Typeface.MONOSPACE);
-        box.addView(winText[i], new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        close.setTextColor(0xFF8B949E);
-        close.setTextSize(11);
-        close.setText("✕");
-        close.setPadding(dp(6), dp(1), dp(1), dp(1));
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        cp.leftMargin = dp(4);
-        box.addView(close, cp);
-
-        winLp[i] = overlayLp();
-        winLp[i].x = dp(16) + i * dp(10);
-        winLp[i].y = dp(170) + i * dp(40);
-        final int idx = i;
-        box.setOnTouchListener(new DragTouch((v, e) -> {
-            if (hit(close, e)) {
-                closeWindow(idx);
-                return;
+        @Override
+        protected void onMeasure(int wms, int hms) {
+            int d = dp(34), gap = dp(12), lab = dp(13);
+            if (vertical) {
+                setMeasuredDimension(d, 3 * (d + lab) + 2 * dp(8));
+            } else {
+                setMeasuredDimension(3 * d + 2 * gap, d + lab);
             }
-            if (idx == 4 && hit(tvRec, e)) {
-                toggleRec();
-                return;
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            int d = dp(34), lab = dp(13), gap = dp(12);
+            float stroke = dp(3);
+            float r = d / 2f - stroke / 2;
+
+            Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
+            track.setStyle(Paint.Style.STROKE);
+            track.setStrokeWidth(stroke);
+            track.setStrokeCap(Paint.Cap.ROUND);
+            track.setColor(0x26FFFFFF);
+
+            Paint prog = new Paint(track);
+
+            Paint inside = new Paint(Paint.ANTI_ALIAS_FLAG);
+            inside.setColor(COL_VALUE);
+            inside.setTextSize(dp(8));
+            inside.setTextAlign(Paint.Align.CENTER);
+
+            Paint sub = new Paint(Paint.ANTI_ALIAS_FLAG);
+            sub.setColor(0xFFB0B8C4);
+            sub.setTextSize(dp(8.5f));
+            sub.setTextAlign(Paint.Align.CENTER);
+
+            float[] pcts = {pC, pG, pB};
+            int[] cols = {COL_GREEN, COL_GREEN, pB <= 25 ? COL_ORANGE : COL_GREEN};
+            String[] ins = {iC, iG, iB};
+            String[] subs = {sC, sG, sB};
+
+            for (int i = 0; i < 3; i++) {
+                float cx = vertical ? d / 2f : d / 2f + i * (d + gap);
+                float cy = vertical ? d / 2f + i * (d + lab + dp(8)) : d / 2f;
+                float top = vertical ? i * (d + lab + dp(8)) : 0;
+                rect.set(cx - r, cy - r, cx + r, cy + r);
+                c.drawArc(rect, 0, 360, false, track);
+                prog.setColor(cols[i]);
+                float p = Math.max(0, Math.min(100, pcts[i]));
+                if (p > 0.5f) c.drawArc(rect, -90, 3.6f * p, false, prog);
+                c.drawText(ins[i], cx, cy + dp(3), inside);
+                c.drawText(subs[i], cx, top + d + dp(10), sub);
             }
-            // 锁定状态下点击窗口主体唤出菜单（可解锁/开关其他窗）
-            if (locked) openMenuAt(v);
-        }, null, true));
-        winBox[i] = box;
-        wm.addView(box, winLp[i]);
-        winText[i].setText(WIN_LABELS[i] + " --");
-    }
-
-    private void saveWins() {
-        SharedPreferences.Editor ed = getSharedPreferences("colorfc", MODE_PRIVATE).edit();
-        for (int i = 0; i < winOpen.length; i++) ed.putBoolean(WIN_KEYS[i], winOpen[i]);
-        ed.apply();
-    }
-
-    private int dp(float v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+        }
     }
 
     // ==================== 界面刷新 ====================
 
-    /** 追加一个着色片段，非首个片段前自动加 " · " 分隔 */
-    private void item(SpannableStringBuilder b, String txt, int color) {
-        if (b.length() > 0) {
-            int s = b.length();
-            b.append(" · ");
-            b.setSpan(new ForegroundColorSpan(0xFF566373), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
+    /** "标签 数值" 两段式行：浅灰标签 + 着色数值 */
+    private void setRow(TextView tv, String label, String value, int valueColor) {
+        SpannableStringBuilder b = new SpannableStringBuilder();
         int s = b.length();
-        b.append(txt);
-        b.setSpan(new ForegroundColorSpan(color), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        b.append(label);
+        b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        b.append(' ');
+        s = b.length();
+        b.append(value);
+        b.setSpan(new ForegroundColorSpan(valueColor), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tv.setText(b);
     }
 
-    /** 温度着色：≥75 红 ≥60 橙 其余白 */
-    private static int tColor(double t) {
-        return t >= 75 ? 0xFFEF4444 : t >= 60 ? 0xFFF59E0B : 0xFFE6EDF3;
-    }
-
-    private void updateAll() {
-        if (winOpen[0]) winText[0].setText(cW >= 0
-                ? String.format(Locale.US, "功耗 %.2fW", cW) : "功耗 --");
-        if (winOpen[1]) {
-            SpannableStringBuilder b = new SpannableStringBuilder();
-            item(b, "CPU " + (cBusy >= 0 ? String.format(Locale.US, "%.0f%%", cBusy) : "--"), 0xFFE6EDF3);
-            if (cCpuM > 0) item(b, String.format(Locale.US, "%.0fMHz", cCpuM), 0xFF8B949E);
-            winText[1].setText(b);
-        }
-        if (winOpen[2]) winText[2].setText(cGpuM > 0
-                ? String.format(Locale.US, "GPU %.0fMHz", cGpuM) : "GPU --");
-        if (winOpen[3]) {
-            SpannableStringBuilder b = new SpannableStringBuilder();
-            item(b, String.format(Locale.US, "CPU温度 %.1f℃", cCpuT), tColor(cCpuT));
-            item(b, String.format(Locale.US, "SOC温度 %.1f℃", cSocT), tColor(cSocT));
-            winText[3].setText(b);
-        }
-        if (winOpen[4]) {
-            if (recording) {
-                SpannableStringBuilder b = new SpannableStringBuilder();
-                item(b, String.format(Locale.US, "● %02d:%02d", recShown / 60000, (recShown / 1000) % 60), 0xFFEF4444);
-                item(b, String.format(Locale.US, "%.1ffps", cHz), 0xFF8B949E);
-                winText[4].setText(b);
-            } else {
-                winText[4].setText(cHz > 0 ? String.format(Locale.US, "%.1ffps", cHz) : "--fps");
+    private void updateUi() {
+        // 负载监视器
+        if (winOpen[M_LOAD]) {
+            float cpuP = cBusy >= 0 ? (float) cBusy : 0;
+            float gpuP = gpuLoad >= 0 ? gpuLoad
+                    : (gpuMax > 0 && cGpuM > 0 ? (float) Math.min(100, 100 * cGpuM / gpuMax) : 0);
+            float batP = batPct >= 0 ? batPct : 0;
+            rings.data(
+                    cpuP, String.format(Locale.US, "%.0f", cpuP),
+                    cCpuM > 0 ? String.format(Locale.US, "%.0fMHz", cCpuM) : "--",
+                    gpuP, String.format(Locale.US, "%.0f", gpuP),
+                    cGpuM > 0 ? String.format(Locale.US, "%.0fMHz", cGpuM) : "--",
+                    batP, String.format(Locale.US, "%.0f%%", batP),
+                    cBatT > 0 ? String.format(Locale.US, "%.1f℃", cBatT) : "--");
+            if (expanded) {
+                ensureClusterRows();
+                setRow(rowRam, "#RAM", ramPct >= 0
+                        ? String.format(Locale.US, "%.0f%% · %.1fG", ramPct, ramUsedG) : "--", COL_VALUE);
+                setRow(rowCpu, "#CPU", cCpuT > 0
+                        ? String.format(Locale.US, "%.1f℃", cCpuT) : "--", tColor(cCpuT));
+                TextView[] rows = clusterRows();
+                for (int i = 0; i < nCluster && i < rows.length; i++) {
+                    setRow(rows[i], "#" + clLbl[i],
+                            String.format(Locale.US, "%.0fMHz · %.0f%%", clFreq[i], clBusy[i]), COL_VALUE);
+                }
+                setRow(rowGpu, "#GPU", gpuLoad >= 0
+                        ? String.format(Locale.US, "%.0fMHz · %.0f%%", cGpuM, gpuLoad)
+                        : String.format(Locale.US, "%.0fMHz", cGpuM), COL_VALUE);
+                setRow(rowBat, "#BAT", batPct >= 0
+                        ? String.format(Locale.US, "%.0f%% · %.1f℃", batPct, cBatT) : "--", tColor(cBatT));
             }
         }
-    }
 
-    // ==================== 快速循环（500ms：功耗/CPU/帧率 实时） ====================
+        // 功耗监视器：仅 数字+W
+        if (winOpen[M_PWR]) {
+            pwrBig.setText(cW >= 0 ? String.format(Locale.US, "%.2fW", cW) : "--W");
+        }
 
-    private void fastLoop() {
-        boolean needPower = winOpen[0];
-        boolean needCpu = winOpen[1] || recording;
-        boolean needHz = winOpen[4] || recording;
-        if (needPower || needCpu || needHz) {
-            new Thread(() -> {
-                if (needPower) {
-                    PowerMonitor.BatteryStat st = null;
-                    try {
-                        st = PowerMonitor.readOnce();
-                    } catch (Exception ignored) {
-                    }
-                    if (st != null) {
-                        // 与主页一致的电芯模式修正（显示与记录同步）
-                        cW = PowerMonitor.applyCellMode(st, cellMode);
-                        cBatT = st.tempC;
-                        // 功耗历史记录（内部节流），按修正后功耗写入
-                        st.watts = cW;
-                        PowerHistoryManager.record(this, st);
-                    } else {
-                        cW = -1;
-                    }
-                }
-                if (needCpu) cBusy = readCpuBusy();
-                if (needHz && !recording) cHz = realFps();
-                ui.post(this::updateAll);
-                ui.postDelayed(this::fastLoop, 500);
-            }).start();
-        } else {
-            ui.postDelayed(this::fastLoop, 500);
+        // 帧率记录器
+        if (winOpen[M_FPS]) {
+            SpannableStringBuilder b = new SpannableStringBuilder();
+            if (recording) {
+                int s = b.length();
+                b.append(String.format(Locale.US, "● %02d:%02d",
+                        recShown / 60000, (recShown / 1000) % 60));
+                b.setSpan(new ForegroundColorSpan(COL_RED), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                s = b.length();
+                b.append(String.format(Locale.US, " %.1ffps", cHz > 0 ? cHz : 0));
+                b.setSpan(new ForegroundColorSpan(COL_VALUE), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            } else {
+                int s = b.length();
+                b.append("#FPS");
+                b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                b.append(' ');
+                s = b.length();
+                b.append(cHz > 0 ? String.format(Locale.US, "%.1f", cHz) : "--");
+                b.setSpan(new ForegroundColorSpan(COL_VALUE), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            fpsText.setText(b);
+        }
+
+        // 温度监视器
+        if (winOpen[M_TEMP]) {
+            SpannableStringBuilder b = new SpannableStringBuilder();
+            appendTemp(b, "CPU", cCpuT);
+            b.append("  ");
+            appendTemp(b, "SOC", cSocT);
+            b.append("  ");
+            appendTemp(b, "BAT", cBatT);
+            tempText.setText(b);
         }
     }
 
-    // ==================== 慢速循环（2s：GPU/CPU 频率/温度） ====================
+    private void appendTemp(SpannableStringBuilder b, String label, double v) {
+        int s = b.length();
+        b.append(label);
+        b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        b.append(' ');
+        s = b.length();
+        b.append(v > 0 ? String.format(Locale.US, "%.1f℃", v) : "--");
+        b.setSpan(new ForegroundColorSpan(tColor(v)), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    /** 温度着色：≥75 红 ≥60 橙 其余 Scene 纯白 */
+    private static int tColor(double t) {
+        return t >= 75 ? COL_RED : t >= 60 ? 0xFFF59E0B : COL_VALUE;
+    }
+
+    private TextView[] clusterRows() {
+        int n = clusterBox.getChildCount();
+        TextView[] out = new TextView[n];
+        for (int i = 0; i < n; i++) out[i] = (TextView) clusterBox.getChildAt(i);
+        return out;
+    }
+
+    /** 集群行按需创建（集群数量在首次慢速扫描后确定） */
+    private void ensureClusterRows() {
+        if (rowsBuilt == nCluster || nCluster <= 0) return;
+        clusterBox.removeAllViews();
+        for (int i = 0; i < nCluster && i < MAX_CL; i++) {
+            TextView tv = mkText("--", COL_VALUE, 10);
+            clusterBox.addView(tv);
+        }
+        rowsBuilt = nCluster;
+    }
+
+    // ==================== 快速循环（500ms：功耗/电量/CPU/帧率） ====================
+
+    private void fastLoop() {
+        new Thread(() -> {
+            try {
+                PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
+                if (st != null) {
+                    // 与主页一致的电芯模式修正（显示与记录同步）
+                    cW = PowerMonitor.applyCellMode(st, cellMode);
+                    cV = st.volts;
+                    cA = st.amps;
+                    cBatT = st.tempC;
+                    st.watts = cW;
+                    PowerHistoryManager.record(this, st);
+                } else {
+                    cW = -1;
+                    cV = -1;
+                    cA = -1;
+                }
+            } catch (Exception ignored) {
+            }
+            readBattery();
+            if (winOpen[M_LOAD]) {
+                cBusy = readCpuBusy();
+                aggClusters(readCores());
+            }
+            if (winOpen[M_FPS] || recording) cHz = currentFps();
+            ui.post(this::updateUi);
+            ui.postDelayed(this::fastLoop, 500);
+        }).start();
+    }
+
+    /** 电量 %：ACTION_BATTERY_CHANGED 粘性广播（免 root） */
+    private void readBattery() {
+        try {
+            Intent b = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (b != null) {
+                int lvl = b.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int sc = b.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                if (lvl >= 0 && sc > 0) batPct = 100f * lvl / sc;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 按集群聚合每核心占用 % */
+    private void aggClusters(float[] coreBusy) {
+        if (coreBusy == null) return;
+        if (clMap == null || nCluster <= 0) {
+            float sum = 0;
+            for (float v : coreBusy) sum += v;
+            clBusy[0] = coreBusy.length > 0 ? sum / coreBusy.length : 0;
+            return;
+        }
+        for (int c = 0; c < nCluster && c < clMap.length; c++) {
+            float sum = 0;
+            int n = 0;
+            for (int core : clMap[c]) {
+                if (core >= 0 && core < coreBusy.length) {
+                    sum += coreBusy[core];
+                    n++;
+                }
+            }
+            clBusy[c] = n > 0 ? sum / n : 0;
+        }
+    }
+
+    // ==================== 慢速循环（2s：GPU/CPU 集群/温度/RAM） ====================
 
     private void slowLoop() {
-        if (winOpen[1] || winOpen[2] || winOpen[3]) {
-            new Thread(() -> {
+        new Thread(() -> {
+            if (winOpen[M_LOAD] || winOpen[M_TEMP]) {
                 String out = "";
                 try {
                     RootShell.Result r = RootShell.exec(SCAN);
                     if (r.ok() && r.out != null) out = r.out;
                 } catch (Exception ignored) {
                 }
-                double gpuHz = parseGpu(out);
-                cGpuM = gpuHz > 0 ? gpuHz / 1e6 : 0;
-                cCpuM = parseFreq(out) / 1000;
+                int q = 0;
+                for (String line : out.split("\\n")) {
+                    if (line.startsWith("G:")) {
+                        double g = parseGpu(line);
+                        cGpuM = g > 0 ? g / 1e6 : 0;
+                    } else if (line.startsWith("GL:")) {
+                        gpuLoad = parseGpuLoad(line);
+                    } else if (line.startsWith("GM:")) {
+                        double m = parseGpuMax(line);
+                        if (m > 0) gpuMax = m;
+                    } else if (line.startsWith("Q:")) {
+                        try {
+                            double f = Double.parseDouble(line.substring(2).trim());
+                            if (q < MAX_CL) clFreq[q] = f / 1000;   // kHz → MHz
+                        } catch (Exception ignored) {
+                        }
+                        q++;
+                    } else if (line.startsWith("R:") && clMap == null) {
+                        buildClusterMap(line.substring(2));
+                    }
+                }
+                if (nCluster <= 0) nCluster = Math.min(MAX_CL, Math.max(1, q));
+                double max = 0;
+                for (int i = 0; i < nCluster; i++) max = Math.max(max, clFreq[i]);
+                cCpuM = max;
                 double cpuT = parseZoneTemp(out, "cpu", cBatT);
                 cCpuT = cpuT;
                 cSocT = parseZoneTemp(out, "soc", cpuT);
-                ui.post(this::updateAll);
-                ui.postDelayed(this::slowLoop, 2000);
-            }).start();
-        } else {
+                readMem();
+            }
+            ui.post(this::updateUi);
             ui.postDelayed(this::slowLoop, 2000);
+        }).start();
+    }
+
+    /** R 行解析：related_cpu 拓扑 → 集群映射与标签（如 0-3 / 4-7） */
+    private void buildClusterMap(String r) {
+        try {
+            List<int[]> map = new ArrayList<>();
+            List<String> lbl = new ArrayList<>();
+            for (String seg : r.split(";")) {
+                seg = seg.trim();
+                if (seg.isEmpty()) continue;
+                String[] cs = seg.split("\\s+");
+                int[] cores = new int[cs.length];
+                for (int i = 0; i < cs.length; i++) cores[i] = Integer.parseInt(cs[i].trim());
+                if (cores.length == 0) continue;
+                map.add(cores);
+                lbl.add(cores[0] + "-" + cores[cores.length - 1]);
+                if (map.size() >= MAX_CL) break;
+            }
+            if (!map.isEmpty()) {
+                clMap = map.toArray(new int[0][]);
+                for (int i = 0; i < clMap.length; i++) clLbl[i] = lbl.get(i);
+                nCluster = clMap.length;
+            }
+        } catch (Exception ignored) {
         }
     }
 
-    // ==================== 后台功耗记录（功耗窗关闭时仍采样） ====================
+    /** /proc/meminfo → 已用百分比 + 已用 GB */
+    private void readMem() {
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/meminfo"))) {
+            long total = -1, avail = -1;
+            String l;
+            while ((l = r.readLine()) != null) {
+                if (total < 0 && l.startsWith("MemTotal:")) {
+                    total = Long.parseLong(l.split("\\s+")[1]);
+                } else if (avail < 0 && l.startsWith("MemAvailable:")) {
+                    avail = Long.parseLong(l.split("\\s+")[1]);
+                } else if (total >= 0 && avail >= 0) break;
+            }
+            if (total > 0 && avail >= 0) {
+                ramPct = 100f * (total - avail) / total;
+                ramUsedG = (total - avail) / 1048576f;
+            }
+        } catch (Exception ignored) {
+        }
+    }
 
-    private void historyLoop() {
-        if (!winOpen[0]) {   // 功耗窗开启时 fastLoop 已高频记录
-            new Thread(() -> {
-                try {
-                    PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
-                    if (st != null) {
-                        // 记录功耗按主页电芯模式修正（与显示一致）
-                        st.watts = PowerMonitor.applyCellMode(st, cellMode);
-                        PowerHistoryManager.record(this, st);
+    // ==================== 线程监视器循环（250ms 实时） ====================
+
+    private void threadLoop() {
+        new Thread(() -> {
+            if (winOpen[M_THR]) sampleThreads();
+            ui.postDelayed(this::threadLoop, 250);
+        }).start();
+    }
+
+    /** 前台应用线程 CPU 占用：pid 缓存 + 单次 awk 全量读取（250ms 实时差分） */
+    private void sampleThreads() {
+        try {
+            long now = SystemClock.elapsedRealtime();
+            if (thrPid <= 0 || now - thrPidAt > 4000) {   // 前台 pid 每 4 秒解析一次（切换应用自动跟随）
+                String rs = "f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
+                        + "p=$(echo \"$f\" | grep -oE '[A-Za-z0-9_.]+/' | head -1); p=${p%/};"
+                        + "echo \"K:$(getconf CLK_TCK 2>/dev/null)\";"
+                        + "pid=$(pidof \"$p\" 2>/dev/null | cut -d' ' -f1); echo \"I:$pid\";";
+                RootShell.Result r0 = RootShell.exec(rs, 8);
+                if (r0.ok() && r0.out != null) {
+                    for (String line : r0.out.split("\\n")) {
+                        String t = line.trim();
+                        if (t.startsWith("K:")) {
+                            try {
+                                double k = Double.parseDouble(t.substring(2).trim());
+                                if (k > 0) thrTck = k;
+                            } catch (Exception ignored) {
+                            }
+                        } else if (t.startsWith("I:")) {
+                            try {
+                                thrPid = Integer.parseInt(t.substring(2).trim());
+                            } catch (Exception ignored) {
+                                thrPid = 0;
+                            }
+                        }
                     }
-                } catch (Exception ignored) {
                 }
-                ui.postDelayed(this::historyLoop, 10_000);
-            }).start();
-        } else {
-            ui.postDelayed(this::historyLoop, 10_000);
+                thrPidAt = now;
+                if (thrPid <= 0) return;   // 拿不到 pid：保持上一次显示
+            }
+            String cmd = "if [ -d /proc/" + thrPid + " ]; then echo TZQ7_;"
+                    + " awk '{n=split(FILENAME,a,\"/\"); print a[n-1] \" \" $14+$15}' /proc/" + thrPid + "/task/*/stat 2>/dev/null;"
+                    + " echo NZQ7_; cat /proc/" + thrPid + "/task/*/comm 2>/dev/null; echo EZQ7_;"
+                    + " else echo DEADZQ7_; fi";
+            RootShell.Result r = RootShell.exec(cmd, 4);
+            if (!r.ok() || r.out == null) return;
+            long now2 = SystemClock.elapsedRealtime();
+            Map<Integer, long[]> cur = new HashMap<>();
+            List<Integer> order = new ArrayList<>();   // stat 输出顺序（升序 tid）
+            List<String> names = new ArrayList<>();    // comm 输出顺序（与 stat 同 glob 序）
+            int mode = 0;   // 0 头 / 1 stat / 2 comm
+            for (String line : r.out.split("\\n")) {
+                if (line.equals("TZQ7_")) { mode = 1; continue; }
+                if (line.equals("NZQ7_")) { mode = 2; continue; }
+                if (line.equals("EZQ7_")) break;
+                if (line.equals("DEADZQ7_")) { thrPid = 0; return; }
+                if (mode == 1) {
+                    int sp = line.indexOf(' ');
+                    if (sp <= 0) continue;
+                    try {
+                        int tid = Integer.parseInt(line.substring(0, sp).trim());
+                        long u = Long.parseLong(line.substring(sp + 1).trim());
+                        cur.put(tid, new long[]{u});
+                        order.add(tid);
+                    } catch (Exception ignored) {
+                    }
+                } else if (mode == 2) {
+                    String nm = line.trim();
+                    names.add(nm.isEmpty() ? "?" : nm);
+                }
+            }
+            if (cur.isEmpty()) return;
+            // 名称按输出顺序与 tid 对位（仅展示用）
+            Map<Integer, String> nmOf = new HashMap<>();
+            for (int i = 0; i < order.size() && i < names.size(); i++) nmOf.put(order.get(i), names.get(i));
+            if (thrPrev != null && now2 > thrLastAt) {
+                double dt = (now2 - thrLastAt) / 1000.0;
+                List<double[]> top = new ArrayList<>();   // {pct, tid}
+                // 逐线程差分：同 tid 对位，按真实采样间隔折算占用率
+                for (Map.Entry<Integer, long[]> en : cur.entrySet()) {
+                    long[] prev = thrPrev.get(en.getKey());
+                    if (prev == null) continue;
+                    long d = en.getValue()[0] - prev[0];
+                    if (d <= 0) continue;
+                    double pct = Math.min(999, d / thrTck / dt * 100);
+                    top.add(new double[]{pct, en.getKey()});
+                }
+                top.sort(Comparator.comparingDouble(a -> -a[0]));
+                List<double[]> pick = top.subList(0, Math.min(6, top.size()));
+                final String[] txt = new String[6];
+                for (int i = 0; i < 6; i++) {
+                    if (i < pick.size()) {
+                        double pct = pick.get(i)[0];
+                        String nm = nmOf.get((int) pick.get(i)[1]);
+                        if (nm == null) nm = "?";
+                        if (nm.length() > 14) nm = nm.substring(0, 14);
+                        txt[i] = String.format(Locale.US, "%s %.0f%%", nm, pct);
+                    } else txt[i] = null;
+                }
+                ui.post(() -> {
+                    for (int i = 0; i < 6; i++) {
+                        if (txt[i] == null) continue;   // 无增量数据：保持上一次显示，不回落 "--"
+                        {
+                            int sp = txt[i].lastIndexOf(' ');
+                            SpannableStringBuilder b = new SpannableStringBuilder();
+                            int s = b.length();
+                            b.append(txt[i].substring(0, sp));
+                            b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                            b.append(' ');
+                            s = b.length();
+                            b.append(txt[i].substring(sp + 1));
+                            double pct = Double.parseDouble(txt[i].substring(sp + 1).replace("%", ""));
+                            b.setSpan(new ForegroundColorSpan(
+                                            pct >= 80 ? COL_RED : pct >= 50 ? 0xFFF59E0B : COL_VALUE),
+                                    s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                            thrRows[i].setText(b);
+                        }
+                    }
+                });
+            }
+            thrPrev = cur;
+            thrLastAt = now2;
+        } catch (Exception ignored) {
         }
     }
 
@@ -682,11 +1321,7 @@ public class MonitorService extends Service {
             recLastIdle = -1;
             recLastTotal = -1;
             lastCoreIdle = null;
-            if (tvRec != null) {
-                tvRec.setText("■");
-                tvRec.setTextColor(0xFFEF4444);
-            }
-            Toast.makeText(this, "开始录制（至少 3 秒）", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "开始录制（至少 3 秒），再次点击停止并保存", Toast.LENGTH_SHORT).show();
             recSample();
         } else {
             stopRec(true);
@@ -695,10 +1330,6 @@ public class MonitorService extends Service {
 
     private void stopRec(boolean toast) {
         recording = false;
-        if (tvRec != null) {
-            tvRec.setText("●");
-            tvRec.setTextColor(0xFF00E5FF);
-        }
         long dur = System.currentTimeMillis() - recStart;
         int n = ts.size();
         if (dur < MIN_REC_MS || n < 4) {
@@ -713,7 +1344,7 @@ public class MonitorService extends Service {
     private void recSample() {
         if (!recording) return;
         new Thread(() -> {
-            float hz = realFps();
+            float hz = currentFps();
             Double busy = recCpuTotal();
             float[] coreBusy = readCores();
             if (!recording) return;
@@ -726,7 +1357,7 @@ public class MonitorService extends Service {
             }
             cHz = hz;
             recShown = now - recStart;
-            ui.post(this::updateAll);
+            ui.post(this::updateUi);
             ui.postDelayed(this::recSample, 500);
         }).start();
     }
@@ -1085,14 +1716,28 @@ public class MonitorService extends Service {
         return 0;
     }
 
-    /** CPU 最大频率（kHz） */
-    private double parseFreq(String out) {
+    /** GPU 负载 %：gpu_load / gpu_busy_percentage / gpuload（>100 视作十分位百分比） */
+    private float parseGpuLoad(String line) {
         try {
-            for (String line : out.split("\\n")) {
-                if (line.startsWith("F:")) {
-                    return Double.parseDouble(line.substring(2).trim());
-                }
-            }
+            String s = line.substring(3).trim().replace("%", "");
+            s = s.replaceAll("[^0-9.].*$", "").trim();
+            if (s.isEmpty()) return -1;
+            float v = Float.parseFloat(s);
+            if (v > 100 && v <= 1000) v /= 10f;
+            return Math.max(0, Math.min(100, v));
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    /** GPU 最大频率（MHz）：<3000 视作 MHz，<1e6 视作 kHz，其余视作 Hz */
+    private double parseGpuMax(String line) {
+        try {
+            double v = Double.parseDouble(line.substring(3).trim());
+            if (v <= 0) return 0;
+            if (v < 3000) return v;
+            if (v < 1_000_000) return v / 1000;
+            return v / 1e6;
         } catch (Exception ignored) {
         }
         return 0;
@@ -1128,163 +1773,132 @@ public class MonitorService extends Service {
     // ==================== 实时帧率（真实渲染帧率，非面板刷新率） ====================
 
     /**
-     * 实时帧率三级策略（全部为实测渲染帧率，绝不显示面板刷新率档位）：
-     * 1. SurfaceFlinger --latency：前台图层的帧呈现时间戳 → 最近窗口真实 fps（游戏 SurfaceView 也计入）
-     * 2. dumpsys gfxinfo：前台应用总渲染帧数差分（部分系统移除了 --latency 时）
-     * 3. dumpsys gfxinfo framestats：PROFILEDATA 帧完成时间戳差分
-     * 全部失败返回 0，界面显示 "--fps"
+     * 实时帧率（增量差分：两次轮询间新增帧 ÷ 跨越时长，停止渲染即归零）：
+     * 1. SurfaceFlinger --latency：前台图层新增帧（游戏 SurfaceView 也计入）
+     * 2. dumpsys gfxinfo：前台应用总渲染帧数差分（--latency 无数据时）
+     * 全部 shell 工作合并为单次调用（FPS_CMD），降低偶发失败与延迟；
+     * 返回 null = 本次检测失败（命令异常/无焦点），0 = 确认空闲
      */
-    private float realFps() {
-        Float f = sfFps();
-        if (f == null) f = gfxFps();
-        if (f == null) f = gfxFrameStatsFps();
-        return f != null ? f : 0f;
-    }
-
-    /** dumpsys gfxinfo framestats：PROFILEDATA 帧完成时间戳差分 → 实时 fps（第三兜底） */
-    private Float gfxFrameStatsFps() {
-        if (fpsPkg == null) return null;
+    private Float realFps() {
         try {
-            RootShell.Result r = RootShell.exec(
-                    "dumpsys gfxinfo " + fpsPkg + " framestats 2>/dev/null", 8);
+            RootShell.Result r = RootShell.exec(FPS_CMD, 8);
             if (!r.ok() || r.out == null) return null;
-            long min = Long.MAX_VALUE, max = 0;
-            int n = 0;
+            String pkg = null, layer = null;
+            long gfx = -1, newest = 0, lastTs = 0;
+            int fresh = 0;
+            boolean afterL = false;
             for (String l : r.out.split("\\n")) {
-                if (!l.matches("\\d+(,\\d+)+")) continue;
-                String[] c = l.split(",");
-                if (c.length < 16) continue;
-                try {
-                    long t = Long.parseLong(c[14]);   // FrameCompleted（纳秒）
-                    if (t <= 0) continue;
-                    n++;
-                    if (t < min) min = t;
-                    if (t > max) max = t;
-                } catch (NumberFormatException ignored) {
+                String t = l.trim();
+                if (t.startsWith("P:")) {
+                    pkg = t.substring(2);
+                    continue;
+                }
+                if (t.startsWith("L:")) {
+                    layer = t.substring(2);
+                    afterL = true;
+                    continue;
+                }
+                if (t.isEmpty()) continue;
+                if (!afterL) {                 // L 之前的纯数字行 = gfxinfo 帧计数
+                    long v = parseNs(t);
+                    if (v >= 0) gfx = v;
+                    continue;
+                }
+                // SF latency 行：取第二列 actual_present_time
+                String[] col = t.split("\\s+");
+                long ts = col.length >= 2 ? parseNs(col[1]) : parseNs(col[0]);
+                if (ts < 1_000_000_000L || ts >= Long.MAX_VALUE / 2) continue;
+                if (ts > newest) newest = ts;
+                // 去重：掉帧/持帧时 SF 会按 vsync 重复写入同一 actual_present_time，
+                // 重复时间戳不计入帧数，防止瞬时算出超过面板刷新率的值
+                if (sfPrevNewest > 0 && ts > sfPrevNewest && ts != lastTs) {
+                    fresh++;
+                    lastTs = ts;
                 }
             }
-            if (n >= 2 && max > min) {
-                double span = (max - min) / 1e9;
-                if (span >= 0.05 && span <= 30) {
-                    return Math.max(1f, Math.min(240f, (float) ((n - 1) / span)));
+            if (pkg != null && pkg.isEmpty()) pkg = null;
+            if (layer != null && layer.isEmpty()) layer = null;
+
+            // 图层或应用变化：重置差分基准，防止跨应用误算
+            boolean changed = !eq(layer, fpsLayer) || !eq(pkg, fpsPkg);
+            if (changed) {
+                sfPrevNewest = -1;
+                gfxFrames = -1;
+            }
+            fpsLayer = layer;
+            fpsPkg = pkg;
+
+            if (layer != null && newest > 0) {
+                if (sfPrevNewest <= 0) {          // 首次：仅建立基准，本轮用 gfx 兜底
+                    sfPrevNewest = newest;
+                } else if (newest <= sfPrevNewest) {
+                    return 0f;                    // 本轮无新帧 → 确认空闲
+                } else {
+                    double span = (newest - sfPrevNewest) / 1e9;
+                    sfPrevNewest = newest;
+                    if (span < 0.005 || span > 120) return 0f;
+                    return Math.max(1f, Math.min(peakHz > 0 ? peakHz : 240f, (float) (fresh / span)));
                 }
+            }
+            if (pkg != null && gfx >= 0) {
+                long now = SystemClock.uptimeMillis();
+                if (gfxFrames >= 0 && gfx >= gfxFrames) {
+                    float f = 1000f * (gfx - gfxFrames) / Math.max(1, now - gfxAt);
+                    gfxFrames = gfx;
+                    gfxAt = now;
+                    return Math.max(0f, Math.min(peakHz > 0 ? peakHz : 240f, f));
+                }
+                gfxFrames = gfx;                  // 首次或计数回绕：仅建立基准
+                gfxAt = now;
             }
         } catch (Exception ignored) {
         }
         return null;
     }
 
-    /** 刷新前台应用图层缓存（约 5 秒一次）：前台包名 + SF 图层列表择优 */
-    private void refreshLayer() {
-        long now = SystemClock.elapsedRealtime();
-        if (fpsLayer != null && now - layerAt < 5000) return;
-        try {
-            RootShell.Result r = RootShell.exec(
-                    "f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
-                            + "p=$(echo \"$f\" | grep -oE '[a-z0-9_.]+/' | head -1);"
-                            + "echo \"P:${p%/}\";"
-                            + "dumpsys SurfaceFlinger --list 2>/dev/null", 8);
-            if (!r.ok() || r.out == null) return;
-            String[] lines = r.out.split("\\n");
-            String pkg = null;
-            int start = 0;
-            for (int i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith("P:")) {
-                    pkg = lines[i].substring(2).trim();
-                    start = i + 1;
-                    break;
-                }
-            }
-            if (pkg == null || pkg.isEmpty()) return;
-            // 择优：含包名的 SurfaceView 图层（游戏帧）优先，否则首个该应用图层
-            String best = null;
-            for (int i = start; i < lines.length; i++) {
-                String l = lines[i].trim();
-                if (l.isEmpty() || !l.contains(pkg)) continue;
-                if (l.contains("SurfaceView")) {
-                    best = l;
-                    break;
-                }
-                if (best == null) best = l;
-            }
-            if (best != null) {
-                fpsLayer = best;
-                fpsPkg = pkg;
-                layerAt = now;
-            }
-        } catch (Exception ignored) {
-        }
+    private static boolean eq(String a, String b) {
+        return a == null ? b == null : a.equals(b);
     }
 
     /**
-     * SurfaceFlinger --latency：读取图层最近呈现的帧时间戳（纳秒，环形缓冲约 127 帧），
-     * fps = 帧数 / 时间跨度。头部为刷新周期值、尾部为 0，用阈值过滤
+     * 检测失败或空闲（无新帧）时保持上一有效值——首次成功后不再回落 "--"，
+     * 仅在从未取得过有效帧率时显示 "--"
      */
-    private Float sfFps() {
-        refreshLayer();
-        if (fpsLayer == null) return null;
-        try {
-            String safe = fpsLayer.replace("'", "'\\''");
-            RootShell.Result r = RootShell.exec(
-                    "dumpsys SurfaceFlinger --latency '" + safe + "' 2>/dev/null", 8);
-            if (!r.ok() || r.out == null) return null;
-            long min = Long.MAX_VALUE, max = 0;
-            int n = 0;
-            for (String l : r.out.split("\\n")) {
-                l = l.trim();
-                if (l.length() < 10 || !l.matches("\\d+")) continue;
-                long t = Long.parseLong(l);
-                if (t < 1_000_000_000L) continue;   // 过滤刷新周期(µs/ms 级)与结尾 0
-                n++;
-                if (t < min) min = t;
-                if (t > max) max = t;
-            }
-            if (n >= 2 && max > min) {
-                double span = (max - min) / 1e9;
-                if (span >= 0.05) {
-                    return Math.max(1f, Math.min(240f, (float) ((n - 1) / span)));
-                }
-            }
-        } catch (Exception ignored) {
+    private float currentFps() {
+        Float f = realFps();
+        if (f != null && f > 0) {
+            lastGoodHz = f;
+            lastGoodAt = SystemClock.elapsedRealtime();
+            return f;
         }
-        return null;
+        return lastGoodAt > 0 ? lastGoodHz : 0f;
     }
 
-    /** dumpsys gfxinfo 前台应用总渲染帧数差分 → 实时 fps（--latency 不可用时的兜底） */
-    private Float gfxFps() {
-        if (fpsPkg == null) return null;
+    /** 安全解析纳秒时间戳 */
+    private static long parseNs(String s) {
         try {
-            RootShell.Result r = RootShell.exec(
-                    "dumpsys gfxinfo " + fpsPkg + " 2>/dev/null | grep -m1 'Total frames rendered'", 8);
-            if (!r.ok() || r.out == null) return null;
-            int i = r.out.lastIndexOf(' ');
-            long cur = Long.parseLong(r.out.substring(i + 1).trim());
-            long now = SystemClock.uptimeMillis();
-            if (gfxFrames >= 0 && cur > gfxFrames) {
-                float fps = 1000f * (cur - gfxFrames) / Math.max(1, now - gfxAt);
-                gfxFrames = cur;
-                gfxAt = now;
-                return Math.max(1f, Math.min(240f, fps));
-            }
-            gfxFrames = cur;   // 首次或计数回绕：只记录基准
-            gfxAt = now;
-        } catch (Exception ignored) {
+            return Long.parseLong(s.trim());
+        } catch (NumberFormatException e) {
+            return -1;
         }
-        return null;
     }
 
     private Notification notif() {
         NotificationManager nm = getSystemService(NotificationManager.class);
         NotificationChannel ch = new NotificationChannel("monitor",
-                "迷你监视器", NotificationManager.IMPORTANCE_LOW);
+                "负载监视器", NotificationManager.IMPORTANCE_LOW);
         nm.createNotificationChannel(ch);
         PendingIntent close = PendingIntent.getService(this, 1,
                 new Intent(this, MonitorService.class).setAction("stop"),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent show = PendingIntent.getService(this, 2,
+                new Intent(this, MonitorService.class).setAction("show_pill"),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, "monitor")
-                .setContentTitle("迷你监视器运行中")
-                .setContentText("≡ 菜单 · 锁定后点击任意悬浮窗唤出菜单")
+                .setContentTitle("监视器功能运行中")
+                .setContentText("点击「监视器」展开功能 · 长按胶囊隐藏 · 长按窗口锁定位置")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
+                .addAction(new Notification.Action.Builder(null, "显示菜单", show).build())
                 .addAction(new Notification.Action.Builder(null, "关闭", close).build())
                 .setOngoing(true)
                 .build();

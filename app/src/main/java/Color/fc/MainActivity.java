@@ -3,6 +3,7 @@ package Color.fc;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
@@ -15,7 +16,6 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -45,9 +45,12 @@ public class MainActivity extends ThemedActivity {
     private TextView socMarketing, socPlatform, rootBadge;
     private TextView powerValue, powerStatus, currentValue, voltageValue, peakValue, cellBadge;
     private TextView cpuCount, batteryLevel, batteryTemp;
-    private SparkView sparkView;
-    private Switch monitorSwitch;
-    private boolean suppressSwitch = false;
+    /** 位置1：迷你悬浮窗文字按钮（点击显隐，无开关） */
+    private TextView monitorToggle;
+    /** 位置2：功耗统计按钮（点击展开/收起近 3 小时曲线） */
+    private TextView histToggle;
+    private LinearLayout powerHistBox;
+    private boolean histExpanded = false;
 
     private SparkView histSpark;
     private TextView histHint;
@@ -74,7 +77,6 @@ public class MainActivity extends ThemedActivity {
         cpuCount = findViewById(R.id.cpuCount);
         batteryLevel = findViewById(R.id.batteryLevel);
         batteryTemp = findViewById(R.id.batteryTemp);
-        sparkView = findViewById(R.id.sparkView);
 
         // 功能入口：直接进入下一页面（转场特效已按需求移除）
         wireBeam(R.id.menuSchedule, ScheduleActivity.class);
@@ -84,26 +86,31 @@ public class MainActivity extends ThemedActivity {
         Warp.press(findViewById(R.id.socCard));
         // 记录卡片：按压动效
         Warp.press(findViewById(R.id.menuFrameRecords));
+        Warp.press(findViewById(R.id.menuPowerRecords));
 
         detectSoc();
         detectRoot();
         startPowerLoop();
+        AppLimitService.ensure(this);   // 已配置单应用负载限制则确保执行服务在跑
 
-        // 迷你悬浮窗开关
-        monitorSwitch = findViewById(R.id.monitorSwitch);
-        monitorSwitch.setOnCheckedChangeListener((btn, on) -> {
-            if (suppressSwitch) return;
-            toggleMonitor(on);
-        });
+        // 位置1：点击"迷你悬浮窗"文字显隐悬浮窗（无开关）
+        monitorToggle = findViewById(R.id.monitorToggle);
+        monitorToggle.setOnClickListener(v -> toggleMonitor(!MonitorService.running));
 
-        // 功耗统计曲线（SOC 卡内）：点击查看历史明细
+        // 位置2：点击"功耗统计"展开/收起近 3 小时曲线
+        histToggle = findViewById(R.id.histToggle);
+        histToggle.setOnClickListener(v -> toggleHist());
+        powerHistBox = findViewById(R.id.powerHistBox);
+
+        // 功耗统计曲线（SOC 卡内）：点击查看 Scene 样式详细记录
         histSpark = findViewById(R.id.histSpark);
         histHint = findViewById(R.id.histHint);
-        findViewById(R.id.powerHistBox).setOnClickListener(v -> showHistoryDialog());
-        refreshHistCurve();
+        powerHistBox.setOnClickListener(v -> PowerHistoryManager.openDetail(this));
 
         // 帧率录制记录卡片
         findViewById(R.id.menuFrameRecords).setOnClickListener(v -> showFrameRecords());
+        // 功耗记录卡片：Scene 样式详细记录
+        findViewById(R.id.menuPowerRecords).setOnClickListener(v -> PowerHistoryManager.openDetail(this));
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         cellBadge.setOnClickListener(v -> showCellDialog());
@@ -191,10 +198,8 @@ public class MainActivity extends ThemedActivity {
     protected void onResume() {
         super.onResume();
         updateCellModeFromPrefs();
-        // 回到前台时同步悬浮窗开关状态（服务可能已被通知栏/✕关闭）
-        suppressSwitch = true;
-        if (monitorSwitch != null) monitorSwitch.setChecked(MonitorService.running);
-        suppressSwitch = false;
+        // 回到前台时同步悬浮窗按钮状态（服务可能已被通知栏/菜单关闭）
+        syncMonitorUi();
     }
 
     @Override
@@ -202,11 +207,20 @@ public class MainActivity extends ThemedActivity {
         super.onPause();
     }
 
-    /** 迷你悬浮窗开关：权限检查 + 启停前台服务 */
+    /** 迷你悬浮窗按钮状态：运行中主题色，未运行次要色 */
+    private void syncMonitorUi() {
+        if (monitorToggle != null) {
+            monitorToggle.setTextColor(MonitorService.running
+                    ? getResources().getColor(R.color.accent)
+                    : getResources().getColor(R.color.textSecondary));
+        }
+    }
+
+    /** 位置1：点击"迷你悬浮窗"文字启停前台服务（无开关） */
     private void toggleMonitor(boolean on) {
         if (on) {
             if (!Settings.canDrawOverlays(this)) {
-                monitorSwitch.setChecked(false);
+                syncMonitorUi();
                 Toast.makeText(this, "请先授予悬浮窗权限后重试", Toast.LENGTH_LONG).show();
                 startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:" + getPackageName())));
@@ -214,8 +228,28 @@ public class MainActivity extends ThemedActivity {
             }
             startForegroundService(new Intent(this, MonitorService.class));
         } else {
-            stopService(new Intent(this, MonitorService.class));
+            // 服务运行且胶囊处于隐藏状态：点击按钮优先恢复菜单胶囊而不是停止服务
+            SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
+            if (MonitorService.running && p.getBoolean("mon_pill_hidden", false)) {
+                Intent it = new Intent(this, MonitorService.class);
+                it.setAction("show_pill");
+                startForegroundService(it);
+            } else {
+                stopService(new Intent(this, MonitorService.class));
+            }
         }
+        syncMonitorUi();
+    }
+
+    /** 位置2：点击"功耗统计"展开/收起近 3 小时曲线 */
+    private void toggleHist() {
+        histExpanded = !histExpanded;
+        powerHistBox.setVisibility(histExpanded ? View.VISIBLE : View.GONE);
+        histToggle.setText(histExpanded ? "功耗统计 ▴" : "功耗统计 ▾");
+        histToggle.setTextColor(histExpanded
+                ? getResources().getColor(R.color.accent)
+                : getResources().getColor(R.color.textSecondary));
+        if (histExpanded) refreshHistCurve();
     }
 
     /** 功耗统计曲线：近 3 小时采样 + 均值/峰值提示 */
@@ -240,23 +274,6 @@ public class MainActivity extends ThemedActivity {
         }).start();
     }
 
-    /** 功耗历史记录弹窗（充/放电会话） */
-    private void showHistoryDialog() {
-        new Thread(() -> {
-            final String text = PowerHistoryManager.historyText(this, 30);
-            runOnUiThread(() -> new AlertDialog.Builder(this)
-                    .setTitle("功耗统计")
-                    .setMessage(text)
-                    .setPositiveButton("关闭", null)
-                    .setNeutralButton("清空记录", (d, w) -> {
-                        PowerHistoryManager.clear(this);
-                        Toast.makeText(this, "已清空功耗记录", Toast.LENGTH_SHORT).show();
-                        refreshHistCurve();
-                    })
-                    .show());
-        }).start();
-    }
-
     /** 帧率录制记录列表：点击条目查看曲线图 */
     private void showFrameRecords() {
         new Thread(() -> {
@@ -273,8 +290,8 @@ public class MainActivity extends ThemedActivity {
                 if (recs.isEmpty()) {
                     new AlertDialog.Builder(this)
                             .setTitle("帧率录制记录")
-                            .setMessage("暂无录制\n\n开启迷你悬浮窗后，点击悬浮窗上的 ● 开始录制，"
-                                    + "再次点击停止并自动保存曲线图（帧率 / CPU线程负载 / CPU使用率）")
+                            .setMessage("暂无录制\n\n开启【监视器功能】→ 点击状态栏\"监视器\"展开列表 → 打开\"帧率记录器\"，"
+                                    + "点击帧率窗口开始录制，再次点击停止并自动保存曲线图（帧率 / CPU线程负载 / CPU使用率）")
                             .setPositiveButton("关闭", null)
                             .show();
                     return;
@@ -370,7 +387,6 @@ public class MainActivity extends ThemedActivity {
 
         powerValue.setText(w > 0 ? String.format(Locale.US, "%.2f", w) : "--");
         if (w > peakWatts) peakWatts = w;
-        sparkView.push(w);
         peakValue.setText(peakWatts > 0 ? String.format(Locale.US, "%.2f W", peakWatts) : "--");
 
         String status = st.status.isEmpty()

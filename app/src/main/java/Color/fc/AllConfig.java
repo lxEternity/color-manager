@@ -148,6 +148,7 @@ public class AllConfig {
         sb.append("    $mokzdz/A/opt2 ").append(ps.opt2).append('\n');
         sb.append("    $mokzdz/A/conservative.sh\n");
         sb.append("    $mokzdz/A/json_cpu_max_min \"").append(ps.cpuMax).append("\" \"").append(ps.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/A/freq0.sh 2>/dev/null\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(ps.llcc).append('\n');
         sb.append("    \n");
         appendUclamp(sb, ps);
@@ -160,6 +161,7 @@ public class AllConfig {
         sb.append("    $mokzdz/A/opt2 ").append(bl.opt2).append('\n');
         sb.append("    $mokzdz/A/scx1.sh\n");
         sb.append("    $mokzdz/A/json_cpu_max_min \"").append(bl.cpuMax).append("\" \"").append(bl.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/A/freq1.sh 2>/dev/null\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(bl.llcc).append('\n');
         sb.append("   \n");
         appendUclamp(sb, bl);
@@ -172,6 +174,7 @@ public class AllConfig {
         sb.append("    $mokzdz/A/opt2 ").append(pf.opt2).append('\n');
         sb.append("    $mokzdz/A/scx2.sh\n");
         sb.append("    $mokzdz/A/json_cpu_max_min \"").append(pf.cpuMax).append("\" \"").append(pf.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/A/freq2.sh 2>/dev/null\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(pf.llcc).append('\n');
         appendUclamp(sb, pf);
         sb.append("fi\n\n");
@@ -185,9 +188,34 @@ public class AllConfig {
         sb.append("    $mokzdz/A/scx3.sh\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(fa.llcc).append('\n');
         sb.append("    $mokzdz/A/json_cpu_max_min \"").append(fa.cpuMax).append("\" \"").append(fa.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/A/freq3.sh 2>/dev/null\n");
         sb.append('\n');
         appendUclamp(sb, fa);
         sb.append("fi\n");
+        return sb.toString();
+    }
+
+    /** 给已部署的方案 conf 补上 freq 调用行（幂等）：每个模式块的 json_cpu_max_min 之后
+     *  追加 sh $mokzdz/{dir}/freq{块}.sh（a.all.sh 用 A，b.all.sh 用 B）。
+     *  调速器页保存时对旧 conf 打补丁，无需重新保存调度 */
+    public static String patchFreqLines(String content, String dir) {
+        if (content == null || content.trim().isEmpty()) return content;
+        StringBuilder sb = new StringBuilder();
+        int mode = -1;
+        for (String line : content.split("\n", -1)) {
+            // 移除旧的补丁行（A 或 B 引用），保证重复执行不叠加
+            if (line.contains("$mokzdz") && (line.contains("/A/freq") || line.contains("/B/freq"))) {
+                continue;
+            }
+            if (line.contains("$action == \"powersave\"")) mode = 0;
+            else if (line.contains("$action == \"balance\"")) mode = 1;
+            else if (line.contains("$action == \"performance\"")) mode = 2;
+            else if (line.contains("$action == \"fast\"")) mode = 3;
+            sb.append(line).append('\n');
+            if (mode >= 0 && line.contains("json_cpu_max_min")) {
+                sb.append("    sh $mokzdz/").append(dir).append("/freq").append(mode).append(".sh 2>/dev/null\n");
+            }
+        }
         return sb.toString();
     }
 

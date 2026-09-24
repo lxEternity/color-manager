@@ -2,6 +2,8 @@ package Color.fc;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.net.Uri;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -71,6 +73,7 @@ public class ScheduleActivity extends ThemedActivity {
         findViewById(R.id.saveBtn).setOnClickListener(v -> saveConfig());
         findViewById(R.id.btnImport).setOnClickListener(v -> importLax());
         findViewById(R.id.btnExport).setOnClickListener(v -> exportLax());
+        findViewById(R.id.btnReset).setOnClickListener(v -> resetDefaults());
 
         buildCards();
 
@@ -351,9 +354,12 @@ public class ScheduleActivity extends ThemedActivity {
         collectCurrent();
         String path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
         String content = AllConfig.generate(currentCfg());
+        // 方案2 的 conf 引用 B/ 脚本目录（调速器参数可按方案分别保存）
+        if ("b".equals(tab)) content = content.replace("$mokzdz/A/", "$mokzdz/B/");
+        final String out = content;
 
         new Thread(() -> {
-            RootShell.Result r = RootShell.writeFile(getCacheDir(), content, path);
+            RootShell.Result r = RootShell.writeFile(getCacheDir(), out, path);
             runOnUiThread(() -> {
                 if (r.ok()) {
                     dirty = false;
@@ -365,22 +371,91 @@ public class ScheduleActivity extends ThemedActivity {
         }).start();
     }
 
+    // ==================== 恢复默认值（可选方案1/方案2/全部） ====================
+
+    /** 弹窗选择要恢复的方案，确认后立即写入出厂默认值并保存 */
+    private void resetDefaults() {
+        if (cfgA == null || cfgB == null) {
+            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        final int[] sel = {0};
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("恢复默认值")
+                .setMessage("选择要恢复出厂默认参数的方案，点击确定后立即写入并保存")
+                .setSingleChoiceItems(opts, 0, (d, w) -> sel[0] = w)
+                .setPositiveButton("确定", (d, w) -> doResetDefaults(sel[0]))
+                .setNegativeButton("取消", null)
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
+    }
+
+    /** w: 0=方案1  1=方案2  2=方案1+方案2。内存替换 + 立即写对应 a/b.all.sh */
+    private void doResetDefaults(int w) {
+        if (w != 1) cfgA = AllConfig.defaults();
+        if (w != 0) cfgB = AllConfig.defaults();
+        if ((w == 0 && "a".equals(tab)) || (w == 1 && "b".equals(tab)) || w == 2) {
+            fillInputs();
+            dirty = false;   // 已直接持久化，无未保存修改
+        }
+        final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : "方案1+方案2";
+        new Thread(() -> {
+            boolean ok = true;
+            if (w != 1) ok = RootShell.writeFile(getCacheDir(), AllConfig.generate(cfgA),
+                    RootShell.CONFIG_DIR + "/a.all.sh").ok() && ok;
+            if (w != 0) ok = RootShell.writeFile(getCacheDir(),
+                    AllConfig.generate(cfgB).replace("$mokzdz/A/", "$mokzdz/B/"),
+                    RootShell.CONFIG_DIR + "/b.all.sh").ok() && ok;
+            final boolean okF = ok;
+            runOnUiThread(() -> Toast.makeText(this, okF
+                    ? "已恢复默认值并保存（" + label + "）"
+                    : "写入失败，请重试", Toast.LENGTH_SHORT).show());
+        }).start();
+    }
+
     // ==================== color.lax 导入导出（方案1+方案2 全部模式） ====================
 
-    /** 导出方案1+方案2 全部模式的调度参数到 Download/color.lax */
+    /** 导入文件选择器请求码 */
+    private static final int REQ_IMPORT = 7301;
+    /** 导入方案选择：0=方案1  1=方案2  2=方案1+2 */
+    private int laxScheme = 2;
+
+    /** 导出前先选择方案（方案1 / 方案2 / 方案1+2），再写入内部储存根目录 color.lax */
     private void exportLax() {
         if (cfgA == null || cfgB == null) {
             Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
+        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("选择要导出的方案")
+                .setSingleChoiceItems(opts, 2, (d, w) -> {
+                    d.dismiss();
+                    doExport(w);
+                })
+                .setNegativeButton("取消", null)
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
+    }
+
+    /** 按所选方案导出（只覆盖文件中对应方案的小节，另一方案保持原样） */
+    private void doExport(int scheme) {
         collectCurrent();   // 当前页签未保存的编辑也一并导出
         LinkedHashMap<String, String> block = new LinkedHashMap<>();
-        putLaxCfg(block, "a", cfgA);
-        putLaxCfg(block, "b", cfgB);
+        if (scheme != 1) putLaxCfg(block, "a", cfgA);
+        if (scheme != 0) putLaxCfg(block, "b", cfgB);
+        final String label = scheme == 0 ? "方案1" : scheme == 1 ? "方案2" : "方案1+2";
         new Thread(() -> {
             RootShell.Result r = LaxStore.write(getCacheDir(), block);
             runOnUiThread(() -> Toast.makeText(this, r.ok()
-                    ? "已导出方案1+2 到 Download/color.lax"
+                    ? "已导出" + label + " 到内部储存根目录 /storage/emulated/0/color.lax"
                     : "导出失败：" + r.err, Toast.LENGTH_LONG).show());
         }).start();
     }
@@ -394,35 +469,68 @@ public class ScheduleActivity extends ThemedActivity {
         }
     }
 
-    /** 从 Download/color.lax 导入调度参数（方案1+2 全部模式，导入后点保存生效） */
+    /** 导入前先选择要应用的方案（方案1 / 方案2 / 方案1+2），再打开文件选择器 */
     private void importLax() {
         if (cfgA == null || cfgB == null) {
             Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
+        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("选择要导入的方案")
+                .setSingleChoiceItems(opts, 2, (d, w) -> {
+                    d.dismiss();
+                    laxScheme = w;
+                    Intent it = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    it.addCategory(Intent.CATEGORY_OPENABLE);
+                    it.setType("*/*");
+                    startActivityForResult(it, REQ_IMPORT);
+                })
+                .setNegativeButton("取消", null)
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_IMPORT || resultCode != RESULT_OK
+                || data == null || data.getData() == null) return;
+        final Uri uri = data.getData();
+        if (cfgA == null || cfgB == null) {
+            Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
         new Thread(() -> {
-            LinkedHashMap<String, String> map = LaxStore.read();
+            LinkedHashMap<String, String> map = LaxStore.readUri(this, uri);
             runOnUiThread(() -> {
                 if (map.isEmpty()) {
-                    Toast.makeText(this, "未找到 Download/color.lax", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "无法读取所选文件", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                int n = applyLax(map);
+                int n = applyLaxScheme(map);
                 if (n == 0) {
                     Toast.makeText(this, "文件中没有调度参数", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 fillInputs();
                 dirty = true;
-                Toast.makeText(this, "已导入 " + n + " 项（方案1+2），点击保存后生效",
+                String label = laxScheme == 0 ? "方案1" : laxScheme == 1 ? "方案2" : "方案1+2";
+                Toast.makeText(this, "已导入 " + n + " 项（" + label + "），点击保存后生效",
                         Toast.LENGTH_LONG).show();
             });
         }).start();
     }
 
-    /** 应用 lax 中的 sch.* 到两份配置（缺失的项保持原值），返回应用项数 */
-    private int applyLax(Map<String, String> map) {
-        return applyLaxCfg(map, cfgA, "a") + applyLaxCfg(map, cfgB, "b");
+    /** 按导入方案选择应用 lax 中的 sch.*（缺失的项保持原值），返回应用项数 */
+    private int applyLaxScheme(Map<String, String> map) {
+        int n = 0;
+        if (laxScheme != 1) n += applyLaxCfg(map, cfgA, "a");
+        if (laxScheme != 0) n += applyLaxCfg(map, cfgB, "b");
+        return n;
     }
 
     private int applyLaxCfg(Map<String, String> map, AllConfig cfg, String t) {

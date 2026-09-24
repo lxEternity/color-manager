@@ -1,7 +1,9 @@
 package Color.fc;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.animation.Animation;
@@ -28,20 +30,33 @@ import java.util.Map;
  */
 public class GovernorActivity extends ThemedActivity {
 
-    private final GovernorConfig.Gov[] govs = new GovernorConfig.Gov[4];
+    private final GovernorConfig.Gov[] govsA = new GovernorConfig.Gov[4];
+    private final GovernorConfig.Gov[] govsB = new GovernorConfig.Gov[4];
+    /** 当前页签（a=方案1 b=方案2）对应的配置数组引用 */
+    private GovernorConfig.Gov[] govs;
+    private String tab = "a";
+    private TextView tabAV, tabBV;
     private final HashMap<String, EditText> inputs = new HashMap<>();
     private final HashMap<String, TextView> spinners = new HashMap<>();
     /** 每模式的 8 个核心芯片（key=模式索引） */
     private final HashMap<String, TextView[]> coreChips = new HashMap<>();
+    /** 每模式的限频选择值（key=模式.minFreq / 模式.maxFreq） */
+    private final HashMap<String, TextView> freqVals = new HashMap<>();
+    /** 本机可用 CPU 频率档位（MHz 降序），首次扫描一次后永久缓存 */
+    private long[] cpuFreqs = new long[0];
+    /** 本机支持的调速器列表（首次扫描一次后缓存），空 = 扫描失败回退 GOV_PRESETS */
+    private String[] govList = new String[0];
     private boolean loading = true;
 
-    /** 预设调速器列表（不再支持手动输入） */
+    /** 预设调速器列表（本机扫描失败时的回退列表） */
     private static final String[] GOV_PRESETS = {
             "conservative", "walt", "ips", "sugov_next", "scx",
             "hmbird", "powersave", "performance", "schedutil"
     };
 
     private static final String[] FILES = {"conservative.sh", "scx1.sh", "scx2.sh", "scx3.sh"};
+    /** 方案2 调速器脚本目录（与 A/ 结构相同，b.all.sh 引用） */
+    private static final String GOV_DIR_B = "/data/adb/modules/colorFC/B";
     private static final String[] NAMES = {"省电模式", "均衡模式", "性能模式", "极速模式"};
     private static final String[] DESCS = {
             "省电模式调速器参数（CPU0-7）",
@@ -49,18 +64,18 @@ public class GovernorActivity extends ThemedActivity {
             "性能模式调速器参数（CPU 0/3/5/7）",
             "极速模式全核调速器参数（CPU0-7）"
     };
-    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用） */
+    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用），minFreq/maxFreq = CPU 自定义限频（MHz，0=不限制） */
     private static final String[][] FIELDS = {
-            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate"},
-            {"governor", "targetLoads"},
-            {"governor", "targetLoads"},
-            {"governor", "targetLoads"}
+            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate", "minFreq", "maxFreq"},
+            {"governor", "targetLoads", "minFreq", "maxFreq"},
+            {"governor", "targetLoads", "minFreq", "maxFreq"},
+            {"governor", "targetLoads", "minFreq", "maxFreq"}
     };
     private static final String[][] DEFAULTS = {
-            {"conservative", "98", "93", "1", "14000"},
-            {"scx", "90"},
-            {"scx", "70"},
-            {"scx", "70"}
+            {"conservative", "98", "93", "1", "14000", "0", "0"},
+            {"scx", "90", "0", "0"},
+            {"scx", "70", "0", "0"},
+            {"scx", "70", "0", "0"}
     };
     /** 模块可能用于恢复 A/ 脚本的镜像位置（类似 conf 模板机制），保存时三重写入 */
     private static final String[] MIRROR_DIRS = {
@@ -77,18 +92,37 @@ public class GovernorActivity extends ThemedActivity {
         findViewById(R.id.saveBtn).setOnClickListener(v -> saveAll());
         findViewById(R.id.btnImport).setOnClickListener(v -> importLax());
         findViewById(R.id.btnExport).setOnClickListener(v -> exportLax());
+        findViewById(R.id.btnReset).setOnClickListener(v -> resetDefaults());
+
+        // 方案页签：默认选中 SOC 对应方案，与调度页一致
+        tabAV = findViewById(R.id.tabA);
+        tabBV = findViewById(R.id.tabB);
+        tabAV.setOnClickListener(v -> switchTab("a"));
+        tabBV.setOnClickListener(v -> switchTab("b"));
+        SocInfo soc = MainActivity.cachedSoc;
+        if (soc == null) soc = SocInfo.autoDetect();
+        tab = soc.config != null ? soc.config : "a";
 
         buildCards();
 
         new Thread(() -> {
-            GovernorConfig.Gov[] mirror = loadGovMirror();
+            // 方案1（A/）与方案2（B/）分别解析，各自镜像兜底
+            GovernorConfig.Gov[] mirrorA = loadGovMirror("a");
+            GovernorConfig.Gov[] mirrorB = loadGovMirror("b");
             for (int i = 0; i < 4; i++) {
-                String content = RootShell.readFile(RootShell.GOV_DIR + "/" + FILES[i]);
-                GovernorConfig.Gov g = GovernorConfig.parse(content, i == 0);
-                govs[i] = mergeGov(g, mirror[i], i);
+                GovernorConfig.Gov ga = GovernorConfig.parse(
+                        RootShell.readFile(RootShell.GOV_DIR + "/" + FILES[i]), i == 0);
+                govsA[i] = mergeGov(ga, mirrorA[i], i);
+                GovernorConfig.Gov gb = GovernorConfig.parse(
+                        RootShell.readFile(GOV_DIR_B + "/" + FILES[i]), i == 0);
+                govsB[i] = mergeGov(gb, mirrorB[i], i);
             }
+            loadFreqScan();   // 本机频率档位：仅在无缓存时扫描一次
+            loadGovScan();   // 本机支持的调速器：仅首次扫描，避免选到不支持的调速器
             runOnUiThread(() -> {
                 loading = false;
+                govs = "b".equals(tab) ? govsB : govsA;
+                applyTabStyle();
                 fillInputs();
             });
         }).start();
@@ -121,7 +155,7 @@ public class GovernorActivity extends ThemedActivity {
 
             addCoreSelector(box, idx);
             addGovernorSelector(box, idx + ".governor",
-                    "切换预设调速器（写入 scaling_governor）", i == 0 ? "conservative" : "scx");
+                    "调速器选择", i == 0 ? "conservative" : "scx");
             if (i == 0) {
                 addParam(box, idx + ".upThreshold", "up_threshold 升频阈值（% 负载超过即升频）", "98", true);
                 addParam(box, idx + ".downThreshold", "down_threshold 降频阈值（% 负载低于即降频）", "93", true);
@@ -131,6 +165,8 @@ public class GovernorActivity extends ThemedActivity {
                 addParam(box, idx + ".targetLoads", "target_loads 目标负载（%）",
                         i == 1 ? "90" : "70", true);
             }
+            addFreqSelector(box, idx + ".minFreq", "CPU 最小频率限制");
+            addFreqSelector(box, idx + ".maxFreq", "CPU 最大频率限制");
             container.addView(card);
         }
     }
@@ -138,7 +174,7 @@ public class GovernorActivity extends ThemedActivity {
     /** 启用核心选择行：8 个可点击芯片，选中=启用该核心 */
     private void addCoreSelector(LinearLayout box, int idx) {
         TextView label = new TextView(this);
-        label.setText("启用核心（点击开关，未选中=该模式下关闭此核）");
+        label.setText("启用或关闭核心");
         label.setTextSize(11);
         label.setTextColor(getResources().getColor(R.color.textSecondary));
         label.setPadding(dp(2), dp(4), dp(2), dp(4));
@@ -248,20 +284,25 @@ public class GovernorActivity extends ThemedActivity {
         box.addView(row);
     }
 
-    /** 上下滑动选择弹窗：当前值高亮，预设外值追加显示 */
+    /** 上下滑动选择弹窗：列表仅显示本机支持的调速器（scaling_available_governors 扫描），
+     *  本机没有的调速器不可以选择，点击时提示「没有这个调速器！」；当前值高亮 */
     private void showGovPicker(String key, TextView val) {
         String cur = val.getText().toString();
-        String[] list = new String[GOV_PRESETS.length];
+        String[] items = govList.length > 0 ? govList : GOV_PRESETS;
         int checked = -1;
-        for (int i = 0; i < GOV_PRESETS.length; i++) {
-            list[i] = GOV_PRESETS[i];
-            if (GOV_PRESETS[i].equals(cur)) checked = i;
+        for (int i = 0; i < items.length; i++) {
+            if (items[i].equals(cur)) { checked = i; break; }
         }
-        final String[] items = list;
+        final String[] list = items;
         AlertDialog dlg = new AlertDialog.Builder(this)
                 .setTitle("选择调速器")
-                .setSingleChoiceItems(items, checked, (d, w) -> {
-                    val.setText(items[w]);
+                .setSingleChoiceItems(list, checked, (d, w) -> {
+                    // 点击的调速器不在本机支持列表（如扫描未完成时回退预设列表）：提示且不选中
+                    if (govList.length > 0 && !inGovList(list[w])) {
+                        Toast.makeText(this, "没有这个调速器！", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    val.setText(list[w]);
                     d.dismiss();
                 })
                 .setNegativeButton("取消", null)
@@ -270,6 +311,193 @@ public class GovernorActivity extends ThemedActivity {
             dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
         }
         dlg.show();
+    }
+
+    /** 调速器是否在本机支持列表中 */
+    private boolean inGovList(String g) {
+        for (String s : govList) if (s.equals(g)) return true;
+        return false;
+    }
+
+    /** 限频选择行：显示当前值（不限制 / xxx MHz），点击弹出本机档位选择 */
+    private void addFreqSelector(LinearLayout box, String key, String label) {
+        View row = getLayoutInflater().inflate(R.layout.governor_row, box, false);
+        ((TextView) row.findViewById(R.id.label)).setText(label);
+        TextView val = row.findViewById(R.id.govValue);
+        val.setText("不限制");
+        val.setOnClickListener(v -> showFreqPicker(key, val));
+        freqVals.put(key, val);
+        box.addView(row);
+    }
+
+    /** 弹出本机频率档位单选弹窗（列表来自首次扫描并缓存的 freqScan） */
+    private void showFreqPicker(String key, TextView val) {
+        if (cpuFreqs.length == 0) {
+            Toast.makeText(this, "频率列表不可用，改为手动输入（MHz，0=不限制）",
+                    Toast.LENGTH_SHORT).show();
+            showFreqManual(val);
+            return;
+        }
+        String cur = val.getText().toString().trim();
+        String[] items = new String[cpuFreqs.length + 2];
+        items[0] = "不限制";
+        int checked = "不限制".equals(cur) ? 0 : -1;
+        for (int i = 0; i < cpuFreqs.length; i++) {
+            items[i + 1] = cpuFreqs[i] + " MHz";
+            if (checked < 0 && String.valueOf(cpuFreqs[i]).equals(cur)) checked = i + 1;
+        }
+        items[cpuFreqs.length + 1] = "手动输入 MHz…";
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("选择频率")
+                .setSingleChoiceItems(items, checked, (d, w) -> {
+                    d.dismiss();
+                    if (w == 0) {
+                        val.setText("不限制");
+                    } else if (w == items.length - 1) {
+                        showFreqManual(val);
+                    } else {
+                        val.setText(String.valueOf(cpuFreqs[w - 1]));
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
+    }
+
+    /** 手动输入限频（MHz，0 或留空=不限制） */
+    private void showFreqManual(TextView val) {
+        final EditText et = new EditText(this);
+        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        et.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(10)});
+        String cur = val.getText().toString().trim();
+        et.setText("不限制".equals(cur) ? "0" : cur);
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("输入频率（MHz，0=不限制）")
+                .setView(et)
+                .setPositiveButton("确定", (d, w) -> {
+                    String s = et.getText().toString().trim();
+                    if (s.isEmpty()) s = "0";
+                    try {
+                        long v = Long.parseLong(s);
+                        val.setText(v <= 0 ? "不限制" : String.valueOf(v));
+                    } catch (Exception ignored) {
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
+    }
+
+    /** 扫描本机所有 CPU 的可用频率档位（MHz 降序去重）。仅在无缓存时执行一次，
+     *  结果永久保存到 SharedPreferences，之后不再重复扫描 */
+    private void loadFreqScan() {
+        try {
+            String csv = getSharedPreferences("colorfc", MODE_PRIVATE).getString("freqScan", "");
+            if (!csv.isEmpty()) {
+                String[] ps = csv.split(",");
+                long[] arr = new long[ps.length];
+                int n = 0;
+                for (String p : ps) {
+                    try {
+                        arr[n++] = Long.parseLong(p);
+                    } catch (Exception ignored) {
+                    }
+                }
+                cpuFreqs = java.util.Arrays.copyOf(arr, n);
+                return;
+            }
+            StringBuilder cmd = new StringBuilder();
+            for (int c = 0; c < 8; c++) {
+                cmd.append("cat /sys/devices/system/cpu/cpu").append(c)
+                        .append("/cpufreq/scaling_available_frequencies 2>/dev/null; ");
+            }
+            java.util.TreeSet<Long> set = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+            RootShell.Result r = RootShell.exec(cmd.toString());
+            if (r.ok() && r.out != null) {
+                for (String tok : r.out.trim().split("\\s+")) {
+                    try {
+                        long k = Long.parseLong(tok);
+                        if (k > 1000) set.add(k / 1000);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            // 部分内核无 available 列表：退回各簇 cpuinfo_min/max 兜底
+            if (set.size() < 2) {
+                StringBuilder fb = new StringBuilder();
+                for (int c = 0; c < 8; c++) {
+                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
+                            .append("/cpufreq/cpuinfo_min_freq 2>/dev/null; ");
+                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
+                            .append("/cpufreq/cpuinfo_max_freq 2>/dev/null; ");
+                }
+                r = RootShell.exec(fb.toString());
+                if (r.ok() && r.out != null) {
+                    for (String tok : r.out.trim().split("\\s+")) {
+                        try {
+                            long k = Long.parseLong(tok);
+                            if (k > 1000) set.add(k / 1000);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+            if (!set.isEmpty()) {
+                StringBuilder sbCsv = new StringBuilder();
+                for (long v : set) {
+                    if (sbCsv.length() > 0) sbCsv.append(',');
+                    sbCsv.append(v);
+                }
+                getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                        .putString("freqScan", sbCsv.toString()).commit();
+                cpuFreqs = new long[set.size()];
+                int n = 0;
+                for (long v : set) cpuFreqs[n++] = v;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 扫描本机所有 CPU 支持的调速器（scaling_available_governors 并集去重）。
+     *  仅首次扫描，结果缓存到 SharedPreferences（内核级列表，重启不变） */
+    private void loadGovScan() {
+        try {
+            String csv = getSharedPreferences("colorfc", MODE_PRIVATE).getString("govScan", "");
+            if (!csv.isEmpty()) {
+                govList = csv.split(",");
+                return;
+            }
+            StringBuilder cmd = new StringBuilder();
+            for (int c = 0; c < 8; c++) {
+                cmd.append("cat /sys/devices/system/cpu/cpu").append(c)
+                        .append("/cpufreq/scaling_available_governors 2>/dev/null; ");
+            }
+            RootShell.Result r = RootShell.exec(cmd.toString());
+            java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>();
+            if (r.ok() && r.out != null) {
+                for (String tok : r.out.trim().split("\\s+")) {
+                    String g = tok.trim();
+                    if (!g.isEmpty()) set.add(g);
+                }
+            }
+            if (!set.isEmpty()) {
+                govList = set.toArray(new String[0]);
+                StringBuilder sbCsv = new StringBuilder();
+                for (String g : set) {
+                    if (sbCsv.length() > 0) sbCsv.append(',');
+                    sbCsv.append(g);
+                }
+                getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                        .putString("govScan", sbCsv.toString()).commit();
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void fillInputs() {
@@ -292,6 +520,11 @@ public class GovernorActivity extends ThemedActivity {
                     if (sp != null && v != null && !v.isEmpty()) sp.setText(v);
                     continue;
                 }
+                if ("minFreq".equals(FIELDS[i][j]) || "maxFreq".equals(FIELDS[i][j])) {
+                    TextView tv = freqVals.get(key);
+                    if (tv != null) tv.setText(normF(v).isEmpty() ? "不限制" : v.trim());
+                    continue;
+                }
                 EditText et = inputs.get(key);
                 if (et == null) continue;
                 et.setText(v);
@@ -307,6 +540,8 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": return g.freqStep;
             case "samplingRate": return g.samplingRate;
             case "targetLoads": return g.targetLoads;
+            case "minFreq": return g.minFreq;
+            case "maxFreq": return g.maxFreq;
         }
         return "";
     }
@@ -319,6 +554,8 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": g.freqStep = v; break;
             case "samplingRate": g.samplingRate = v; break;
             case "targetLoads": g.targetLoads = v; break;
+            case "minFreq": g.minFreq = v; break;
+            case "maxFreq": g.maxFreq = v; break;
         }
     }
 
@@ -342,6 +579,13 @@ public class GovernorActivity extends ThemedActivity {
                     }
                     continue;
                 }
+                if ("minFreq".equals(f) || "maxFreq".equals(f)) {
+                    TextView tv = freqVals.get(i + "." + f);
+                    if (tv == null) continue;
+                    String s = tv.getText().toString().trim();
+                    writeField(govs[i], f, (s.isEmpty() || "不限制".equals(s)) ? "0" : s);
+                    continue;
+                }
                 EditText et = inputs.get(i + "." + f);
                 if (et == null) continue;
                 String v = et.getText().toString().trim();
@@ -351,50 +595,124 @@ public class GovernorActivity extends ThemedActivity {
         }
     }
 
-    /** 保存 4 个调速器脚本 */
+    /** 保存调速器脚本：加载哪个方案（当前页签）就保存到哪个方案，不再弹窗选择 */
     private void saveAll() {
-        if (loading || govs[0] == null) {
+        if (loading || govs == null || govs[0] == null) {
             Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
         collectInputs();
+        saveAll("b".equals(tab) ? 2 : 1);
+    }
 
+    /** 切换方案页签：当前编辑写回内存后切换回显（不丢失） */
+    private void switchTab(String t) {
+        if (t.equals(tab) || loading || govsA[0] == null) return;
+        collectInputs();
+        tab = t;
+        govs = "b".equals(tab) ? govsB : govsA;
+        applyTabStyle();
+        fillInputs();
+    }
+
+    private void applyTabStyle() {
+        boolean isA = "a".equals(tab);
+        tabAV.setBackgroundResource(isA ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        tabAV.setTextColor(isA ? 0xFF0077A8 : 0xFF7C8AA0);
+        tabBV.setBackgroundResource(isA ? R.drawable.bg_tab : R.drawable.bg_tab_sel);
+        tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0077A8);
+    }
+
+    /** scheme: 0=方案1+方案2  1=仅方案1(A)  2=仅方案2(B)。src 传入要持久化的配置数组
+     *  （正常保存=当前页签收集值，恢复默认值=出厂默认数组），okMsg 为成功提示前缀 */
+    private void persistGovs(GovernorConfig.Gov[] src, int scheme, String okMsg) {
         new Thread(() -> {
-            saveGovMirror();
-            String[] contents = {
-                    GovernorConfig.generateConservative(govs[0]),
-                    GovernorConfig.generateScx(govs[1]),
-                    GovernorConfig.generateScx(govs[2]),
-                    GovernorConfig.generateScx3(govs[3])
-            };
-            String[] targets = new String[4];
-            for (int i = 0; i < 4; i++) targets[i] = RootShell.GOV_DIR + "/" + FILES[i];
-            // 一次 su 完成 4 个主文件写入
+            // 镜像按所选方案分别落盘（恢复默认值时镜像同步为默认配置，兜底回显不再指向旧值）
+            if (scheme != 2) saveMirrorFor(src, "a");
+            if (scheme != 1) saveMirrorFor(src, "b");
+            java.util.ArrayList<String> saveDirs = new java.util.ArrayList<>();
+            if (scheme != 2) saveDirs.add(RootShell.GOV_DIR);
+            if (scheme != 1) saveDirs.add(GOV_DIR_B);
+            // 所选目录首次替换 json_cpu_max_min 前分别备份原 ELF；B/ 不存在时先创建
+            StringBuilder bk = new StringBuilder();
+            for (String d : saveDirs) {
+                bk.append("mkdir -p '").append(d).append("'; ");
+                bk.append("[ -f '").append(d).append("/json_cpu_max_min.orig' ] || ")
+                        .append("cp '").append(d).append("/json_cpu_max_min' '")
+                        .append(d).append("/json_cpu_max_min.orig'; ");
+            }
+            RootShell.exec(bk.toString());
+            // 9 文件集（4 调速器 + 4 限频 + json_cpu_max_min 复现脚本）× 所选目录
+            String[] srcContents = new String[9];
+            String[] srcNames = new String[9];
+            srcContents[0] = GovernorConfig.generateConservative(src[0]);
+            srcContents[1] = GovernorConfig.generateScx(src[1]);
+            srcContents[2] = GovernorConfig.generateScx(src[2]);
+            srcContents[3] = GovernorConfig.generateScx3(src[3]);
+            srcContents[4] = GovernorConfig.generateFreqScript(src[0], 0);
+            srcContents[5] = GovernorConfig.generateFreqScript(src[1], 1);
+            srcContents[6] = GovernorConfig.generateFreqScript(src[2], 2);
+            srcContents[7] = GovernorConfig.generateFreqScript(src[3], 3);
+            srcContents[8] = GovernorConfig.generateJmmScript();
+            for (int i = 0; i < 4; i++) srcNames[i] = FILES[i];
+            for (int i = 0; i < 4; i++) srcNames[4 + i] = "freq" + i + ".sh";
+            srcNames[8] = "json_cpu_max_min";
+            String[] contents = new String[saveDirs.size() * 9];
+            String[] targets = new String[saveDirs.size() * 9];
+            for (int d = 0; d < saveDirs.size(); d++) {
+                for (int i = 0; i < 9; i++) {
+                    contents[d * 9 + i] = srcContents[i];
+                    targets[d * 9 + i] = saveDirs.get(d) + "/" + srcNames[i];
+                }
+            }
+            // 一次 su 完成全部文件写入
             boolean ok = RootShell.writeFiles(getCacheDir(), contents, targets);
-            // 一次 su 完成镜像位置同步（best-effort，失败不影响保存结果）
+            // 一次 su 完成镜像位置同步（仅同步所选方案对应的目录；best-effort，失败不影响保存结果）
             if (ok) {
                 StringBuilder mc = new StringBuilder();
-                for (String dir : MIRROR_DIRS) {
-                    mc.append("mkdir -p '").append(dir).append("'; ");
-                    for (int i = 0; i < 4; i++) {
-                        mc.append("cp '").append(targets[i]).append("' '")
-                                .append(dir).append("/").append(FILES[i]).append("'; ");
+                for (String mirror : MIRROR_DIRS) {
+                    String mirrorB = mirror.endsWith("/A") ? mirror.substring(0, mirror.length() - 2) + "/B" : mirror + "B";
+                    if (saveDirs.contains(RootShell.GOV_DIR)) {
+                        mc.append("mkdir -p '").append(mirror).append("'; ");
+                        for (int i = 0; i < 9; i++) {
+                            mc.append("cp '").append(RootShell.GOV_DIR).append("/").append(srcNames[i]).append("' '")
+                                    .append(mirror).append("/").append(srcNames[i]).append("'; ");
+                        }
+                    }
+                    if (saveDirs.contains(GOV_DIR_B)) {
+                        mc.append("mkdir -p '").append(mirrorB).append("'; ");
+                        for (int i = 0; i < 9; i++) {
+                            mc.append("cp '").append(GOV_DIR_B).append("/").append(srcNames[i]).append("' '")
+                                    .append(mirrorB).append("/").append(srcNames[i]).append("'; ");
+                        }
                     }
                 }
                 RootShell.exec(mc.toString());
+            }
+            // 给已部署的方案 conf 幂等补上 freq 调用行（a 引用 A/，b 引用 B/，与各自目录的 freqN.sh 对应）
+            String[][] confs = {{"a.all.sh", "A"}, {"b.all.sh", "B"}};
+            for (String[] cf : confs) {
+                try {
+                    String path = RootShell.CONFIG_DIR + "/" + cf[0];
+                    String cur = RootShell.readFile(path);
+                    if (cur == null || cur.trim().isEmpty()) continue;
+                    String patched = AllConfig.patchFreqLines(cur, cf[1]);
+                    if (!patched.equals(cur)) RootShell.writeFile(getCacheDir(), patched, path);
+                } catch (Exception ignored) {
+                }
             }
             // 写后回读校验，发现被外部回滚立即提示（而不是下次进页面静默回显默认值）
             String verify = "";
             if (ok) {
                 try { Thread.sleep(800); } catch (InterruptedException ignored) { }
-                int bad = verifySaved();
+                int bad = verifySaved(saveDirs);
                 if (bad > 0) verify = " · " + bad + " 个文件回读不符(被外部修改?)";
             }
             final boolean okF = ok;
             final String verifyF = verify;
             runOnUiThread(() -> {
                 if (okF) {
-                    Toast.makeText(this, "保存成功" + verifyF, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, okMsg + verifyF, Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(this, "保存失败：脚本写入不成功，请重试", Toast.LENGTH_LONG).show();
                 }
@@ -402,14 +720,109 @@ public class GovernorActivity extends ThemedActivity {
         }).start();
     }
 
+    /** scheme: 0=方案1+方案2  1=仅方案1(A)  2=仅方案2(B) */
+    private void saveAll(int scheme) {
+        persistGovs(govs, scheme, "保存成功");
+    }
+
+    // ==================== 恢复默认值（可选方案1/方案2/全部） ====================
+
+    /** 弹窗选择要恢复的方案，确认后立即写入出厂默认值并保存 */
+    private void resetDefaults() {
+        if (loading || govsA[0] == null) {
+            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        final int[] sel = {0};
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("恢复默认值")
+                .setMessage("选择要恢复出厂默认参数的方案，点击确定后立即写入并保存（调速器、参数、限频与核心全恢复默认）")
+                .setSingleChoiceItems(opts, 0, (d, w) -> sel[0] = w)
+                .setPositiveButton("确定", (d, w) -> doResetDefaults(sel[0]))
+                .setNegativeButton("取消", null)
+                .create();
+        if (dlg.getWindow() != null) {
+            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
+        }
+        dlg.show();
+    }
+
+    /** w: 0=方案1  1=方案2  2=方案1+方案2。内存替换 + 立即持久化到所选方案的脚本目录 */
+    private void doResetDefaults(int w) {
+        GovernorConfig.Gov[] def = defaultGovs();
+        if (w != 1) {
+            GovernorConfig.Gov[] ca = copyGovs(def);
+            for (int i = 0; i < 4; i++) govsA[i] = ca[i];
+        }
+        if (w != 0) {
+            GovernorConfig.Gov[] cb = copyGovs(def);
+            for (int i = 0; i < 4; i++) govsB[i] = cb[i];
+        }
+        boolean curA = "a".equals(tab);
+        // 当前页签在恢复范围内才刷新输入框，避免覆盖另一页签的未保存编辑
+        if ((w != 1 && curA) || (w != 0 && !curA)) {
+            govs = curA ? govsA : govsB;
+            fillInputs();
+        }
+        final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : "方案1+方案2";
+        persistGovs(def, w == 0 ? 1 : w == 1 ? 2 : 0,
+                "已恢复默认值并保存（" + label + "）");
+    }
+
+    /** 出厂默认配置数组：调速器/参数取 DEFAULTS，限频 0=不限制，核心全启用 */
+    private GovernorConfig.Gov[] defaultGovs() {
+        GovernorConfig.Gov[] out = new GovernorConfig.Gov[4];
+        for (int i = 0; i < 4; i++) {
+            GovernorConfig.Gov g = new GovernorConfig.Gov();
+            g.governor = DEFAULTS[i][0];
+            if (i == 0) {
+                g.upThreshold = DEFAULTS[0][1];
+                g.downThreshold = DEFAULTS[0][2];
+                g.freqStep = DEFAULTS[0][3];
+                g.samplingRate = DEFAULTS[0][4];
+                g.minFreq = DEFAULTS[0][5];
+                g.maxFreq = DEFAULTS[0][6];
+            } else {
+                g.targetLoads = DEFAULTS[i][1];
+                g.minFreq = DEFAULTS[i][2];
+                g.maxFreq = DEFAULTS[i][3];
+            }
+            // cores 保持构造默认（8 核全启用）
+            out[i] = g;
+        }
+        return out;
+    }
+
+    /** 深拷贝（cores 数组独立，两个方案互不影响） */
+    private GovernorConfig.Gov[] copyGovs(GovernorConfig.Gov[] src) {
+        GovernorConfig.Gov[] out = new GovernorConfig.Gov[4];
+        for (int i = 0; i < 4; i++) {
+            GovernorConfig.Gov g = new GovernorConfig.Gov();
+            GovernorConfig.Gov s = src[i];
+            g.governor = s.governor;
+            g.upThreshold = s.upThreshold;
+            g.downThreshold = s.downThreshold;
+            g.freqStep = s.freqStep;
+            g.samplingRate = s.samplingRate;
+            g.targetLoads = s.targetLoads;
+            g.minFreq = s.minFreq;
+            g.maxFreq = s.maxFreq;
+            System.arraycopy(s.cores, 0, g.cores, 0, 8);
+            out[i] = g;
+        }
+        return out;
+    }
+
     // ==================== 配置镜像（SharedPreferences，回显兜底） ====================
 
-    /** 保存当前 4 模式配置镜像，脚本读取失败/字段缺失时用它兜底回显 */
-    private void saveGovMirror() {
+    /** 保存指定方案 4 模式配置镜像（按方案分键），脚本读取失败/字段缺失时用它兜底回显 */
+    private void saveMirrorFor(GovernorConfig.Gov[] src, String t) {
+        if (src == null) return;
         try {
             JSONArray arr = new JSONArray();
             for (int i = 0; i < 4; i++) {
-                GovernorConfig.Gov g = govs[i];
+                GovernorConfig.Gov g = src[i];
                 JSONObject o = new JSONObject();
                 o.put("name", g.governor);
                 if (i == 0) {
@@ -420,23 +833,31 @@ public class GovernorActivity extends ThemedActivity {
                 } else {
                     o.put("loads", g.targetLoads);
                 }
+                o.put("fmin", g.minFreq);
+                o.put("fmax", g.maxFreq);
                 StringBuilder cs = new StringBuilder();
                 for (boolean c : g.cores) cs.append(c ? '1' : '0');
                 o.put("cores", cs.toString());
                 arr.put(o);
             }
             getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                    .putString("govMirror", arr.toString()).commit();
+                    .putString("govMirror." + t, arr.toString()).commit();
         } catch (Exception ignored) {
         }
     }
 
-    /** 读取上次保存的配置镜像 */
-    private GovernorConfig.Gov[] loadGovMirror() {
+    /** 读取指定方案上次保存的配置镜像（方案1 兼容旧版单方案镜像键） */
+    private GovernorConfig.Gov[] loadGovMirror(String t) {
         GovernorConfig.Gov[] out = new GovernorConfig.Gov[4];
         try {
-            JSONArray arr = new JSONArray(getSharedPreferences("colorfc", MODE_PRIVATE)
-                    .getString("govMirror", "[]"));
+            String js = getSharedPreferences("colorfc", MODE_PRIVATE)
+                    .getString("govMirror." + t, "");
+            if (js.isEmpty() && "a".equals(t)) {
+                js = getSharedPreferences("colorfc", MODE_PRIVATE)
+                        .getString("govMirror", "");   // 旧版（仅方案1）镜像兼容
+            }
+            if (js.isEmpty()) js = "[]";
+            JSONArray arr = new JSONArray(js);
             for (int i = 0; i < 4 && i < arr.length(); i++) {
                 JSONObject o = arr.optJSONObject(i);
                 if (o == null) continue;
@@ -450,6 +871,8 @@ public class GovernorActivity extends ThemedActivity {
                 } else {
                     if (o.has("loads")) g.targetLoads = o.getString("loads");
                 }
+                if (o.has("fmin")) g.minFreq = o.getString("fmin");
+                if (o.has("fmax")) g.maxFreq = o.getString("fmax");
                 String cs = o.optString("cores", "");
                 if (cs.length() == 8) {
                     for (int c = 0; c < 8; c++) g.cores[c] = cs.charAt(c) == '1';
@@ -480,6 +903,10 @@ public class GovernorActivity extends ThemedActivity {
             o.targetLoads = pick(script == null ? null : script.targetLoads,
                     mirror == null ? null : mirror.targetLoads);
         }
+        o.minFreq = pick(script == null ? null : script.minFreq,
+                mirror == null ? null : mirror.minFreq);
+        o.maxFreq = pick(script == null ? null : script.maxFreq,
+                mirror == null ? null : mirror.maxFreq);
         boolean[] src = script != null && script.hasOnline ? script.cores
                 : mirror != null ? mirror.cores : null;
         if (src != null) System.arraycopy(src, 0, o.cores, 0, 8);
@@ -491,27 +918,31 @@ public class GovernorActivity extends ThemedActivity {
     }
 
     /** 一次 su 批量回读 4 个脚本并比对，返回不一致的文件数 */
-    private int verifySaved() {
+    private int verifySaved(java.util.List<String> dirs) {
         StringBuilder cmd = new StringBuilder();
-        for (int i = 0; i < 4; i++) {
-            cmd.append("echo '==CF=").append(FILES[i]).append("='; cat '")
-                    .append(RootShell.GOV_DIR).append("/").append(FILES[i]).append("'; ");
+        for (int d = 0; d < dirs.size(); d++) {
+            for (int i = 0; i < 4; i++) {
+                cmd.append("echo '==CF=").append(d).append('_').append(FILES[i])
+                        .append("='; cat '").append(dirs.get(d)).append("/").append(FILES[i]).append("'; ");
+            }
         }
         RootShell.Result r = RootShell.exec(cmd.toString());
         if (!r.ok()) return 4;
         int bad = 0;
-        for (int i = 0; i < 4; i++) {
-            String marker = "==CF=" + FILES[i] + "=";
-            int s = r.out.indexOf(marker);
-            if (s < 0) {
-                bad++;
-                continue;
+        for (int d = 0; d < dirs.size(); d++) {
+            for (int i = 0; i < 4; i++) {
+                String marker = "==CF=" + d + "_" + FILES[i] + "=";
+                int s = r.out.indexOf(marker);
+                if (s < 0) {
+                    bad++;
+                    continue;
+                }
+                int from = s + marker.length();
+                int e = r.out.indexOf("==CF=", from);
+                String content = e < 0 ? r.out.substring(from) : r.out.substring(from, e);
+                GovernorConfig.Gov b = GovernorConfig.parse(content, i == 0);
+                if (b == null || !sameGov(b, govs[i], i)) bad++;
             }
-            int from = s + marker.length();
-            int e = r.out.indexOf("==CF=", from);
-            String content = e < 0 ? r.out.substring(from) : r.out.substring(from, e);
-            GovernorConfig.Gov b = GovernorConfig.parse(content, i == 0);
-            if (b == null || !sameGov(b, govs[i], i)) bad++;
         }
         return bad;
     }
@@ -528,7 +959,21 @@ public class GovernorActivity extends ThemedActivity {
         if (idx > 0) {
             if (!eqv(a.targetLoads, b.targetLoads)) return false;
         }
+        // 限频字段：null/空/"0" 均视为"不限制"，等价比较（避免不限制时回读误报不符）
+        if (!eqvF(a.minFreq, b.minFreq)) return false;
+        if (!eqvF(a.maxFreq, b.maxFreq)) return false;
         return java.util.Arrays.equals(a.cores, b.cores);
+    }
+
+    /** 限频字段等价比较（null/空/"0" 视为不限制） */
+    private boolean eqvF(String a, String b) {
+        return normF(a).equals(normF(b));
+    }
+
+    private String normF(String s) {
+        if (s == null) return "";
+        s = s.trim();
+        return "0".equals(s) ? "" : s;
     }
 
     private boolean eqv(String a, String b) {
@@ -537,7 +982,10 @@ public class GovernorActivity extends ThemedActivity {
 
     // ==================== color.lax 导入导出（4 个模式全部参数） ====================
 
-    /** 导出全部 4 个模式的调速器参数（名称/数值/核心开关）到 Download/color.lax */
+    /** 导入文件选择器请求码 */
+    private static final int REQ_IMPORT = 7301;
+
+    /** 导出全部 4 个模式的调速器参数（名称/数值/核心开关）到内部储存根目录 /storage/emulated/0/color.lax */
     private void exportLax() {
         if (loading || govs[0] == null) {
             Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
@@ -560,26 +1008,44 @@ public class GovernorActivity extends ThemedActivity {
             cs.setLength(0);
             for (boolean c : g.cores) cs.append(c ? '1' : '0');
             block.put("gov." + i + ".cores", cs.toString());
+            block.put("gov." + i + ".fmin", g.minFreq == null || g.minFreq.isEmpty() ? "0" : g.minFreq);
+            block.put("gov." + i + ".fmax", g.maxFreq == null || g.maxFreq.isEmpty() ? "0" : g.maxFreq);
         }
         new Thread(() -> {
             RootShell.Result r = LaxStore.write(getCacheDir(), block);
             runOnUiThread(() -> Toast.makeText(this, r.ok()
-                    ? "已导出 4 个模式到 Download/color.lax"
+                    ? "已导出 4 个模式到内部储存根目录 /storage/emulated/0/color.lax"
                     : "导出失败：" + r.err, Toast.LENGTH_LONG).show());
         }).start();
     }
 
-    /** 从 Download/color.lax 导入调速器参数（全部模式，导入后点保存生效） */
+    /** 打开系统文件选择器，任意路径选择 lax 文件导入调速器参数（导入后点保存生效） */
     private void importLax() {
         if (loading || govs[0] == null) {
             Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
+        Intent it = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        it.addCategory(Intent.CATEGORY_OPENABLE);
+        it.setType("*/*");
+        startActivityForResult(it, REQ_IMPORT);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_IMPORT || resultCode != RESULT_OK
+                || data == null || data.getData() == null) return;
+        final Uri uri = data.getData();
+        if (loading || govs[0] == null) {
+            Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
         new Thread(() -> {
-            LinkedHashMap<String, String> map = LaxStore.read();
+            LinkedHashMap<String, String> map = LaxStore.readUri(this, uri);
             runOnUiThread(() -> {
                 if (map.isEmpty()) {
-                    Toast.makeText(this, "未找到 Download/color.lax", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "无法读取所选文件", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 int n = applyLax(map);
@@ -631,6 +1097,14 @@ public class GovernorActivity extends ThemedActivity {
             String cs = map.get("gov." + i + ".cores");
             if (cs != null && cs.length() == 8) {
                 for (int c = 0; c < 8; c++) g.cores[c] = cs.charAt(c) == '1';
+                n++;
+            }
+            if ((v = map.get("gov." + i + ".fmin")) != null && !v.isEmpty()) {
+                g.minFreq = v;
+                n++;
+            }
+            if ((v = map.get("gov." + i + ".fmax")) != null && !v.isEmpty()) {
+                g.maxFreq = v;
                 n++;
             }
         }

@@ -1,6 +1,11 @@
 package Color.fc;
 
+import android.content.Context;
+import android.net.Uri;
+
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 
@@ -11,8 +16,8 @@ import java.util.LinkedHashMap;
  */
 public class LaxStore {
 
-    /** 导出位置：Download 目录（用户可直接在文件管理器中看到） */
-    public static final String PATH = "/sdcard/Download/color.lax";
+    /** 导出位置：安卓内部储存根目录 /storage/emulated/0（用户可直接在文件管理器根目录看到） */
+    public static final String PATH = "/storage/emulated/0/color.lax";
 
     /** 解析 lax 内容（key=value 行），忽略注释与空行 */
     public static LinkedHashMap<String, String> parse(String content) {
@@ -31,6 +36,20 @@ public class LaxStore {
     /** 读取 lax 文件（不存在/失败返回空 map） */
     public static LinkedHashMap<String, String> read() {
         return parse(RootShell.readFile(PATH));
+    }
+
+    /** 通过 SAF 文件选择器返回的 Uri 读取 lax 内容（导入自定义路径文件用） */
+    public static LinkedHashMap<String, String> readUri(Context ctx, Uri uri) {
+        try (InputStream is = ctx.getContentResolver().openInputStream(uri)) {
+            if (is == null) return new LinkedHashMap<>();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            return parse(bos.toString("UTF-8"));
+        } catch (Exception e) {
+            return new LinkedHashMap<>();
+        }
     }
 
     /** 写入 lax：先剔除与 block 同前缀（首段）的旧键再合并，gov 段保持在最前 */

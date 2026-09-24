@@ -121,65 +121,73 @@
                             android:textSize="10sp" />
                     </LinearLayout>
 
-                    <!-- 迷你悬浮窗开关（收纳进 SOC 卡） -->
+                    <!-- 位置1: 迷你悬浮窗 · 位置2: 功耗统计（点击文字显隐，无开关） -->
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="8dp"
                         android:orientation="vertical"
-                        android:gravity="center_horizontal">
+                        android:gravity="center_horizontal|end">
 
                         <TextView
+                            android:id="@+id/monitorToggle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="迷你悬浮窗"
+                            android:background="@drawable/bg_tab"
+                            android:paddingStart="9dp"
+                            android:paddingEnd="9dp"
+                            android:paddingTop="4dp"
+                            android:paddingBottom="4dp"
+                            android:text="监视器功能"
                             android:textColor="@color/textSecondary"
                             android:textSize="10sp" />
 
-                        <Switch
-                            android:id="@+id/monitorSwitch"
+                        <TextView
+                            android:id="@+id/histToggle"
                             android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="5dp"
+                            android:background="@drawable/bg_tab"
+                            android:paddingStart="9dp"
+                            android:paddingEnd="9dp"
+                            android:paddingTop="4dp"
+                            android:paddingBottom="4dp"
+                            android:text="功耗统计 ▾"
+                            android:textColor="@color/textSecondary"
+                            android:textSize="10sp" />
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 功耗统计曲线（近 3 小时采样，点击查看历史） -->
+                <!-- 功耗统计曲线（默认折叠，点击"功耗统计"展开，点击区域查看 Scene 样式详细记录） -->
                 <LinearLayout
                     android:id="@+id/powerHistBox"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:orientation="vertical">
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:id="@+id/histHint"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="功耗统计"
-                            android:textColor="@color/textPrimary"
-                            android:textSize="12sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/histHint"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="读取中…"
-                            android:textColor="@color/textSecondary"
-                            android:textSize="10sp" />
-                    </LinearLayout>
+                        android:text="读取中…"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="10sp" />
 
                     <Color.fc.view.SparkView
                         android:id="@+id/histSpark"
                         android:layout_width="match_parent"
                         android:layout_height="54dp"
                         android:layout_marginTop="4dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="点击查看详细记录 ▸"
+                        android:textColor="@color/textDim"
+                        android:textSize="9sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -356,12 +364,6 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <Color.fc.view.SparkView
-                    android:id="@+id/sparkView"
-                    android:layout_width="match_parent"
-                    android:layout_height="46dp"
-                    android:layout_marginTop="4dp" />
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -474,6 +476,40 @@
                     android:src="@drawable/ic_arrow_right"
                     android:tint="#EF4444"
                     android:contentDescription="帧率录制记录" />
+            </LinearLayout>
+
+            <!-- 功耗记录（Scene 样式详细记录） -->
+            <LinearLayout
+                android:id="@+id/menuPowerRecords"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="10dp">
+
+                <View
+                    android:layout_width="3dp"
+                    android:layout_height="18dp"
+                    android:background="@color/accent" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:text="功耗记录"
+                    android:textColor="@color/textPrimary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    android:tint="@color/accent"
+                    android:contentDescription="功耗记录" />
             </LinearLayout>
 
             <!-- 分组: 调度功能 -->

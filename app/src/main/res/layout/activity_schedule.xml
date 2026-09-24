@@ -51,12 +51,26 @@
             android:id="@+id/btnExport"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:background="@drawable/bg_tab"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
             android:paddingTop="7dp"
             android:paddingBottom="7dp"
             android:text="导出"
+            android:textColor="@color/textSecondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/btnReset"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_tab"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:text="默认"
             android:textColor="@color/textSecondary"
             android:textSize="13sp" />
     </LinearLayout>

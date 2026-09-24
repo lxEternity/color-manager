@@ -2,6 +2,7 @@ package Color.fc;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -30,6 +31,8 @@ public class ModeActivity extends ThemedActivity {
     /** 模块工作目录（quanj.sh: mingc="qingtd"） */
     private static final String MOKML = "/sdcard/Android/qingtd";
     private static final String CONF_FILE = MOKML + "/动态模式切换.conf";
+    /** 单应用负载限制：低频率/高频率（独立文件，选择即保存） */
+    private static final String LOAD_FILE = AppFreqLimiter.CONF;
     /** 模块目录内的 conf 模板（service.sh 开机恢复源） */
     private static final String MODULE_CONF_FILE = "/data/adb/modules/colorFC/qingtd/动态模式切换.conf";
     private static final String STOP_FILE = MOKML + "/stop";
@@ -46,6 +49,15 @@ public class ModeActivity extends ThemedActivity {
     private String moren = "powersave";
     /** 应用规则：包名 -> 模式 */
     private final LinkedHashMap<String, String> rules = new LinkedHashMap<>();
+    /** 单应用负载限制：包名 -> {低频率MHz, 高频率MHz, 占用%}（0=未设） */
+    private final LinkedHashMap<String, long[]> loads = new LinkedHashMap<>();
+    /** 当前展开功能列表的应用行 */
+    private String expandedPkg = null;
+    /** 删除模式：应用行显示红 X */
+    private boolean deleteMode = false;
+    private TextView btnDelMode, btnDoneMode;
+    /** 本机频率档位（MHz 降序，首次扫描缓存） */
+    private long[] cpuFreqs = new long[0];
     private boolean confLoaded = false;
 
     @Override
@@ -57,6 +69,12 @@ public class ModeActivity extends ThemedActivity {
         ruleHint = findViewById(R.id.ruleHint);
         ruleBox = findViewById(R.id.ruleBox);
 
+        // 右上角：删除模式开关（红 X 显隐）
+        btnDelMode = findViewById(R.id.btnDeleteMode);
+        btnDoneMode = findViewById(R.id.btnDoneMode);
+        btnDelMode.setOnClickListener(v -> setDeleteMode(true));
+        btnDoneMode.setOnClickListener(v -> setDeleteMode(false));
+
         findViewById(R.id.addRuleBtn).setOnClickListener(v -> pickApp());
         findViewById(R.id.saveRuleBtn).setOnClickListener(v -> saveConf());
 
@@ -67,7 +85,9 @@ public class ModeActivity extends ThemedActivity {
 
     private void loadState() {
         new Thread(() -> {
+            loadFreqScan();
             String conf = RootShell.readFile(CONF_FILE);
+            parseLoads(RootShell.readFile(LOAD_FILE));
             if (conf != null) {
                 parseConf(conf);
                 confLoaded = true;
@@ -76,6 +96,122 @@ public class ModeActivity extends ThemedActivity {
                 runOnUiThread(() -> ruleHint.setText("未读取到模块配置文件（动态模式切换.conf）"));
             }
         }).start();
+    }
+
+    /** 解析单应用负载限制文件（包名=低频率MHz,高频率MHz,占用%） */
+    private void parseLoads(String conf) {
+        loads.clear();
+        if (conf == null) return;
+        for (String line : conf.split("\n")) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            int eq = line.indexOf('=');
+            if (eq <= 0) continue;
+            try {
+                String[] v = line.substring(eq + 1).trim().split(",");
+                loads.put(line.substring(0, eq).trim(),
+                        new long[]{parseMhz(v.length > 0 ? v[0] : null), parseMhz(v.length > 1 ? v[1] : null),
+                                parseMhz(v.length > 2 ? v[2] : null)});
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private static long parseMhz(String s) {
+        try {
+            return Long.parseLong(s.trim());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 选择即保存：写入 单应用负载.conf，并立即拉起执行服务 */
+    private void writeLoads() {
+        StringBuilder sb = new StringBuilder("#单应用负载：包名=低频率MHz,高频率MHz,占用%（0=未设）\n");
+        for (Map.Entry<String, long[]> e : loads.entrySet()) {
+            long[] v = e.getValue();
+            if (v[0] <= 0 && v[1] <= 0 && v[2] <= 0) continue;
+            sb.append(e.getKey()).append('=').append(v[0]).append(',').append(v[1])
+                    .append(',').append(v[2]).append('\n');
+        }
+        new Thread(() -> {
+            RootShell.Result r = RootShell.writeFile(getCacheDir(), sb.toString(), LOAD_FILE);
+            if (!r.ok()) {
+                // 写入失败必须告知：否则界面显示新值、服务仍执行旧配置（表现为限制关不掉）
+                runOnUiThread(() -> Toast.makeText(this,
+                        "配置写入失败：" + r.err + "，限制设置未保存", Toast.LENGTH_LONG).show());
+                return;
+            }
+            AppLimitService.ensure(this);   // 写入完成后再启动服务，确保读到最新配置
+        }).start();
+    }
+
+    /** 本机频率档位（MHz 降序，结果缓存到 SharedPreferences，仅首次扫描） */
+    private void loadFreqScan() {
+        try {
+            String csv = getSharedPreferences("colorfc", MODE_PRIVATE).getString("freqScan", "");
+            if (!csv.isEmpty()) {
+                String[] ps = csv.split(",");
+                long[] arr = new long[ps.length];
+                int n = 0;
+                for (String p : ps) {
+                    try {
+                        arr[n++] = Long.parseLong(p);
+                    } catch (Exception ignored) {
+                    }
+                }
+                cpuFreqs = java.util.Arrays.copyOf(arr, n);
+                return;
+            }
+            StringBuilder cmd = new StringBuilder();
+            for (int c = 0; c < 8; c++) {
+                cmd.append("cat /sys/devices/system/cpu/cpu").append(c)
+                        .append("/cpufreq/scaling_available_frequencies 2>/dev/null; ");
+            }
+            java.util.TreeSet<Long> set = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
+            RootShell.Result r = RootShell.exec(cmd.toString());
+            if (r.ok() && r.out != null) {
+                for (String tok : r.out.trim().split("\\s+")) {
+                    try {
+                        long k = Long.parseLong(tok);
+                        if (k > 1000) set.add(k / 1000);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            if (set.size() < 2) {
+                StringBuilder fb = new StringBuilder();
+                for (int c = 0; c < 8; c++) {
+                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
+                            .append("/cpufreq/cpuinfo_min_freq 2>/dev/null; ");
+                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
+                            .append("/cpufreq/cpuinfo_max_freq 2>/dev/null; ");
+                }
+                r = RootShell.exec(fb.toString());
+                if (r.ok() && r.out != null) {
+                    for (String tok : r.out.trim().split("\\s+")) {
+                        try {
+                            long k = Long.parseLong(tok);
+                            if (k > 1000) set.add(k / 1000);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+            if (!set.isEmpty()) {
+                StringBuilder sbCsv = new StringBuilder();
+                for (long v : set) {
+                    if (sbCsv.length() > 0) sbCsv.append(',');
+                    sbCsv.append(v);
+                }
+                getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                        .putString("freqScan", sbCsv.toString()).commit();
+                cpuFreqs = new long[set.size()];
+                int n = 0;
+                for (long v : set) cpuFreqs[n++] = v;
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     // ==================== 应用策略 ====================
@@ -111,11 +247,7 @@ public class ModeActivity extends ThemedActivity {
         // 全局默认行（moren）：紧凑单行，点击改模式
         ruleBox.addView(morenRow());
         for (Map.Entry<String, String> e : rules.entrySet()) {
-            ruleBox.addView(ruleRow(e.getKey(), appName(e.getKey()), e.getValue(), v ->
-                    pickMode(mode -> {
-                        rules.put(e.getKey(), mode);
-                        renderRules();
-                    })));
+            ruleBox.addView(ruleRow(e.getKey(), appName(e.getKey())));
         }
     }
 
@@ -156,20 +288,23 @@ public class ModeActivity extends ThemedActivity {
         return row;
     }
 
-    /** 一条规则行：点击整行改模式，右侧 × 删除 */
-    private View ruleRow(String pkg, String label, String mode, View.OnClickListener onEdit) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        LayoutParams lp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
-        row.setLayoutParams(lp);
+    /** 应用行卡片：头部（名称/包名/模式/删除）+ 展开的换行功能列表 */
+    private View ruleRow(String pkg, String label) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        LayoutParams clp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        clp.topMargin = dp(6);
+        card.setLayoutParams(clp);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(getResources().getColor(R.color.bgInput));
         bg.setCornerRadius(dp(10));
-        row.setBackground(bg);
+        card.setBackground(bg);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), dp(10), dp(12), dp(10));
-        row.setOnClickListener(onEdit);
+        row.setOnClickListener(v -> toggleExpand(pkg));
 
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
@@ -191,24 +326,72 @@ public class ModeActivity extends ThemedActivity {
         row.addView(info);
 
         TextView modeV = new TextView(this);
-        modeV.setText(modeName(mode));
+        modeV.setText(modeName(rules.get(pkg)));
         modeV.setTextColor(getResources().getColor(R.color.accent));
         modeV.setTextSize(13);
         modeV.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         row.addView(modeV);
 
-        ImageView del = new ImageView(this);
-        del.setImageResource(android.R.drawable.ic_delete);
-        del.setColorFilter(0xFFE5484D, android.graphics.PorterDuff.Mode.SRC_ATOP);
-        LayoutParams dlp = new LayoutParams(dp(26), dp(26));
-        dlp.leftMargin = dp(12);
-        del.setLayoutParams(dlp);
-        del.setOnClickListener(v -> {
-            rules.remove(pkg);
+        // 删除模式：行尾红色 X，点击删除该策略（含单应用负载设置）
+        if (deleteMode) {
+            ImageView del = new ImageView(this);
+            del.setImageResource(android.R.drawable.ic_delete);
+            del.setColorFilter(0xFFE5484D, android.graphics.PorterDuff.Mode.SRC_ATOP);
+            LayoutParams dlp = new LayoutParams(dp(26), dp(26));
+            dlp.leftMargin = dp(12);
+            del.setLayoutParams(dlp);
+            del.setOnClickListener(v -> {
+                rules.remove(pkg);
+                loads.remove(pkg);
+                writeLoads();
+                if (pkg.equals(expandedPkg)) expandedPkg = null;
+                renderRules();
+            });
+            row.addView(del);
+        }
+        card.addView(row);
+
+        if (pkg.equals(expandedPkg)) card.addView(expandPanel(pkg));
+        return card;
+    }
+
+    /** 展开/收起功能列表 */
+    private void toggleExpand(String pkg) {
+        expandedPkg = pkg.equals(expandedPkg) ? null : pkg;
+        renderRules();
+    }
+
+    /** 删除模式开关：行尾红 X 显隐 + 顶栏按钮态 */
+    private void setDeleteMode(boolean on) {
+        deleteMode = on;
+        btnDelMode.setBackgroundResource(on ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        btnDoneMode.setBackgroundResource(on ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        btnDoneMode.setTextColor(getResources().getColor(on ? R.color.accent : R.color.textSecondary));
+        renderRules();
+    }
+
+    /** 展开的换行功能列表：模式选择 / 低频率 / 高频率 / 占用率 */
+    private View expandPanel(String pkg) {
+        WrapLayout wrap = new WrapLayout(this, dp(8), dp(8));
+        wrap.setPadding(dp(12), 0, dp(12), dp(12));
+        TextView mc = new TextView(this);
+        mc.setText("模式选择");
+        mc.setTextColor(getResources().getColor(R.color.accent));
+        mc.setTextSize(11.5f);
+        mc.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        mc.setBackground(makeChip(0x1A0077A8));
+        mc.setPadding(dp(8), dp(3), dp(8), dp(3));
+        mc.setOnClickListener(v -> pickMode(mode -> {
+            rules.put(pkg, mode);
             renderRules();
-        });
-        row.addView(del);
-        return row;
+        }));
+        wrap.addView(mc);
+
+        long[] ld = loads.get(pkg);
+        wrap.addView(loadChip("低频率", ld != null && ld[0] > 0, v -> pickFreq(pkg, true)));
+        wrap.addView(loadChip("高频率", ld != null && ld[1] > 0, v -> pickFreq(pkg, false)));
+        wrap.addView(loadChip("占用率", ld != null && ld[2] > 0, v -> pickPct(pkg)));
+        return wrap;
     }
 
     private void pickApp() {
@@ -226,6 +409,203 @@ public class ModeActivity extends ThemedActivity {
     }
 
     private interface ModeCb { void on(String mode); }
+
+    /** 负载芯片：on=已设置（橙色），点击弹频率选择 */
+    private View loadChip(String text, boolean on, View.OnClickListener click) {
+        TextView c = new TextView(this);
+        c.setText(text);
+        c.setTextColor(on ? 0xFFE8A33D : 0xFF7C8AA0);
+        c.setTextSize(11.5f);
+        c.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        c.setBackground(makeChip(on ? 0x1AE8A33D : 0x14808FA6));
+        c.setPadding(dp(8), dp(3), dp(8), dp(3));
+        c.setOnClickListener(click);
+        LayoutParams lp = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dp(6);
+        c.setLayoutParams(lp);
+        return c;
+    }
+
+    /** 低频率 / 高频率 频率选择（档位来自本机扫描，选择即保存） */
+    private void pickFreq(String pkg, boolean min) {
+        final String title = min ? "低频率" : "高频率";
+        if (cpuFreqs.length == 0) {
+            pickFreqManual(pkg, min, title);
+            return;
+        }
+        long[] ld = loads.get(pkg);
+        long cur = ld == null ? 0 : (min ? ld[0] : ld[1]);
+        int checked = 0;
+        if (cur > 0) {
+            for (int i = 0; i < cpuFreqs.length; i++) {
+                if (cpuFreqs[i] == cur) {
+                    checked = i + 1;
+                    break;
+                }
+            }
+        }
+        String[] items = new String[cpuFreqs.length + 1];
+        items[0] = "关闭";
+        for (int i = 0; i < cpuFreqs.length; i++) items[i + 1] = cpuFreqs[i] + " MHz";
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(items, checked, (d, w) -> {
+                    setLoad(pkg, min, w == 0 ? 0 : cpuFreqs[w - 1]);
+                    d.dismiss();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 无档位数据时手动输入（MHz，0=关闭） */
+    private void pickFreqManual(String pkg, boolean min, String title) {
+        final android.widget.EditText et = new android.widget.EditText(this);
+        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        long[] ld = loads.get(pkg);
+        et.setText(String.valueOf(ld == null ? 0 : (min ? ld[0] : ld[1])));
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(et)
+                .setPositiveButton("确定", (d, w) -> {
+                    try {
+                        setLoad(pkg, min, Math.max(0, Long.parseLong(et.getText().toString().trim())));
+                    } catch (Exception ignored) {
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 占用率：滑条 0%~100% + 小数值框手动输入（0=关闭） */
+    private void pickPct(String pkg) {
+        long[] ld = loads.get(pkg);
+        int cur = (int) Math.min(100, Math.max(0, ld == null ? 0 : ld[2]));
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(4), dp(20), dp(2));
+
+        // 同行：滑条 + 圆角数值框
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        final android.widget.SeekBar sb = new android.widget.SeekBar(this);
+        sb.setMax(100);
+        sb.setProgress(cur);
+        sb.setLayoutParams(new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(sb);
+
+        LinearLayout valBox = new LinearLayout(this);
+        valBox.setOrientation(LinearLayout.HORIZONTAL);
+        valBox.setGravity(Gravity.CENTER_VERTICAL);
+        GradientDrawable vbg = new GradientDrawable();
+        vbg.setColor(0x14808FA6);
+        vbg.setCornerRadius(dp(8));
+        vbg.setStroke(dp(1), 0x2E0077A8);
+        valBox.setBackground(vbg);
+        valBox.setPadding(dp(8), 0, dp(7), 0);
+        LinearLayout.LayoutParams vlp = new LayoutParams(dp(74), LayoutParams.WRAP_CONTENT);
+        vlp.leftMargin = dp(12);
+        valBox.setLayoutParams(vlp);
+
+        final android.widget.EditText et = new android.widget.EditText(this);
+        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        et.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(3)});
+        et.setText(String.valueOf(cur));
+        et.setTextSize(13);
+        et.setTextColor(getResources().getColor(R.color.textPrimary));
+        et.setBackgroundColor(0);
+        et.setMinHeight(0);
+        et.setMinimumHeight(0);
+        et.setPadding(0, dp(6), 0, dp(6));
+        et.setGravity(Gravity.CENTER);
+        et.setLayoutParams(new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
+        valBox.addView(et);
+
+        TextView pct = new TextView(this);
+        pct.setText("%");
+        pct.setTextColor(getResources().getColor(R.color.textSecondary));
+        pct.setTextSize(12);
+        valBox.addView(pct);
+
+        row.addView(valBox);
+        box.addView(row);
+
+        // 滑条 → 数值框
+        sb.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar s, int p, boolean fromUser) {
+                if (fromUser) et.setText(String.valueOf(p));
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar s) {
+            }
+        });
+        // 数值框 → 滑条
+        et.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void onTextChanged(CharSequence s, int st, int b, int c) {
+                try {
+                    int v = Integer.parseInt(s.toString());
+                    if (v >= 0 && v <= 100 && v != sb.getProgress()) sb.setProgress(v);
+                } catch (Exception ignored) {
+                }
+            }
+
+            @Override
+            public void beforeTextChanged(CharSequence s, int st, int b, int c) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+            }
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle("占用率")
+                .setView(box)
+                .setPositiveButton("确定", (d, w) -> {
+                    int v;
+                    try {
+                        v = Integer.parseInt(et.getText().toString().trim());
+                    } catch (Exception e) {
+                        v = sb.getProgress();
+                    }
+                    setLoad(pkg, 2, Math.min(100, Math.max(0, v)));
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void setLoad(String pkg, boolean min, long mhz) {
+        setLoad(pkg, min ? 0 : 1, mhz);
+    }
+
+    /** idx: 0=低频率MHz 1=高频率MHz 2=占用% */
+    private void setLoad(String pkg, int idx, long val) {
+        long[] ld = loads.get(pkg);
+        if (ld == null) ld = new long[]{0, 0, 0};
+        ld[idx] = val;
+        if (ld[0] <= 0 && ld[1] <= 0 && ld[2] <= 0) loads.remove(pkg);
+        else loads.put(pkg, ld);
+        writeLoads();
+        renderRules();
+        AppLimitService.ensure(this);   // 确保限制执行服务在跑（配置清空则服务自动退出）
+    }
+
+    /** 芯片背景：圆角色块 */
+    private android.graphics.drawable.GradientDrawable makeChip(int color) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(7));
+        return g;
+    }
 
     private void pickMode(final ModeCb cb) {
         String[] labels = new String[MODES.length];
@@ -303,5 +683,55 @@ public class ModeActivity extends ThemedActivity {
     private static class LayoutParams extends android.widget.LinearLayout.LayoutParams {
         public LayoutParams(int w, int h) { super(w, h); }
         public LayoutParams(int w, int h, float weight) { super(w, h, weight); }
+    }
+
+    /** 横向流式换行容器（功能芯片自动换行） */
+    private static class WrapLayout extends android.view.ViewGroup {
+        private final int hGap, vGap;
+
+        WrapLayout(Context ctx, int hGap, int vGap) {
+            super(ctx);
+            this.hGap = hGap;
+            this.vGap = vGap;
+        }
+
+        @Override
+        protected void onMeasure(int wms, int hms) {
+            int maxW = MeasureSpec.getSize(wms) - getPaddingLeft() - getPaddingRight();
+            int x = 0, lineH = 0, totalH = getPaddingTop();
+            for (int i = 0; i < getChildCount(); i++) {
+                View ch = getChildAt(i);
+                measureChild(ch, wms, hms);
+                int cw = ch.getMeasuredWidth(), chh = ch.getMeasuredHeight();
+                if (x > 0 && x + hGap + cw > maxW) {   // 放不下 → 换行
+                    totalH += lineH + vGap;
+                    x = 0;
+                    lineH = 0;
+                }
+                x += (x > 0 ? hGap : 0) + cw;
+                lineH = Math.max(lineH, chh);
+            }
+            totalH += lineH + getPaddingBottom();
+            setMeasuredDimension(resolveSize(maxW + getPaddingLeft() + getPaddingRight(), wms),
+                    resolveSize(totalH, hms));
+        }
+
+        @Override
+        protected void onLayout(boolean c, int l, int t, int r, int b) {
+            int x = getPaddingLeft(), y = getPaddingTop(), lineH = 0;
+            int maxR = getWidth() - getPaddingRight();
+            for (int i = 0; i < getChildCount(); i++) {
+                View ch = getChildAt(i);
+                int cw = ch.getMeasuredWidth(), chh = ch.getMeasuredHeight();
+                if (x > getPaddingLeft() && x + cw > maxR) {   // 换行
+                    x = getPaddingLeft();
+                    y += lineH + vGap;
+                    lineH = 0;
+                }
+                ch.layout(x, y, x + cw, y + chh);
+                x += cw + hGap;
+                lineH = Math.max(lineH, chh);
+            }
+        }
     }
 }

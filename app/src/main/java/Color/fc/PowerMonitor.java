@@ -181,7 +181,7 @@ public class PowerMonitor {
                     st.level = (int) toD(t.substring(6).trim());
                 } else if (t.startsWith("temperature:")) {
                     double v = toD(t.substring(12).trim());
-                    st.tempC = v > 60 ? v / 10.0 : v;
+                    st.tempC = v < 0 ? 0 : (v > 60 ? v / 10.0 : v);   // 负值=传感器无效占位，置 0
                 } else if (t.startsWith("voltage:")) {
                     st.volts = calibV(toD(t.substring(8).trim()));
                 } else if (t.startsWith("status:")) {
@@ -210,7 +210,7 @@ public class PowerMonitor {
     private static void fillBasic(BatteryStat st, String[] p) {
         st.level = (int) toD(p[4]);
         double t = toD(p[5]);
-        st.tempC = t > 60 ? t / 10.0 : t;   // 285 → 28.5℃；直接给 25 则保留
+        st.tempC = t < 0 ? 0 : (t > 60 ? t / 10.0 : t);   // 285 → 28.5℃；负值=无效占位置 0
         if (p[6] != null) st.status = p[6].trim();
     }
 

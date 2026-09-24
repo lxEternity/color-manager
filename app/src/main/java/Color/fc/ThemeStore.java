@@ -17,6 +17,8 @@ import android.view.WindowManager;
 
 import java.io.File;
 
+import Color.fc.view.LiquidDrawable;
+
 /**
  * 主题存储：日/夜间、全透明背景（透壁纸）、自定义背景图（透明度/缩放/裁剪偏移）
  * 所有页面通过 ThemedActivity 统一应用，实现全局沉浸
@@ -64,6 +66,11 @@ public class ThemeStore {
     public static int glassAlpha(Context c) {
         int v = c.getSharedPreferences(SP, Context.MODE_PRIVATE).getInt("glass", 75);
         return Math.max(30, Math.min(100, v));
+    }
+
+    /** 液态玻璃：沉浸模式下为全部圆角控件叠加顶部高光 + 白描边的液态质感 */
+    public static boolean liquidGlass(Context c) {
+        return c.getSharedPreferences(SP, Context.MODE_PRIVATE).getBoolean("liquid", false);
     }
 
     /** 主题版本号：日/夜间切换时 +1，ThemedActivity 检测到变化后重建页面 */
@@ -115,6 +122,11 @@ public class ThemeStore {
     public static void setGlass(Context c, int v) {
         c.getSharedPreferences(SP, Context.MODE_PRIVATE).edit()
                 .putInt("glass", Math.max(30, Math.min(100, v))).commit();
+    }
+
+    public static void setLiquid(Context c, boolean on) {
+        c.getSharedPreferences(SP, Context.MODE_PRIVATE).edit()
+                .putBoolean("liquid", on).commit();
     }
 
     // ==================== 应用 ====================
@@ -172,6 +184,7 @@ public class ThemeStore {
 
         if (immersive) {
             // 系统栏全透明：窗口已铺满全屏，状态栏/导航栏直接透出背景像素
+            // （对比度遮罩在 styles.xml 里用 enforceXxxContrast=false 关闭）
             w.setStatusBarColor(Color.TRANSPARENT);
             w.setNavigationBarColor(Color.TRANSPARENT);
             // 背景图：系统栏图标颜色按图片上缘亮度取深浅
@@ -184,6 +197,11 @@ public class ThemeStore {
         }
         // 沉浸模式：全局控件玻璃化——卡片/输入框等圆角背景半透明透出背景
         walkGlass(w.getDecorView(), immersive ? Math.round(glassAlpha(a) * 2.55f) : 255);
+        // 悬浮控件 UI：圆角卡片/胶囊 4dp、渐变按钮 7dp 投影，全局浮起美化
+        float dp = a.getResources().getDisplayMetrics().density;
+        walkFloat(w.getDecorView(), 4f * dp, 7f * dp);
+        // 液态玻璃：沉浸时叠加顶部高光 + 白描边的液态质感
+        walkLiquid(w.getDecorView(), immersive && liquidGlass(a), dp);
     }
 
     /** 亮度判断：系统栏取浅色还是深色图标 */
@@ -274,6 +292,46 @@ public class ThemeStore {
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) walkGlass(g.getChildAt(i), alpha);
+        }
+    }
+
+    /** 悬浮控件 UI：shape 卡片/胶囊 4dp、layer 渐变按钮 7dp 投影，圆角背景整体浮起 */
+    private static void walkFloat(View v, float cardEl, float btnEl) {
+        android.graphics.drawable.Drawable bg = v.getBackground();
+        if (bg instanceof android.graphics.drawable.LayerDrawable) {
+            v.setElevation(btnEl);
+        } else if (bg instanceof android.graphics.drawable.GradientDrawable) {
+            v.setElevation(cardEl);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) walkFloat(g.getChildAt(i), cardEl, btnEl);
+        }
+    }
+
+    /** 液态玻璃：为圆角背景控件叠加镜面高光覆盖层（foreground），关闭时移除 */
+    private static void walkLiquid(View v, boolean on, float dp) {
+        android.graphics.drawable.Drawable bg = v.getBackground();
+        if (bg instanceof android.graphics.drawable.GradientDrawable
+                || bg instanceof android.graphics.drawable.LayerDrawable) {
+            if (on) {
+                float r = 18f * dp;
+                if (bg instanceof android.graphics.drawable.GradientDrawable) {
+                    try {
+                        float cr = ((android.graphics.drawable.GradientDrawable) bg).getCornerRadius();
+                        if (cr > 0) r = cr;
+                    } catch (Exception ignored) {
+                        // 各角半径不同的 shape，回退默认
+                    }
+                }
+                v.setForeground(new LiquidDrawable(r, dp));
+            } else if (v.getForeground() instanceof LiquidDrawable) {
+                v.setForeground(null);
+            }
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) walkLiquid(g.getChildAt(i), on, dp);
         }
     }
 

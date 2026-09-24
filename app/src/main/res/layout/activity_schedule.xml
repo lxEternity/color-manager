@@ -130,17 +130,20 @@
             android:paddingBottom="24dp" />
     </ScrollView>
 
-    <!-- 底部保存栏 -->
+    <!-- 底部保存栏：悬浮玻璃坞 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="8dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="14dp"
-        android:background="@color/titleBar">
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="10dp"
+        android:background="@drawable/bg_card">
 
         <TextView
             android:id="@+id/saveHint"

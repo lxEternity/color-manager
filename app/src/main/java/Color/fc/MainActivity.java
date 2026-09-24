@@ -25,12 +25,11 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-import Color.fc.view.Beam;
-import Color.fc.view.ChipView;
 import Color.fc.view.SparkView;
+import Color.fc.view.Warp;
 
 /**
- * 主页：SOC 可视化 + 实时功耗（自动校准单/双电芯）+ 硬件实时状态 + 功能入口
+ * 主页：SOC 信息行 + 实时功耗（自动校准单/双电芯）+ 硬件实时状态 + 功能入口
  */
 public class MainActivity extends ThemedActivity {
 
@@ -42,7 +41,6 @@ public class MainActivity extends ThemedActivity {
     private int cellMode = 0;
     private int lastAutoCells = 1;
 
-    private ChipView chipView;
     private TextView socMarketing, socPlatform, rootBadge;
     private TextView powerValue, powerStatus, currentValue, voltageValue, peakValue, cellBadge;
     private TextView cpuCount, batteryLevel, batteryTemp;
@@ -69,7 +67,6 @@ public class MainActivity extends ThemedActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        chipView = findViewById(R.id.chipView);
         socMarketing = findViewById(R.id.socMarketing);
         socPlatform = findViewById(R.id.socPlatform);
         rootBadge = findViewById(R.id.rootBadge);
@@ -131,10 +128,9 @@ public class MainActivity extends ThemedActivity {
         wireBeam(R.id.menuTheme, ThemeActivity.class);
         tintBadges();
         // 记录卡片：按压动效
-        Beam.press(findViewById(R.id.menuFrameRecords));
-        Beam.press(findViewById(R.id.menuPowerHistory));
-        Beam.press(findViewById(R.id.menuMonitor));
-        Beam.press(findViewById(R.id.socCard));
+        Warp.press(findViewById(R.id.menuFrameRecords));
+        Warp.press(findViewById(R.id.menuPowerHistory));
+        Warp.press(findViewById(R.id.menuMonitor));
 
         detectSoc();
         detectRoot();
@@ -164,11 +160,11 @@ public class MainActivity extends ThemedActivity {
         updateCellModeFromPrefs();
     }
 
-    /** 入口卡片：按压动效 + 点击触发光束转场进入下一页面 */
+    /** 入口卡片：按压动效 + 点击触发量子涟漪转场进入下一页面 */
     private void wireBeam(int id, Class<?> cls) {
         View v = findViewById(id);
-        Beam.press(v);
-        v.setOnClickListener(x -> Beam.go(this, new Intent(this, cls)));
+        Warp.press(v);
+        v.setOnClickListener(x -> Warp.go(this, new Intent(this, cls), v));
     }
 
     /** 功能入口徽章着色：柔和底色 + 同色系字符 */
@@ -208,7 +204,6 @@ public class MainActivity extends ThemedActivity {
 
     private void applySoc(SocInfo s) {
         soc = s;
-        chipView.setChip(s.shortName, s.code);
         socMarketing.setText(s.marketing);
         socPlatform.setText(String.format(Locale.US, "platform: %s · %s", s.platform, s.vendor));
         int n = PowerMonitor.cpuCount();

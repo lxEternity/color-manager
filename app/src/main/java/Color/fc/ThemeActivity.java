@@ -32,7 +32,7 @@ public class ThemeActivity extends ThemedActivity {
     private static final int REQ_PICK = 71;
 
     private TextView chipDay, chipNight, alphaValue, scaleValue, offXValue, offYValue, glassValue;
-    private Switch swTransparent, swImage;
+    private Switch swTransparent, swImage, swLiquid;
     private ImageView preview;
     private TextView pickBtn, clearBtn;
     private LinearLayout imageGroup;
@@ -132,6 +132,16 @@ public class ThemeActivity extends ThemedActivity {
             glassValue.setText(p + "%");
             ThemeStore.applyBackground(this);
         }));
+
+        // 液态玻璃：沉浸时叠加镜面高光 + 白描边的液态质感
+        LinearLayout rowL = row("液态玻璃", "圆角控件叠加顶部高光与液滴描边，配合沉浸背景");
+        swLiquid = new Switch(this);
+        rowL.addView(swLiquid);
+        card2.addView(rowL);
+        swLiquid.setOnCheckedChangeListener((b, on) -> {
+            ThemeStore.setLiquid(this, on);
+            ThemeStore.applyBackground(this);
+        });
 
         card2.addView(divider());
 
@@ -339,6 +349,7 @@ public class ThemeActivity extends ThemedActivity {
         offXValue.setText(ThemeStore.bgOffX(this) + "%");
         offYValue.setText(ThemeStore.bgOffY(this) + "%");
         glassValue.setText(ThemeStore.glassAlpha(this) + "%");
+        swLiquid.setChecked(ThemeStore.liquidGlass(this));
         refreshPreview();
     }
 
@@ -506,7 +517,7 @@ public class ThemeActivity extends ThemedActivity {
         bg.setStroke(dp(1), getResources().getColor(colorRes));
         v.setBackground(bg);
         v.setPadding(0, dp(9), 0, dp(9));
-        Color.fc.view.Beam.press(v);
+        Color.fc.view.Warp.press(v);
         return v;
     }
 

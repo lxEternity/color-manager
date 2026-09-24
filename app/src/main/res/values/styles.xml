@@ -8,6 +8,9 @@
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
+        <!-- 关闭系统栏对比度遮罩：沉浸模式透明导航栏后面不再出现半透明色带 -->
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:colorControlActivated">@color/accent</item>
         <item name="android:colorControlNormal">@color/textDim</item>
@@ -21,6 +24,9 @@
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
+        <!-- 关闭系统栏对比度遮罩：沉浸模式透明导航栏后面不再出现半透明色带 -->
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:colorControlActivated">@color/accent</item>
         <item name="android:colorControlNormal">@color/textDim</item>

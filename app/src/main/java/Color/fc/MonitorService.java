@@ -1125,27 +1125,53 @@ public class MonitorService extends Service {
         return Math.max(max, fallback);
     }
 
-    private float refreshRate() {
-        try {
-            DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
-            return dm.getDisplay(0).getRefreshRate();
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
     // ==================== 实时帧率（真实渲染帧率，非面板刷新率） ====================
 
     /**
-     * 实时帧率三级策略：
+     * 实时帧率三级策略（全部为实测渲染帧率，绝不显示面板刷新率档位）：
      * 1. SurfaceFlinger --latency：前台图层的帧呈现时间戳 → 最近窗口真实 fps（游戏 SurfaceView 也计入）
      * 2. dumpsys gfxinfo：前台应用总渲染帧数差分（部分系统移除了 --latency 时）
-     * 3. 面板刷新率兜底（旧行为）
+     * 3. dumpsys gfxinfo framestats：PROFILEDATA 帧完成时间戳差分
+     * 全部失败返回 0，界面显示 "--fps"
      */
     private float realFps() {
         Float f = sfFps();
         if (f == null) f = gfxFps();
-        return f != null ? f : refreshRate();
+        if (f == null) f = gfxFrameStatsFps();
+        return f != null ? f : 0f;
+    }
+
+    /** dumpsys gfxinfo framestats：PROFILEDATA 帧完成时间戳差分 → 实时 fps（第三兜底） */
+    private Float gfxFrameStatsFps() {
+        if (fpsPkg == null) return null;
+        try {
+            RootShell.Result r = RootShell.exec(
+                    "dumpsys gfxinfo " + fpsPkg + " framestats 2>/dev/null", 8);
+            if (!r.ok() || r.out == null) return null;
+            long min = Long.MAX_VALUE, max = 0;
+            int n = 0;
+            for (String l : r.out.split("\\n")) {
+                if (!l.matches("\\d+(,\\d+)+")) continue;
+                String[] c = l.split(",");
+                if (c.length < 16) continue;
+                try {
+                    long t = Long.parseLong(c[14]);   // FrameCompleted（纳秒）
+                    if (t <= 0) continue;
+                    n++;
+                    if (t < min) min = t;
+                    if (t > max) max = t;
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            if (n >= 2 && max > min) {
+                double span = (max - min) / 1e9;
+                if (span >= 0.05 && span <= 30) {
+                    return Math.max(1f, Math.min(240f, (float) ((n - 1) / span)));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     /** 刷新前台应用图层缓存（约 5 秒一次）：前台包名 + SF 图层列表择优 */

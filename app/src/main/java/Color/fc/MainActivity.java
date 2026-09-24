@@ -25,11 +25,12 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import Color.fc.view.ChipView;
 import Color.fc.view.SparkView;
 import Color.fc.view.Warp;
 
 /**
- * 主页：SOC 信息行 + 实时功耗（自动校准单/双电芯）+ 硬件实时状态 + 功能入口
+ * 主页：SOC 型号卡 + 实时功耗（自动校准单/双电芯）+ 功能入口
  */
 public class MainActivity extends ThemedActivity {
 
@@ -51,15 +52,7 @@ public class MainActivity extends ThemedActivity {
     private TextView frameRecordsSummary;
     private int powerTick = 0;
 
-    // ===== 硬件实时状态（主页 2s 扫描） =====
-    private TextView hwCpuBusy, hwCpuTemp, hwGpuFreq, hwGpuTemp, hwCpuFreq;
-    private boolean hwRunning = false;
-    private long hwIdle = -1, hwTotal = -1;
-    /** 电池温度（CPU 温区兜底用，功耗循环更新） */
-    private volatile double batTempC = 0;
-    /** 自调度扫描任务（onCreate 中创建，避免字段初始化自引用） */
-    private Runnable hwTick;
-
+    private ChipView chipView;
     static SocInfo cachedSoc;
 
     @Override
@@ -70,6 +63,7 @@ public class MainActivity extends ThemedActivity {
         socMarketing = findViewById(R.id.socMarketing);
         socPlatform = findViewById(R.id.socPlatform);
         rootBadge = findViewById(R.id.rootBadge);
+        chipView = findViewById(R.id.chipView);
         powerValue = findViewById(R.id.powerValue);
         powerStatus = findViewById(R.id.powerStatus);
         currentValue = findViewById(R.id.currentValue);
@@ -81,52 +75,13 @@ public class MainActivity extends ThemedActivity {
         batteryTemp = findViewById(R.id.batteryTemp);
         sparkView = findViewById(R.id.sparkView);
 
-        // 硬件实时状态
-        hwCpuBusy = findViewById(R.id.hwCpuBusy);
-        hwCpuTemp = findViewById(R.id.hwCpuTemp);
-        hwGpuFreq = findViewById(R.id.hwGpuFreq);
-        hwGpuTemp = findViewById(R.id.hwGpuTemp);
-        hwCpuFreq = findViewById(R.id.hwCpuFreq);
-
-        // 自调度硬件扫描任务（2s 循环，onResume 启动 / onPause 停止）
-        hwTick = () -> {
-            if (!hwRunning) return;
-            new Thread(() -> {
-                double busy = -1, gpuHz = 0, cpuKHz = 0, cpuT = 0, gpuT = 0;
-                try {
-                    RootShell.Result r = RootShell.exec(HardwareMonitor.SCAN, 8);
-                    if (r.ok() && r.out != null) {
-                        // CPU 占用：/proc/stat 差分（root 读取，应用直读被 SELinux 拦截）
-                        long[] it = HardwareMonitor.procStat(r.out);
-                        if (it != null) {
-                            if (hwIdle >= 0 && it[1] > hwTotal) {
-                                busy = Math.max(0, Math.min(100,
-                                        100.0 * (it[1] - hwTotal - (it[0] - hwIdle)) / (it[1] - hwTotal)));
-                            }
-                            hwIdle = it[0];
-                            hwTotal = it[1];
-                        }
-                        gpuHz = HardwareMonitor.gpuHz(r.out);
-                        cpuKHz = HardwareMonitor.cpuMaxKHz(r.out);
-                        // 温区兜底链：cpu→电池温度；soc 仅作 gpu 的兜底（不再展示）
-                        cpuT = HardwareMonitor.zoneTemp(r.out, "cpu", batTempC);
-                        double socT = HardwareMonitor.zoneTemp(r.out, "soc", cpuT);
-                        gpuT = HardwareMonitor.zoneTemp(r.out, "gpu", socT);
-                    }
-                } catch (Exception ignored) {
-                }
-                final double b = busy, g = gpuHz, ck = cpuKHz, ct = cpuT, gt = gpuT;
-                runOnUiThread(() -> updateHardware(b, ck, g, ct, gt));
-                if (hwRunning) handler.postDelayed(hwTick, 2000);
-            }).start();
-        };
-
-        // 功能入口：光束转场进入下一页面
+        // 功能入口：直接进入下一页面（转场特效已按需求移除）
         wireBeam(R.id.menuSchedule, ScheduleActivity.class);
         wireBeam(R.id.menuGovernor, GovernorActivity.class);
         wireBeam(R.id.menuMode, ModeActivity.class);
         wireBeam(R.id.menuTheme, ThemeActivity.class);
         tintBadges();
+        Warp.press(findViewById(R.id.socCard));
         // 记录卡片：按压动效
         Warp.press(findViewById(R.id.menuFrameRecords));
         Warp.press(findViewById(R.id.menuPowerHistory));
@@ -160,11 +115,11 @@ public class MainActivity extends ThemedActivity {
         updateCellModeFromPrefs();
     }
 
-    /** 入口卡片：按压动效 + 点击触发量子涟漪转场进入下一页面 */
+    /** 入口卡片：按压动效 + 直接进入下一页面（转场特效已移除） */
     private void wireBeam(int id, Class<?> cls) {
         View v = findViewById(id);
         Warp.press(v);
-        v.setOnClickListener(x -> Warp.go(this, new Intent(this, cls), v));
+        v.setOnClickListener(x -> startActivity(new Intent(this, cls)));
     }
 
     /** 功能入口徽章着色：柔和底色 + 同色系字符 */
@@ -204,6 +159,7 @@ public class MainActivity extends ThemedActivity {
 
     private void applySoc(SocInfo s) {
         soc = s;
+        chipView.setChip(s.shortName, s.code);
         socMarketing.setText(s.marketing);
         socPlatform.setText(String.format(Locale.US, "platform: %s · %s", s.platform, s.vendor));
         int n = PowerMonitor.cpuCount();
@@ -258,16 +214,11 @@ public class MainActivity extends ThemedActivity {
         suppressSwitch = true;
         if (monitorSwitch != null) monitorSwitch.setChecked(MonitorService.running);
         suppressSwitch = false;
-        // 硬件实时状态：前台每 2 秒扫描，后台自动停止省电
-        hwRunning = true;
-        handler.postDelayed(hwTick, 400);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        hwRunning = false;
-        handler.removeCallbacks(hwTick);
     }
 
     /** 迷你悬浮窗开关：权限检查 + 启停前台服务 */
@@ -455,42 +406,9 @@ public class MainActivity extends ThemedActivity {
         if (st.level >= 0) batteryLevel.setText(st.level + "%");
         if (st.tempC > 0) {
             batteryTemp.setText(String.format(Locale.US, "%.1f℃", st.tempC));
-            batTempC = st.tempC;
         }
     }
 
-    // ==================== 硬件实时状态刷新 ====================
-
-    /** 温度着色：≥75 红 ≥60 橙 其余白 */
-    private static int tempColor(double t) {
-        return t >= 75 ? 0xFFEF4444 : t >= 60 ? 0xFFF59E0B : 0xFFE6EDF3;
-    }
-
-    private static String fmtTemp(double t) {
-        return t > 0 ? String.format(Locale.US, "%.1f℃", t) : "--";
-    }
-
-    private void updateHardware(double busy, double cpuKHz, double gpuHz, double cpuT, double gpuT) {
-        if (hwCpuBusy != null) {
-            hwCpuBusy.setText(busy >= 0 ? String.format(Locale.US, "%.0f%%", busy) : "--");
-            hwCpuBusy.setTextColor(busy >= 85 ? 0xFFEF4444
-                    : busy >= 60 ? 0xFFF59E0B : 0xFFE6EDF3);
-        }
-        if (hwCpuTemp != null) {
-            hwCpuTemp.setText(fmtTemp(cpuT));
-            hwCpuTemp.setTextColor(tempColor(cpuT));
-        }
-        if (hwGpuFreq != null) {
-            hwGpuFreq.setText(gpuHz > 0 ? String.format(Locale.US, "%.0fMHz", gpuHz / 1e6) : "--");
-        }
-        if (hwGpuTemp != null) {
-            hwGpuTemp.setText(fmtTemp(gpuT));
-            hwGpuTemp.setTextColor(tempColor(gpuT));
-        }
-        if (hwCpuFreq != null) {
-            hwCpuFreq.setText(cpuKHz > 0 ? String.format(Locale.US, "%.0fMHz", cpuKHz / 1000) : "--");
-        }
-    }
 
     @Override
     protected void onDestroy() {

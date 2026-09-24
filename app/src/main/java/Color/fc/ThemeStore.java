@@ -197,11 +197,9 @@ public class ThemeStore {
         }
         // 沉浸模式：全局控件玻璃化——卡片/输入框等圆角背景半透明透出背景
         walkGlass(w.getDecorView(), immersive ? Math.round(glassAlpha(a) * 2.55f) : 255);
-        // 悬浮控件 UI：圆角卡片/胶囊 4dp、渐变按钮 7dp 投影，全局浮起美化
-        float dp = a.getResources().getDisplayMetrics().density;
-        walkFloat(w.getDecorView(), 4f * dp, 7f * dp);
         // 液态玻璃：沉浸时叠加顶部高光 + 白描边的液态质感
-        walkLiquid(w.getDecorView(), immersive && liquidGlass(a), dp);
+        walkLiquid(w.getDecorView(), immersive && liquidGlass(a),
+                a.getResources().getDisplayMetrics().density);
     }
 
     /** 亮度判断：系统栏取浅色还是深色图标 */
@@ -292,20 +290,6 @@ public class ThemeStore {
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) walkGlass(g.getChildAt(i), alpha);
-        }
-    }
-
-    /** 悬浮控件 UI：shape 卡片/胶囊 4dp、layer 渐变按钮 7dp 投影，圆角背景整体浮起 */
-    private static void walkFloat(View v, float cardEl, float btnEl) {
-        android.graphics.drawable.Drawable bg = v.getBackground();
-        if (bg instanceof android.graphics.drawable.LayerDrawable) {
-            v.setElevation(btnEl);
-        } else if (bg instanceof android.graphics.drawable.GradientDrawable) {
-            v.setElevation(cardEl);
-        }
-        if (v instanceof android.view.ViewGroup) {
-            android.view.ViewGroup g = (android.view.ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) walkFloat(g.getChildAt(i), cardEl, btnEl);
         }
     }
 

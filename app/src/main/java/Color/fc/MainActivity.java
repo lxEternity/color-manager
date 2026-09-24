@@ -80,7 +80,6 @@ public class MainActivity extends ThemedActivity {
         wireBeam(R.id.menuGovernor, GovernorActivity.class);
         wireBeam(R.id.menuMode, ModeActivity.class);
         wireBeam(R.id.menuTheme, ThemeActivity.class);
-        tintBadges();
         Warp.press(findViewById(R.id.socCard));
         // 记录卡片：按压动效
         Warp.press(findViewById(R.id.menuFrameRecords));
@@ -120,25 +119,6 @@ public class MainActivity extends ThemedActivity {
         View v = findViewById(id);
         Warp.press(v);
         v.setOnClickListener(x -> startActivity(new Intent(this, cls)));
-    }
-
-    /** 功能入口徽章着色：柔和底色 + 同色系字符 */
-    private void tintBadges() {
-        int[][] pairs = {
-                {R.id.badgeSchedule, R.color.accent},
-                {R.id.badgeGovernor, R.color.magenta},
-                {R.id.badgeMode, R.color.green}
-        };
-        for (int[] p : pairs) {
-            TextView badge = findViewById(p[0]);
-            if (badge == null) continue;
-            int color = getResources().getColor(p[1]);
-            GradientDrawable bg = new GradientDrawable();
-            bg.setCornerRadius(dp(9));
-            bg.setColor((color & 0x00FFFFFF) | 0x26000000);
-            badge.setBackground(bg);
-            badge.setTextColor(color);
-        }
     }
 
     private int dp(int v) {

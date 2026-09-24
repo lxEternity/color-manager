@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:paddingStart="36dp"
+    android:paddingEnd="36dp">
+
+    <ImageView
+        android:layout_width="92dp"
+        android:layout_height="92dp"
+        android:src="@mipmap/ic_launcher"
+        android:contentDescription="@string/app_name" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:text="@string/app_name"
+        android:textColor="@color/textPrimary"
+        android:textSize="25sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="请输入访问密码进入"
+        android:textColor="@color/textSecondary"
+        android:textSize="13sp" />
+
+    <EditText
+        android:id="@+id/passwordInput"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:layout_marginTop="32dp"
+        android:background="@drawable/bg_input"
+        android:hint="请输入访问密码"
+        android:gravity="center"
+        android:letterSpacing="0.12"
+        android:textColorHint="@color/textDim"
+        android:textColor="@color/textPrimary"
+        android:inputType="textPassword"
+        android:imeOptions="actionDone"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/unlockBtn"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:layout_marginTop="18dp"
+        android:background="@drawable/btn_primary"
+        android:text="进入 APP"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="验证一次后，下次打开无需再次输入"
+        android:textColor="@color/textDim"
+        android:textSize="11sp" />
+</LinearLayout>

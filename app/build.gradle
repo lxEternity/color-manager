@@ -1,0 +1,39 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'Color.fc'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "Color.fc"
+        minSdk 26
+        targetSdk 34
+        versionCode 138
+        versionName "1.3.8"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('../color.jks')
+            storePassword 'colorfc123'
+            keyAlias 'color'
+            keyPassword 'colorfc123'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

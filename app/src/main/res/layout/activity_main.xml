@@ -120,6 +120,66 @@
                             android:textColor="@color/textSecondary"
                             android:textSize="10sp" />
                     </LinearLayout>
+
+                    <!-- 迷你悬浮窗开关（收纳进 SOC 卡） -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:orientation="vertical"
+                        android:gravity="center_horizontal">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="迷你悬浮窗"
+                            android:textColor="@color/textSecondary"
+                            android:textSize="10sp" />
+
+                        <Switch
+                            android:id="@+id/monitorSwitch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 功耗统计曲线（近 3 小时采样，点击查看历史） -->
+                <LinearLayout
+                    android:id="@+id/powerHistBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="功耗统计"
+                            android:textColor="@color/textPrimary"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/histHint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="读取中…"
+                            android:textColor="@color/textSecondary"
+                            android:textSize="10sp" />
+                    </LinearLayout>
+
+                    <Color.fc.view.SparkView
+                        android:id="@+id/histSpark"
+                        android:layout_width="match_parent"
+                        android:layout_height="54dp"
+                        android:layout_marginTop="4dp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -382,38 +442,6 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 迷你悬浮窗开关 -->
-            <LinearLayout
-                android:id="@+id/menuMonitor"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="10dp">
-
-                <View
-                    android:layout_width="3dp"
-                    android:layout_height="18dp"
-                    android:background="#F59E0B" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="10dp"
-                    android:text="迷你悬浮窗"
-                    android:textColor="@color/textPrimary"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <Switch
-                    android:id="@+id/monitorSwitch"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-
             <!-- 帧率录制记录 -->
             <LinearLayout
                 android:id="@+id/menuFrameRecords"
@@ -446,40 +474,6 @@
                     android:src="@drawable/ic_arrow_right"
                     android:tint="#EF4444"
                     android:contentDescription="帧率录制记录" />
-            </LinearLayout>
-
-            <!-- 功耗记录卡片 -->
-            <LinearLayout
-                android:id="@+id/menuPowerHistory"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="10dp">
-
-                <View
-                    android:layout_width="3dp"
-                    android:layout_height="18dp"
-                    android:background="#22D3EE" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="10dp"
-                    android:text="功耗记录"
-                    android:textColor="@color/textPrimary"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    android:tint="#22D3EE"
-                    android:contentDescription="功耗记录" />
             </LinearLayout>
 
             <!-- 分组: 调度功能 -->

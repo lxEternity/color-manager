@@ -49,6 +49,10 @@ public class MainActivity extends ThemedActivity {
     private Switch monitorSwitch;
     private boolean suppressSwitch = false;
 
+    private SparkView histSpark;
+    private TextView histHint;
+    private long lastHistUpd = 0;
+
     private ChipView chipView;
     static SocInfo cachedSoc;
 
@@ -80,8 +84,6 @@ public class MainActivity extends ThemedActivity {
         Warp.press(findViewById(R.id.socCard));
         // 记录卡片：按压动效
         Warp.press(findViewById(R.id.menuFrameRecords));
-        Warp.press(findViewById(R.id.menuPowerHistory));
-        Warp.press(findViewById(R.id.menuMonitor));
 
         detectSoc();
         detectRoot();
@@ -94,8 +96,11 @@ public class MainActivity extends ThemedActivity {
             toggleMonitor(on);
         });
 
-        // 功耗记录卡片
-        findViewById(R.id.menuPowerHistory).setOnClickListener(v -> showHistoryDialog());
+        // 功耗统计曲线（SOC 卡内）：点击查看历史明细
+        histSpark = findViewById(R.id.histSpark);
+        histHint = findViewById(R.id.histHint);
+        findViewById(R.id.powerHistBox).setOnClickListener(v -> showHistoryDialog());
+        refreshHistCurve();
 
         // 帧率录制记录卡片
         findViewById(R.id.menuFrameRecords).setOnClickListener(v -> showFrameRecords());
@@ -162,6 +167,11 @@ public class MainActivity extends ThemedActivity {
                         // 历史采样（内部 1 分钟节流），功耗按主页电芯模式修正后记录
                         st.watts = PowerMonitor.applyCellMode(st, cellMode);
                         PowerHistoryManager.record(MainActivity.this, st);
+                        // 功耗统计曲线每分钟刷新一次
+                        if (System.currentTimeMillis() - lastHistUpd > 60_000) {
+                            lastHistUpd = System.currentTimeMillis();
+                            refreshHistCurve();
+                        }
                     }
                     runOnUiThread(() -> {
                         if (st != null) updatePower(st);
@@ -208,17 +218,40 @@ public class MainActivity extends ThemedActivity {
         }
     }
 
+    /** 功耗统计曲线：近 3 小时采样 + 均值/峰值提示 */
+    private void refreshHistCurve() {
+        new Thread(() -> {
+            final float[] vals = PowerHistoryManager.recentWatts(this, 180);
+            runOnUiThread(() -> {
+                if (histSpark == null) return;
+                histSpark.setData(vals);
+                if (vals.length == 0) {
+                    histHint.setText("暂无记录 · 采样中");
+                } else {
+                    double avg = 0, max = 0;
+                    for (float v : vals) {
+                        avg += v;
+                        if (v > max) max = v;
+                    }
+                    avg /= vals.length;
+                    histHint.setText(String.format(Locale.US, "近3小时 · 均值 %.2f W · 峰值 %.2f W", avg, max));
+                }
+            });
+        }).start();
+    }
+
     /** 功耗历史记录弹窗（充/放电会话） */
     private void showHistoryDialog() {
         new Thread(() -> {
             final String text = PowerHistoryManager.historyText(this, 30);
             runOnUiThread(() -> new AlertDialog.Builder(this)
-                    .setTitle("功耗历史记录")
+                    .setTitle("功耗统计")
                     .setMessage(text)
                     .setPositiveButton("关闭", null)
                     .setNeutralButton("清空记录", (d, w) -> {
                         PowerHistoryManager.clear(this);
                         Toast.makeText(this, "已清空功耗记录", Toast.LENGTH_SHORT).show();
+                        refreshHistCurve();
                     })
                     .show());
         }).start();

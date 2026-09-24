@@ -125,6 +125,21 @@ public class PowerHistoryManager {
         }
     }
 
+    /** 最近 minutes 分钟的功耗采样曲线（时间正序），用于主页功耗统计图 */
+    public static synchronized float[] recentWatts(Context ctx, int minutes) {
+        load(ctx);
+        long cutoff = System.currentTimeMillis() - minutes * 60_000L;
+        ArrayList<Float> rev = new ArrayList<>();
+        for (int i = data.size() - 1; i >= 0; i--) {
+            Sample s = data.get(i);
+            if (s.t < cutoff) break;
+            rev.add((float) s.watts);
+        }
+        float[] out = new float[rev.size()];
+        for (int i = 0; i < rev.size(); i++) out[i] = rev.get(rev.size() - 1 - i);
+        return out;
+    }
+
     /** 由采样分段生成会话（充电/放电），status=F 归入非充电 */
     public static synchronized List<Session> sessions(Context ctx, int limit) {
         load(ctx);

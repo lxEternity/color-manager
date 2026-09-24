@@ -19,6 +19,7 @@ public class SparkView extends View {
     private final ArrayList<Double> data = new ArrayList<>();
     private double peak = 0.001;
     private double lastW = 0;
+    private boolean fullSpan = false;   // setData 模式：曲线铺满整个宽度（历史曲线）
 
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -37,11 +38,25 @@ public class SparkView extends View {
     }
 
     public void push(double watts) {
+        fullSpan = false;
         lastW = watts;
         data.add(watts);
         if (data.size() > 90) data.remove(0);
         if (watts > peak) peak = watts;
         if (System.currentTimeMillis() % 8 == 0) refreshPeak();
+        invalidate();
+    }
+
+    /** 整段替换数据（历史曲线，时间正序，铺满全宽） */
+    public void setData(float[] watts) {
+        data.clear();
+        peak = 0.001;
+        for (float v : watts) {
+            data.add((double) v);
+            if (v > peak) peak = v;
+        }
+        lastW = data.isEmpty() ? 0 : data.get(data.size() - 1);
+        fullSpan = !data.isEmpty();
         invalidate();
     }
 
@@ -74,8 +89,8 @@ public class SparkView extends View {
         int n = data.size();
         if (n < 2) return;
 
-        float stepX = w / (float) (90 - 1);
-        float startX = w - (n - 1) * stepX;
+        float stepX = fullSpan ? w / (float) Math.max(n - 1, 1) : w / (float) (90 - 1);
+        float startX = fullSpan ? 0 : w - (n - 1) * stepX;
 
         Path line = new Path();
         Path fill = new Path();

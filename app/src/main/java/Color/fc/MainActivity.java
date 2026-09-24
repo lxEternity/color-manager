@@ -48,9 +48,6 @@ public class MainActivity extends ThemedActivity {
     private SparkView sparkView;
     private Switch monitorSwitch;
     private boolean suppressSwitch = false;
-    private TextView powerHistorySummary;
-    private TextView frameRecordsSummary;
-    private int powerTick = 0;
 
     private ChipView chipView;
     static SocInfo cachedSoc;
@@ -98,14 +95,10 @@ public class MainActivity extends ThemedActivity {
         });
 
         // 功耗记录卡片
-        powerHistorySummary = findViewById(R.id.powerHistorySummary);
         findViewById(R.id.menuPowerHistory).setOnClickListener(v -> showHistoryDialog());
-        refreshHistorySummary();
 
         // 帧率录制记录卡片
-        frameRecordsSummary = findViewById(R.id.frameRecordsSummary);
         findViewById(R.id.menuFrameRecords).setOnClickListener(v -> showFrameRecords());
-        refreshRecordsSummary();
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         cellBadge.setOnClickListener(v -> showCellDialog());
@@ -169,8 +162,6 @@ public class MainActivity extends ThemedActivity {
                         // 历史采样（内部 1 分钟节流），功耗按主页电芯模式修正后记录
                         st.watts = PowerMonitor.applyCellMode(st, cellMode);
                         PowerHistoryManager.record(MainActivity.this, st);
-                        // 每 15 秒刷新一次记录摘要
-                        if (++powerTick % 15 == 0) refreshHistorySummary();
                     }
                     runOnUiThread(() -> {
                         if (st != null) updatePower(st);
@@ -217,16 +208,6 @@ public class MainActivity extends ThemedActivity {
         }
     }
 
-    /** 刷新功耗记录卡片摘要 */
-    private void refreshHistorySummary() {
-        new Thread(() -> {
-            final String s = PowerHistoryManager.todaySummary(this);
-            runOnUiThread(() -> {
-                if (powerHistorySummary != null) powerHistorySummary.setText(s);
-            });
-        }).start();
-    }
-
     /** 功耗历史记录弹窗（充/放电会话） */
     private void showHistoryDialog() {
         new Thread(() -> {
@@ -237,20 +218,9 @@ public class MainActivity extends ThemedActivity {
                     .setPositiveButton("关闭", null)
                     .setNeutralButton("清空记录", (d, w) -> {
                         PowerHistoryManager.clear(this);
-                        refreshHistorySummary();
                         Toast.makeText(this, "已清空功耗记录", Toast.LENGTH_SHORT).show();
                     })
                     .show());
-        }).start();
-    }
-
-    /** 刷新帧率录制记录卡片摘要 */
-    private void refreshRecordsSummary() {
-        new Thread(() -> {
-            final String s = FrameRecordStore.summary(this);
-            runOnUiThread(() -> {
-                if (frameRecordsSummary != null) frameRecordsSummary.setText(s);
-            });
         }).start();
     }
 
@@ -330,7 +300,6 @@ public class MainActivity extends ThemedActivity {
                 .setPositiveButton("清空", (d, w) -> new Thread(() -> {
                     FrameRecordStore.clear(this);
                     runOnUiThread(() -> {
-                        refreshRecordsSummary();
                         Toast.makeText(this, "已清空录制记录", Toast.LENGTH_SHORT).show();
                     });
                 }).start())

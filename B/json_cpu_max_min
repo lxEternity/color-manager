@@ -1,0 +1,21 @@
+#!/system/bin/sh
+mx="$1"; mn="$2"
+BASE=/sys/devices/system/cpu/cpufreq
+if [ -n "$mx" ]; then
+  for p in $BASE/policy*; do
+    [ -f "$p/cpuinfo_max_freq" ] || continue
+    imf=$(cat "$p/cpuinfo_max_freq" 2>/dev/null)
+    imn=$(cat "$p/cpuinfo_min_freq" 2>/dev/null)
+    [ -n "$imf" ] || continue
+    [ -n "$mn" ] || mn=0
+    vmax=$((imf * mx / 100))
+    vmin=$((imf * mn / 100))
+    chmod 777 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
+    echo "$imf" > "$p/scaling_max_freq" 2>/dev/null
+    echo "$imn" > "$p/scaling_min_freq" 2>/dev/null
+    echo "$vmax" > "$p/scaling_max_freq" 2>/dev/null
+    echo "$vmin" > "$p/scaling_min_freq" 2>/dev/null
+    chmod 444 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
+  done
+fi
+exit 0

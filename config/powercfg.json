@@ -1,0 +1,14 @@
+{
+    "name": "轻调度",
+    "author": "渺o小",
+    "version": "24.08.18",
+    "versionCode": 1,
+    "features": {
+        "strict": true,
+        "pedestal": true
+    },
+    "module": "qingtd",
+    "state": "",
+    "entry": "/data/powercfg.sh",
+    "projectUrl": ""
+}

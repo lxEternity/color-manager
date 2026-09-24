@@ -95,20 +95,30 @@ public class GovernorConfig {
         return false;
     }
 
-    /** 脚本开头：先把要用的核拉回 online（保证后续调速器写入生效） */
+    /** 脚本开头：先把要用的核拉回 online（保证后续调速器写入生效）
+     *  先 chmod 777 确保 online 节点可写，再 echo 写入，2>/dev/null 容错——彻底启用 */
     private static void appendCoreOn(StringBuilder sb, boolean[] cores) {
         if (!anyOff(cores)) return;   // 全开时不产生任何 online 行（兼容旧脚本）
         for (int i = 0; i < 8; i++) {
-            if (cores[i]) sb.append("echo 1 > /sys/devices/system/cpu/cpu").append(i).append("/online\n");
+            if (cores[i]) {
+                String p = "/sys/devices/system/cpu/cpu" + i + "/online";
+                sb.append("chmod 777 ").append(p).append(" 2>/dev/null\n");
+                sb.append("echo 1 > ").append(p).append(" 2>/dev/null\n");
+            }
         }
         sb.append('\n');
     }
 
-    /** 脚本结尾：关闭不用的核 */
+    /** 脚本结尾：彻底关闭不用的核
+     *  先 chmod 777 确保 online 节点可写，再 echo 0 写入，2>/dev/null 容错——彻底关闭 */
     private static void appendCoreOff(StringBuilder sb, boolean[] cores) {
         if (!anyOff(cores)) return;
         for (int i = 0; i < 8; i++) {
-            if (!cores[i]) sb.append("echo 0 > /sys/devices/system/cpu/cpu").append(i).append("/online\n");
+            if (!cores[i]) {
+                String p = "/sys/devices/system/cpu/cpu" + i + "/online";
+                sb.append("chmod 777 ").append(p).append(" 2>/dev/null\n");
+                sb.append("echo 0 > ").append(p).append(" 2>/dev/null\n");
+            }
         }
     }
 

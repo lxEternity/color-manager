@@ -1,16 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 霓虹按钮：青色光晕 + 靓青→品紫渐变主体（图片色系） -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <shape>
-            <solid android:color="#2E00E5FF" />
-            <corners android:radius="22dp" />
-        </shape>
-    </item>
-    <item android:left="3dp" android:top="3dp" android:right="3dp" android:bottom="3dp">
-        <shape>
-            <gradient android:startColor="#00C3F0" android:endColor="#A02CF0" android:angle="0" />
-            <corners android:radius="19dp" />
-        </shape>
-    </item>
-</layer-list>
+<!-- 保存按钮：纯色主题青 + 圆角，与全局 UI 一致（原霓虹渐变已弃用） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/accent" />
+    <corners android:radius="14dp" />
+</shape>

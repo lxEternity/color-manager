@@ -38,7 +38,7 @@ public class ScheduleActivity extends ThemedActivity {
     private final HashMap<String, EditText> inputs = new HashMap<>();
     private final HashMap<String, SeekBar> seekBars = new HashMap<>();
     private boolean syncing = false;
-    private TextView tabAV, tabBV, socTip, saveHint;
+    private TextView tabAV, tabBV, socTip;
 
     /** 调度参数字段（fillInputs / collectCurrent / lax 共用） */
     private static final String[] FIELDS = {"opt2", "cpuMax", "cpuMin", "llcc", "uclampDisplay",
@@ -53,7 +53,6 @@ public class ScheduleActivity extends ThemedActivity {
         socTip = findViewById(R.id.socTip);
         tabAV = findViewById(R.id.tabA);
         tabBV = findViewById(R.id.tabB);
-        saveHint = findViewById(R.id.saveHint);
 
         soc = MainActivity.cachedSoc;
         if (soc == null) soc = SocInfo.autoDetect();
@@ -87,7 +86,6 @@ public class ScheduleActivity extends ThemedActivity {
                 loading = false;
                 applyTabStyle();
                 fillInputs();
-                updateSaveHint();
             });
         }).start();
     }
@@ -316,15 +314,6 @@ public class ScheduleActivity extends ThemedActivity {
         tab = t;
         applyTabStyle();
         fillInputs();
-        updateSaveHint();
-    }
-
-    /** 底部提示：按当前页签显示方案1/方案2 读取状态 */
-    private void updateSaveHint() {
-        String name = "a".equals(tab) ? "方案1" : "方案2";
-        AllConfig cur = currentCfg();
-        saveHint.setText((cur == null ? name + " 为默认值" : name + " 已读取")
-                + " · 修改后点击保存写入");
     }
 
     private void applyTabStyle() {

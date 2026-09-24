@@ -92,18 +92,10 @@
         android:paddingBottom="10dp"
         android:background="@drawable/bg_card">
 
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="调速器参数将应用到 CPU0-7"
-            android:textColor="@color/textDim"
-            android:textSize="11sp" />
-
         <Button
             android:id="@+id/saveBtn"
-            android:layout_width="150dp"
-            android:layout_height="48dp"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
             android:background="@drawable/btn_primary"
             android:text="保存配置"
             android:textColor="#FFFFFF"

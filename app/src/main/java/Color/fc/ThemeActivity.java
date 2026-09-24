@@ -108,7 +108,7 @@ public class ThemeActivity extends ThemedActivity {
         card2.addView(l2);
 
         // 全透明背景
-        LinearLayout rowT = row("全透明背景", "不绘制任何底色，直接透出后面的桌面");
+        LinearLayout rowT = row("全透明背景");
         swTransparent = new Switch(this);
         rowT.addView(swTransparent);
         card2.addView(rowT);
@@ -123,7 +123,7 @@ public class ThemeActivity extends ThemedActivity {
         });
 
         // 控件透明度：沉浸背景生效时全局卡片/控件的玻璃透明度
-        LinearLayout rowG = row("控件透明度", "透明背景/背景图生效时，卡片控件玻璃化程度");
+        LinearLayout rowG = row("控件透明度");
         glassValue = val();
         rowG.addView(glassValue);
         card2.addView(rowG);
@@ -134,7 +134,7 @@ public class ThemeActivity extends ThemedActivity {
         }));
 
         // 液态玻璃：沉浸时叠加镜面高光 + 白描边的液态质感
-        LinearLayout rowL = row("液态玻璃", "圆角控件叠加顶部高光与液滴描边，配合沉浸背景");
+        LinearLayout rowL = row("液态玻璃");
         swLiquid = new Switch(this);
         rowL.addView(swLiquid);
         card2.addView(rowL);
@@ -146,7 +146,7 @@ public class ThemeActivity extends ThemedActivity {
         card2.addView(divider());
 
         // 自定义背景图开关
-        LinearLayout rowI = row("自定义背景图片", "选择图片作为全部页面的沉浸背景");
+        LinearLayout rowI = row("自定义背景图片");
         swImage = new Switch(this);
         rowI.addView(swImage);
         card2.addView(rowI);
@@ -225,7 +225,7 @@ public class ThemeActivity extends ThemedActivity {
 
         // 透明度
         card2.addView(divider());
-        LinearLayout rowA = row("背景透明度", "越小图片越淡，与 App 底色混合，不透出桌面");
+        LinearLayout rowA = row("背景透明度");
         alphaValue = val();
         rowA.addView(alphaValue);
         card2.addView(rowA);
@@ -236,7 +236,7 @@ public class ThemeActivity extends ThemedActivity {
         }));
 
         // 缩放
-        LinearLayout rowS = row("背景缩放", "放大图片后再按偏移裁剪取景");
+        LinearLayout rowS = row("背景缩放");
         scaleValue = val();
         rowS.addView(scaleValue);
         card2.addView(rowS);
@@ -247,7 +247,7 @@ public class ThemeActivity extends ThemedActivity {
         }));
 
         // 偏移 X
-        LinearLayout rowX = row("取景偏移 左右", "配合缩放裁剪图片左右区域");
+        LinearLayout rowX = row("取景偏移 左右");
         offXValue = val();
         rowX.addView(offXValue);
         card2.addView(rowX);
@@ -258,7 +258,7 @@ public class ThemeActivity extends ThemedActivity {
         }));
 
         // 偏移 Y
-        LinearLayout rowY = row("取景偏移 上下", "配合缩放裁剪图片上下区域");
+        LinearLayout rowY = row("取景偏移 上下");
         offYValue = val();
         rowY.addView(offYValue);
         card2.addView(rowY);
@@ -269,16 +269,6 @@ public class ThemeActivity extends ThemedActivity {
         }));
 
         root.addView(card2);
-
-        // 底部说明
-        TextView tip = new TextView(this);
-        tip.setText("日/夜间与背景对所有页面生效；修改即时预览，无需保存");
-        tip.setTextSize(11);
-        tip.setTextColor(getResources().getColor(R.color.textDim));
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        tlp.topMargin = dp(10);
-        root.addView(tip, tlp);
 
         refreshAll();
     }
@@ -403,7 +393,7 @@ public class ThemeActivity extends ThemedActivity {
         return v;
     }
 
-    private LinearLayout row(String title, String sub) {
+    private LinearLayout row(String title) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -411,23 +401,12 @@ public class ThemeActivity extends ThemedActivity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(8);
         row.setLayoutParams(lp);
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
         TextView t = new TextView(this);
         t.setText(title);
         t.setTextSize(13);
         t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         t.setTextColor(getResources().getColor(R.color.textPrimary));
-        box.addView(t);
-        TextView s = new TextView(this);
-        s.setText(sub);
-        s.setTextSize(10.5f);
-        s.setTextColor(getResources().getColor(R.color.textSecondary));
-        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sl.topMargin = dp(1);
-        box.addView(s, sl);
-        row.addView(box, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         return row;
     }
 

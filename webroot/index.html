@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ColorFC · WebUI</title>
+<style>
+:root{
+  --bg:#F5F7FC; --card:#FFFFFF; --stroke:#E4EBF4;
+  --t1:#1B2540; --t2:#5D6B85; --t3:#9AA7BD;
+  --ac:#0096C8; --ac2:#A02CF0; --orange:#E08A00;
+  --mc0:#00B5A3; --mc2:#E08A00; --soft:#E5F7FD;
+  --ok:#0FA968; --warn:#D94343;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--t1);font:14px/1.45 -apple-system,"HarmonyOS Sans SC","MiSans",Roboto,sans-serif;padding-bottom:64px}
+.wrap{max-width:520px;margin:0 auto;padding:0 14px}
+
+/* 顶栏 */
+header{display:flex;align-items:center;gap:10px;padding:14px 0 10px}
+header svg{width:38px;height:38px}
+header h1{font-size:17px;font-weight:700}
+header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
+.form-badge{margin-left:auto;font-size:11px;padding:3px 10px;border-radius:20px;font-weight:700}
+.form-badge.dispatch{background:#E5F7FD;color:var(--ac)}
+.form-badge.adapt{background:#F3E8FF;color:var(--ac2)}
+.demo-badge{background:#FFF3E0;color:var(--orange);border:1px solid #FFD9A0;font-size:11px;
+  padding:3px 9px;border-radius:20px;display:none}
+
+/* 卡片 */
+.card{background:var(--card);border:1px solid var(--stroke);border-radius:16px;padding:14px;margin-bottom:11px;
+  box-shadow:0 1px 3px rgba(27,37,64,.04)}
+
+/* 数据网格 */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cell{background:var(--soft);border-radius:12px;padding:9px 6px;text-align:center}
+.cell i{font-style:normal;display:block;color:var(--t3);font-size:10px}
+.cell b{font-size:13px}
+.cell b em{font-style:normal;font-size:10px;color:var(--t2);font-weight:400}
+
+/* 形态切换 */
+.form-h{display:flex;align-items:center;justify-content:space-between}
+.form-h .t b{font-size:16px}
+.form-h .t i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:1px}
+.form-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
+.form-icon svg{width:26px;height:26px}
+.form-desc{color:var(--t3);font-size:12px;margin:9px 0 2px;line-height:1.5}
+.swap-btn{width:100%;border:0;color:#fff;font-size:14px;font-weight:700;
+  padding:11px 0;border-radius:20px;cursor:pointer;margin-top:11px;transition:.15s}
+.swap-btn:active{transform:scale(.97);opacity:.9}
+.swap-btn.to-adapt{background:linear-gradient(90deg,#8B2FF7,#C86DD7);box-shadow:0 4px 16px rgba(160,44,240,.35)}
+.swap-btn.to-dispatch{background:linear-gradient(90deg,#00C3F0,#0FA968);box-shadow:0 4px 16px rgba(0,180,224,.35)}
+.swap-btn.confirm{background:linear-gradient(90deg,#E0533D,#D94343);box-shadow:0 4px 16px rgba(217,67,67,.35)}
+.swap-btn[disabled]{opacity:.55;pointer-events:none}
+.swap-log{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.6;display:none;
+  background:var(--soft);border-radius:10px;padding:8px 10px;word-break:break-all}
+
+/* 模式 chips */
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+.chip{border:1.5px solid var(--stroke);background:var(--card);color:var(--t2);font-size:12px;font-weight:600;
+  padding:6px 13px;border-radius:20px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:.15s}
+.chip .dot{width:7px;height:7px;border-radius:50%}
+.chip.on{box-shadow:0 2px 8px rgba(27,37,64,.08)}
+.desc{color:var(--t3);font-size:12px;margin:-2px 2px 11px}
+.hint{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.5}
+
+/* 滑条 */
+.sl{display:flex;align-items:center;gap:10px;padding:7px 0}
+.sl label{width:88px;flex:none;font-size:12px;color:var(--t2)}
+.sl output{width:66px;flex:none;text-align:right;font-size:12px;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;
+  background:linear-gradient(90deg,var(--ac) var(--p,50%),#E0E8F2 var(--p,50%));outline:0}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
+  background:#fff;border:2.5px solid var(--ac);box-shadow:0 1px 5px rgba(0,150,200,.4)}
+
+/* 按钮 */
+.btn{width:100%;border:0;background:linear-gradient(90deg,#00C3F0,#A02CF0);color:#fff;font-size:14px;font-weight:700;
+  padding:11px 0;border-radius:20px;cursor:pointer;margin-top:13px;
+  box-shadow:0 4px 16px rgba(0,180,224,.35);transition:.15s}
+.btn:active{transform:scale(.97);opacity:.9}
+
+/* 入口 */
+.entry{display:flex;align-items:center;gap:11px;cursor:pointer}
+.entry .bar{width:4px;height:30px;border-radius:3px}
+.entry .tx{flex:1}
+.entry .tx b{font-size:14px}
+.entry .tx i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:1px}
+.entry svg{width:16px;height:16px;flex:none}
+
+/* 页面切换 */
+.page{display:none}
+.page.on{display:block}
+
+/* 调速器 */
+.gov-head{display:flex;align-items:center;justify-content:space-between}
+.gov-head .cur small{display:block;color:var(--t3);font-size:11px}
+.gov-head .cur b{font-size:19px;color:var(--ac)}
+.dd{position:relative}
+.dd-btn{display:flex;align-items:center;justify-content:center;gap:7px;background:var(--card);
+  border:1.5px solid var(--ac);color:var(--ac);font-size:13px;font-weight:700;
+  padding:9px 18px;border-radius:20px;cursor:pointer}
+.dd-btn svg{width:13px;height:13px;transition:.2s}
+.dd.open .dd-btn svg{transform:rotate(180deg)}
+.dd-list{position:absolute;top:calc(100% + 6px);right:0;min-width:170px;z-index:30;
+  background:rgba(255,255,255,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid rgba(0,184,224,.25);border-radius:14px;padding:5px;display:none;
+  box-shadow:0 10px 30px rgba(27,37,64,.16)}
+.dd.open .dd-list{display:block}
+.dd-list .it{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;
+  font-size:13px;color:var(--t1);border-radius:10px;cursor:pointer}
+.dd-list .it:active{background:var(--soft)}
+.dd-list .it.on{color:var(--ac);font-weight:700;background:var(--soft)}
+.dd-list .it.on::after{content:"✓";font-size:12px}
+.gv-note{color:var(--t3);font-size:12px;margin:12px 2px 0}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:rgba(255,255,255,.92);backdrop-filter:blur(12px);color:var(--ac);font-size:13px;font-weight:700;
+  border:1px solid rgba(0,184,224,.3);padding:9px 22px;border-radius:22px;pointer-events:none;
+  box-shadow:0 8px 24px rgba(0,150,200,.22);transition:.25s;z-index:99;max-width:86vw;text-align:center}
+#toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+
+/* 底部导航 */
+nav{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);border-top:1px solid var(--stroke);z-index:50}
+nav .in{max-width:520px;margin:0 auto;display:flex}
+nav button{flex:1;border:0;background:none;padding:8px 0 10px;display:flex;flex-direction:column;
+  align-items:center;gap:2px;color:var(--t3);font-size:11px;cursor:pointer}
+nav button svg{width:21px;height:21px}
+nav button.on{color:var(--ac);font-weight:700}
+
+.group{color:var(--t3);font-size:11px;margin:9px 0 1px;padding-left:2px}
+.row-between{display:flex;justify-content:space-between;align-items:center}
+.mini-btn{border:1.5px solid var(--stroke);background:var(--card);color:var(--t2);font-size:12px;font-weight:600;
+  padding:5px 14px;border-radius:16px;cursor:pointer}
+.unavail{color:var(--t3);font-size:13px;text-align:center;padding:30px 10px;line-height:1.7}
+.unavail b{color:var(--t2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- 顶栏 -->
+<header>
+  <svg viewBox="0 0 108 108">
+    <rect x="25" y="25" width="58" height="58" rx="12" fill="rgba(0,229,255,.04)" stroke="#00B8E0" stroke-width="3"/>
+    <path d="M41 34v4M54 34v4M67 34v4M41 70v4M54 70v4M67 70v4M34 41h4M34 54h4M34 67h4M70 41h4M70 54h4M70 67h4" stroke="#93A7C4" stroke-width="3.4" stroke-linecap="round"/>
+    <rect x="38" y="38" width="32" height="32" rx="5" fill="#2A63E8"/>
+    <rect x="41" y="41" width="16" height="4" rx="2" fill="#fff" opacity=".3"/>
+    <path d="M42 57h6l3.5-8 4.5 14 4-11 3 5h8" fill="none" stroke="#00E5FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M48 45l4 7h-8z" fill="#FFC400"/>
+    <circle cx="65" cy="46" r="5" fill="none" stroke="#FF9100" stroke-width="1.6"/>
+    <path d="M65 42.5c1.4 1.8 2.7 2.6 2.7 4.2a2.7 2.7 0 1 1-5.4 0c0-1.6 1.3-2.4 2.7-4.2z" fill="#FF9100"/>
+  </svg>
+  <div><h1>ColorFC 管理器<small>调度 · 调速 · 自适应限频</small></h1></div>
+  <span class="form-badge dispatch" id="formBadge">--</span>
+  <span class="demo-badge" id="demoBadge">演示模式</span>
+</header>
+
+<!-- ===== 主页 ===== -->
+<section class="page on" id="pg-home">
+
+  <!-- 模块形态 -->
+  <div class="card" id="formCard">
+    <div class="form-h">
+      <div class="t"><b id="formName">--</b><i id="formSub">--</i></div>
+      <div class="form-icon" id="formIcon"></div>
+    </div>
+    <div class="form-desc" id="formDesc">--</div>
+    <button class="swap-btn to-adapt" id="swapBtn" onclick="onSwap()">--</button>
+    <div class="swap-log" id="swapLog"></div>
+  </div>
+
+  <!-- 调度：模式快切 -->
+  <div class="card" id="modeCard" style="display:none">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">模式快切</span>
+      <span style="color:var(--t3);font-size:11px">当前: <b id="curMode" style="color:var(--ac)">--</b></span>
+    </div>
+    <div class="chips" id="homeChips" style="margin-bottom:0"></div>
+    <div class="hint">由模块前台监视（动态模式切换.conf）自动切换，此处可手动立即应用。</div>
+  </div>
+
+  <!-- 自适应：状态 -->
+  <div class="card" id="adaptCard" style="display:none">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">自适应限频状态</span>
+      <span id="pdStat" style="font-size:12px;font-weight:700;color:var(--ok)">--</span>
+    </div>
+    <div class="grid">
+      <div class="cell"><i>大核封顶</i><b id="pBig">--</b></div>
+      <div class="cell"><i>次大核封顶</i><b id="pMid2">--</b></div>
+      <div class="cell"><i>中核封顶</i><b id="pMid">--</b></div>
+      <div class="cell"><i>小核封顶</i><b id="pLittle">--</b></div>
+      <div class="cell"><i>GPU封顶</i><b id="pGpu">--</b></div>
+      <div class="cell"><i>游戏解锁名单</i><b id="gCount">--</b></div>
+    </div>
+    <div class="hint">常态按百分比锁定 CPU/GPU，检测到 games.txt 内游戏前台时自动放开。修改 powerd.conf 或 games.txt 立即生效（MT管理器 Action 按钮可打开配置）。</div>
+  </div>
+
+  <!-- 系统状态（手动刷新，非监视器） -->
+  <div class="card">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">系统状态</span>
+      <button class="mini-btn" onclick="refreshHome()">刷新</button>
+    </div>
+    <div class="grid">
+      <div class="cell"><i>电量</i><b id="vSoc">--</b></div>
+      <div class="cell"><i>电池温度</i><b id="vTemp">--</b></div>
+      <div class="cell"><i>核心数</i><b id="vCpu">--</b></div>
+      <div class="cell"><i>当前调速器</i><b id="vGov">--</b></div>
+      <div class="cell"><i>大核最高频</i><b id="vMax">--</b></div>
+      <div class="cell"><i>可用内存</i><b id="vMem">--</b></div>
+    </div>
+  </div>
+
+  <!-- 入口（仅调度形态） -->
+  <div id="homeEntries">
+    <div class="card entry" onclick="go('modes')">
+      <div class="bar" style="background:var(--ac)"></div>
+      <div class="tx"><b>调度参数</b><i>四模式 CPU 频率与提升参数</i></div>
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0096C8" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+    </div>
+    <div class="card entry" onclick="go('gov')">
+      <div class="bar" style="background:var(--ac2)"></div>
+      <div class="tx"><b>调速器配置</b><i>预设调速器切换与参数</i></div>
+      <svg viewBox="0 0 24 24" fill="none" stroke="#A02CF0" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 调度参数 ===== -->
+<section class="page" id="pg-modes">
+  <div id="modesUnavail" class="unavail" style="display:none"><b>自适应限频形态下不可用</b><br>请先在主页切回 Color 调度形态</div>
+  <div id="modesBody">
+    <div class="chips" id="modeChips"></div>
+    <div class="desc" id="modeDesc"></div>
+    <div class="card" id="modeSliders"></div>
+    <button class="btn" onclick="saveMode()">保存</button>
+    <div class="hint" id="modesFileHint" style="text-align:center;margin-top:8px"></div>
+  </div>
+</section>
+
+<!-- ===== 调速器配置 ===== -->
+<section class="page" id="pg-gov">
+  <div id="govUnavail" class="unavail" style="display:none"><b>自适应限频形态下不可用</b><br>请先在主页切回 Color 调度形态</div>
+  <div id="govBody">
+    <div class="chips" id="govChips"></div>
+    <div class="desc" id="govDesc"></div>
+    <div class="card gov-head">
+      <div class="cur"><small>当前调速器(实时)</small><b id="govNow">--</b></div>
+      <div class="dd" id="dd">
+        <button class="dd-btn" onclick="ddToggle(event)">
+          <span id="ddLabel">切换调速器</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="dd-list" id="ddList"></div>
+      </div>
+    </div>
+    <div class="card" id="govSliders"></div>
+    <button class="btn" onclick="saveGov()">保存</button>
+    <div class="hint" id="govFileHint" style="text-align:center;margin-top:8px"></div>
+  </div>
+</section>
+
+</div>
+<div id="toast"></div>
+
+<nav><div class="in">
+  <button id="nb-home" class="on" onclick="go('home')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>主页</button>
+  <button id="nb-modes" onclick="go('modes')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M4 12h16M4 18h13"/></svg>调度参数</button>
+  <button id="nb-gov" onclick="go('gov')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>调速器</button>
+</div></nav>
+
+<script>
+/* ============ ksu.exec 桥 ============ */
+const $ = id => document.getElementById(id);
+const hasKsu = (typeof ksu !== 'undefined') && (typeof ksu.exec === 'function');
+let cbSeq = 0, demoMode = !hasKsu;
+function exec(cmd){
+  return new Promise(res=>{
+    if(!hasKsu){ setTimeout(()=>res({errno:0,stdout:'',stderr:'DEMO'}),100); return; }
+    const name = '__c' + (++cbSeq);
+    window[name] = (errno, stdout, stderr)=>{ delete window[name]; res({errno, stdout:stdout||'', stderr:stderr||''}); };
+    try{ ksu.exec(cmd, '{}', name); }catch(e){ delete window[name]; res({errno:-1, stdout:'', stderr:''+e}); }
+  });
+}
+const shOut = async c => (await exec(c)).stdout.trim();
+let toastT;
+function toast(t){ $('toast').textContent = t||''; $('toast').classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>$('toast').classList.remove('show'),2000); }
+if(typeof ksu !== 'undefined' && typeof ksu.toast === 'function'){
+  const _t = toast; toast = t => { _t(t); try{ ksu.toast(t); }catch(e){} };
+}
+
+/* ============ 常量 ============ */
+const MOD = '/data/adb/modules/colorFC';
+const MODE_KEYS = ['powersave','balance','performance','fast'];
+const MODE_NAMES = {powersave:'省电', balance:'均衡', performance:'性能', fast:'极速'};
+const MODE_COLORS = ['#00B5A3','#0096C8','#E08A00','#A02CF0'];
+const MODE_DESC = ['powersave · 最长续航，压制频率与提升值','balance · 日常使用，兼顾流畅与功耗',
+  'performance · 高负载场景，激进提升','fast · 极限性能，全力释放'];
+const GOV_FILES = {powersave:'conservative.sh', balance:'scx1.sh', performance:'scx2.sh', fast:'scx3.sh'};
+
+/* ============ 全局状态 ============ */
+let form = 'dispatch';        // dispatch | adapt
+let curMode = '';             // 当前运行模式
+let activeConf = '';          // config/a.all.sh 或 b.all.sh
+let activeScheme = 'a';       // A方案 / B方案
+let confText = '';             // 活动配置文件内容
+let modesData = {};            // 解析后的四模式参数
+let editMode = 'powersave';
+let govMode = 'powersave';    // 调速器页选中的模式
+let govData = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:''};
+let govCur = '';
+
+/* ============ 形态检测与切换 ============ */
+async function detectForm(){
+  const out = await shOut(
+    `S=$(cat /data/adb/colorFC_store/state 2>/dev/null); `+
+    `[ -f ${MOD}/powerd.sh ] && echo "PD=1"; [ -d ${MOD}/script ] && echo "SC=1"; echo "STATE=$S"`);
+  const hasPd = /^PD=1$/m.test(out), hasSc = /^SC=1$/m.test(out);
+  const st = (out.match(/STATE=(.*)/)||[])[1]||'';
+  if(hasPd && !hasSc) form = 'adapt';
+  else if(hasSc && !hasPd) form = 'dispatch';
+  else form = (st==='adapt') ? 'adapt' : 'dispatch';   // 混合状态（重刷包）按备份记录判定
+  return form;
+}
+
+const FORM_ICON_DISPATCH = '<svg viewBox="0 0 24 24" fill="none" stroke="#0096C8" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>';
+const FORM_ICON_ADAPT = '<svg viewBox="0 0 24 24" fill="none" stroke="#A02CF0" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+
+function renderFormCard(){
+  const b = $('formBadge');
+  b.className = 'form-badge ' + form;
+  b.textContent = form==='adapt' ? '自适应形态' : '调度形态';
+  if(form==='adapt'){
+    $('formName').textContent = 'ColorFC 自适应限频';
+    $('formSub').textContent = 'powerd_freqcap · Ktwo';
+    $('formIcon').innerHTML = FORM_ICON_ADAPT;
+    $('formIcon').style.background = '#F3E8FF';
+    $('formDesc').textContent = '当前为自适应限频形态：常态按百分比锁定 CPU/GPU，游戏自动放开。切换将完全卸载自适应模块文件，并重新释放 Color 调度到 ColorFC 目录。';
+    $('swapBtn').className = 'swap-btn to-dispatch';
+    $('swapBtn').textContent = '切换回 Color 调度';
+  }else{
+    $('formName').textContent = 'ColorFC · Color 调度';
+    $('formSub').textContent = '四模式 · 前台动态切换';
+    $('formIcon').innerHTML = FORM_ICON_DISPATCH;
+    $('formIcon').style.background = '#E5F7FD';
+    $('formDesc').textContent = '当前为 Color 调度形态：四模式按前台应用自动切换。切换将完全卸载 Color 调度（含 /data 运行时接口），并全新释放自适应限频模块到 ColorFC 目录，模块 ID 同步为 colorFC。';
+    $('swapBtn').className = 'swap-btn to-adapt';
+    $('swapBtn').textContent = '切换到自适应限频';
+  }
+  $('demoBadge').style.display = demoMode?'inline-block':'none';
+  $('modeCard').style.display = form==='dispatch'?'':'none';
+  $('adaptCard').style.display = form==='adapt'?'':'none';
+  $('homeEntries').style.display = form==='dispatch'?'':'none';
+  const un = form!=='dispatch';
+  $('modesUnavail').style.display = un?'':'none';
+  $('modesBody').style.display = un?'none':'';
+  $('govUnavail').style.display = un?'':'none';
+  $('govBody').style.display = un?'none':'';
+}
+
+let swapArmed = false, swapTimer = null;
+async function onSwap(){
+  const btn = $('swapBtn');
+  if(demoMode){ toast('演示模式：真机内点击将执行形态切换'); return; }
+  if(!swapArmed){
+    swapArmed = true; btn.classList.add('confirm');
+    btn.textContent = form==='dispatch' ? '再次点击确认切换（将卸载Color调度）' : '再次点击确认切换（将卸载自适应限频）';
+    clearTimeout(swapTimer);
+    swapTimer = setTimeout(()=>{ swapArmed=false; renderFormCard(); }, 3200);
+    return;
+  }
+  swapArmed = false; clearTimeout(swapTimer);
+  const target = form==='dispatch' ? 'adapt' : 'dispatch';
+  btn.disabled = true; btn.classList.remove('confirm');
+  btn.textContent = '切换中…（守护启停约需10秒）';
+  const log = $('swapLog'); log.style.display='block';
+  log.textContent = '> sh swap.sh ' + target + '\n> 正在停止守护并搬移文件…';
+  const r = await exec(`sh ${MOD}/webroot/swap.sh ${target}`);
+  const out = r.stdout.trim();
+  log.textContent = '> sh swap.sh ' + target + '\n> ' + (out||('errno='+r.errno));
+  btn.disabled = false;
+  if(/^OK_/.test(out)){
+    toast(target==='adapt' ? '已切换到自适应限频，管理器列表稍后自动刷新' : '已切回 Color 调度，管理器列表稍后自动刷新');
+    await detectForm(); renderFormCard(); refreshHome();
+  }else if(out==='ALREADY_ADAPT' || out==='ALREADY_DISPATCH'){
+    toast('已是目标形态'); renderFormCard();
+  }else if(out==='ERR_NO_BACKUP'){
+    log.textContent += '\n未找到调度文件备份，无法切回。请重刷模块安装包恢复调度形态。';
+    toast('切换失败：缺少备份');
+  }else if(out==='ERR_ADAPT_DEPLOY'||out==='ERR_DISPATCH_DEPLOY'){
+    log.textContent += '\n目标形态文件释放失败，请重刷模块安装包后重试。';
+    toast('切换失败：文件释放异常');
+  }else{
+    toast('切换异常，详见日志'); 
+  }
+}
+function errnoTag(r){ return (r&&r.errno!=null)?r.errno:'?'; }
+
+/* ============ 主页刷新 ============ */
+async function refreshHome(){
+  if(demoMode){
+    $('vSoc').textContent='66%'; $('vTemp').textContent='31.2℃'; $('vCpu').textContent='8 核';
+    $('vGov').textContent='scx'; $('vMax').textContent='3.07GHz'; $('vMem').textContent='9.2GB';
+    $('curMode').textContent='balance';
+    renderHomeChips('balance');
+    return;
+  }
+  const out = await shOut(
+    `echo "SOC=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)";`+
+    `echo "BT=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)";`+
+    `echo "CPU=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | grep -c .)";`+
+    `echo "GOV=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)";`+
+    `echo "MAX=$(cat /sys/devices/system/cpu/cpufreq/policy7/scaling_max_freq 2>/dev/null)";`+
+    `echo "MEM=$(awk '/MemAvailable/{print int($2/1024)"M"}' /proc/meminfo 2>/dev/null)";`+
+    (form==='dispatch'
+      ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)"`
+      : `echo "PD=$(sh ${MOD}/powerd.sh status 2>/dev/null | tail -1)";`+
+        `echo "BIG=$(grep -o 'CPU_PCT_BIG=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
+        `echo "MID2=$(grep -o 'CPU_PCT_MID2=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
+        `echo "MID=$(grep -o 'CPU_PCT_MID=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
+        `echo "LIT=$(grep -o 'CPU_PCT_LITTLE=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
+        `echo "GPU=$(grep -o 'GPU_PCT=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
+        `echo "GC=$(sed '/^#/d;/^[[:space:]]*$/d' ${MOD}/games.txt 2>/dev/null | wc -l)"`));
+  const g = k => (out.match(new RegExp('^'+k+'=(.*)$','m'))||[])[1]||'--';
+  $('vSoc').textContent = g('SOC')==='--'?'--':g('SOC')+'%';
+  const bt = g('BT'); $('vTemp').textContent = bt==='--'?'--':(bt/10).toFixed(1)+'℃';
+  $('vCpu').textContent = g('CPU')+' 核';
+  $('vGov').textContent = g('GOV');
+  const mf = g('MAX'); $('vMax').textContent = (mf==='--'||!/^[0-9]+$/.test(mf))?'--':(mf/1000).toFixed(0)+' MHz';
+  $('vMem').textContent = g('MEM');
+  if(form==='dispatch'){
+    curMode = g('CUR');
+    if(!MODE_KEYS.includes(curMode)) curMode='balance';
+    $('curMode').textContent = MODE_NAMES[curMode]||curMode;
+    renderHomeChips(curMode);
+  }else{
+    $('pBig').textContent = g('BIG')+'%'; $('pMid2').textContent = g('MID2')+'%';
+    $('pMid').textContent = g('MID')+'%'; $('pLittle').textContent = g('LIT')+'%';
+    $('pGpu').textContent = g('GPU')+'%';
+    $('gCount').textContent = g('GC');
+    const pd = g('PD'); $('pdStat').textContent = pd==='--' ? '未运行' : '运行中';
+    $('pdStat').style.color = pd==='--' ? 'var(--warn)' : 'var(--ok)';
+  }
+}
+
+function renderHomeChips(active){
+  const box = $('homeChips'); box.innerHTML='';
+  MODE_KEYS.forEach(k=>{
+    const i = MODE_KEYS.indexOf(k);
+    const c = document.createElement('button');
+    c.className = 'chip'+(k===active?' on':'');
+    c.innerHTML = `<span class="dot" style="background:${MODE_COLORS[i]}"></span>${MODE_NAMES[k]}`;
+    c.style.borderColor = k===active?MODE_COLORS[i]:'';
+    c.onclick = ()=>applyMode(k);
+    box.appendChild(c);
+  });
+}
+
+async function applyMode(k){
+  if(demoMode){ toast('演示模式'); return; }
+  toast('正在应用 '+MODE_NAMES[k]+'…');
+  const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
+  const r = await exec(`sh ${MOD}/script/main.sh ${k} ${MOD}/files ${peiz}`);
+  curMode = k; $('curMode').textContent = MODE_NAMES[k];
+  renderHomeChips(k);
+  toast(MODE_NAMES[k]+' 已应用');
+}
+
+/* ============ 调度参数 ============ */
+const SLIDER_DEFS = [
+  {k:'opt2',        t:'性能提升',  min:0,  max:100, step:1,  suf:'%'},
+  {k:'cpuMax',      t:'CPU 上限',  min:5,  max:100, step:1,  suf:'%'},
+  {k:'cpuMin',      t:'CPU 下限',  min:0,  max:95,  step:1,  suf:'%'},
+  {k:'llcc',        t:'LLCC 频率', min:350000, max:1800000, step:50000, div:1000, suf:' MHz'},
+  {k:'uclampDisplay',t:'显示增强', min:0, max:100, step:1, suf:'%'},
+  {k:'uclampSsfg',   t:'后台增强', min:0, max:100, step:1, suf:'%'},
+  {k:'uclampTouch',  t:'触控增强', min:0, max:100, step:1, suf:'%'},
+  {k:'uclampMm',     t:'多媒体增强',min:0,max:100, step:1, suf:'%'},
+  {k:'uclampRt',     t:'实时增强', min:0, max:100, step:1, suf:'%'},
+  {k:'uclampTopApp', t:'前台增强', min:0, max:100, step:1, suf:'%'},
+  {k:'walt1', t:'WALT 限制1', min:0, max:100,   step:1,    suf:'', only:'fast'},
+  {k:'walt2', t:'WALT 限制2', min:100,max:10000, step:100,  suf:' µs', only:'fast'},
+];
+
+async function detectActiveConf(){
+  if(demoMode){ activeConf='config/a.all.sh'; activeScheme='a'; return; }
+  const out = await shOut(
+    `P=$(cat ${MOD}/files/peiz 2>/dev/null); [ -z "$P" ] && P=all; `+
+    `if cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null | grep -q scx; then S=a; `+
+    `elif cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null | grep -q conservative; then S=b; `+
+    `else S=a; fi; echo "$S.$P"`);
+  const m = out.match(/^([ab])\.(\w+)$/);
+  if(m){ activeScheme = m[1]; activeConf = `config/${m[1]}.${m[2]}.sh`; }
+  else { activeScheme='a'; activeConf='config/a.all.sh'; }
+}
+
+function parseConf(text){
+  const data = {};
+  MODE_KEYS.forEach(mode=>{
+    const re = new RegExp('if \\[\\[ \\$action == "'+mode+'" \\]\\]; then([\\s\\S]*?)\\nfi','m');
+    const bm = text.match(re);
+    const blk = bm ? bm[1] : '';
+    const d = {};
+    d.opt2 = +(blk.match(/\$mokzdz\/[AB]\/opt2 (\d+)/)||[])[1] || 0;
+    const jm = blk.match(/json_cpu_max_min "(\d+)" "(\d+)"/);
+    d.cpuMax = jm?+jm[1]:100; d.cpuMin = jm?+jm[2]:0;
+    d.llcc = +(blk.match(/llcc\.sh set_max_freq (\d+)/)||[])[1] || 0;
+    const um = {};
+    blk.replace(/echo "(\d+)"\s*>\s*\/dev\/cpuctl\/(display|ssfg|touch|multimedia|rt|top-app)\/cpu\.uclamp\.min/g,
+      (_,v,g)=>{ um[g]=+v; return _; });
+    d.uclampDisplay=um.display??0; d.uclampSsfg=um.ssfg??0; d.uclampTouch=um.touch??0;
+    d.uclampMm=um.multimedia??0; d.uclampRt=um.rt??0; d.uclampTopApp=um['top-app']??0;
+    const wm = blk.match(/walt_up_rate_limit_us "(\d+)" "(\d+)"/);
+    d.walt1 = wm?+wm[1]:0; d.walt2 = wm?+wm[2]:1500;
+    data[mode] = d;
+  });
+  return data;
+}
+
+async function loadModes(){
+  if(form!=='dispatch') return;
+  if(demoMode){
+    modesData = parseConf(DEMO_CONF); activeConf='config/a.all.sh';
+  }else{
+    await detectActiveConf();
+    confText = await shOut(`cat ${MOD}/${activeConf} 2>/dev/null`);
+    modesData = parseConf(confText);
+  }
+  const chips=$('modeChips'); chips.innerHTML='';
+  MODE_KEYS.forEach((k,i)=>{
+    const c=document.createElement('button');
+    c.className='chip'+(k===editMode?' on':'');
+    c.innerHTML=`<span class="dot" style="background:${MODE_COLORS[i]}"></span>${MODE_NAMES[k]}`;
+    c.style.borderColor = k===editMode?MODE_COLORS[i]:'';
+    c.onclick=()=>{editMode=k;renderMode();};
+    chips.appendChild(c);
+  });
+  renderMode();
+  $('modesFileHint').textContent = '写入 ' + activeConf + '（' + (activeScheme==='a'?'A':'B') + '方案）· 保存后如为当前运行模式则立即应用';
+}
+
+function renderMode(){
+  document.querySelectorAll('#modeChips .chip').forEach((c,i)=>{
+    const k=MODE_KEYS[i];
+    c.classList.toggle('on',k===editMode);
+    c.style.borderColor = k===editMode?MODE_COLORS[i]:'';
+  });
+  $('modeDesc').textContent = MODE_DESC[MODE_KEYS.indexOf(editMode)];
+  const md = modesData[editMode]||{}, box=$('modeSliders'); box.innerHTML='';
+  SLIDER_DEFS.forEach(d=>{
+    if(d.only && d.only!==editMode) return;
+    const row=document.createElement('div'); row.className='sl';
+    row.innerHTML=`<label>${d.t}</label>
+      <input type="range" min="${d.min}" max="${d.max}" step="${d.step}"
+        value="${md[d.k]??0}">
+      <output></output>`;
+    const inp=row.querySelector('input'), out=row.querySelector('output');
+    const upd=()=>{ const v=+inp.value; md[d.k]=v;
+      out.textContent=(d.div?v/d.div:v)+d.suf;
+      const p=(v-d.min)/(d.max-d.min)*100; inp.style.setProperty('--p',p+'%'); };
+    inp.oninput=upd; upd(); box.appendChild(row);
+  });
+}
+
+async function saveMode(){
+  if(demoMode){ toast('演示模式：真机保存将写入 ' + activeConf); return; }
+  const text = buildConf(confText, modesData);
+  const ok = await writeFile(`${MOD}/${activeConf}`, text);
+  if(!ok){ toast('写入失败'); return; }
+  confText = text;
+  let extra = '';
+  if(editMode===curMode){
+    const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
+    await exec(`sh ${MOD}/script/main.sh ${editMode} ${MOD}/files ${peiz}`);
+    extra = '，已实时应用';
+  }
+  toast('已保存' + extra);
+}
+
+/* 在原文上按模式块替换参数（保留其余内容不动） */
+function buildConf(text, data){
+  let out = text;
+  MODE_KEYS.forEach(mode=>{
+    const re = new RegExp('if \\[\\[ \\$action == "'+mode+'" \\]\\]; then([\\s\\S]*?)\\nfi','m');
+    const bm = out.match(re);
+    if(!bm) return;
+    let blk = bm[1];
+    const d = data[mode];
+    blk = blk.replace(/(\$mokzdz\/[AB]\/opt2 )\d+/, '$1'+d.opt2);
+    blk = blk.replace(/json_cpu_max_min "\d+" "\d+"/, `json_cpu_max_min "${d.cpuMax}" "${d.cpuMin}"`);
+    blk = blk.replace(/(llcc\.sh set_max_freq )\d+/, '$1'+d.llcc);
+    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/display\/cpu\.uclamp\.min)/, `echo "${d.uclampDisplay}"$2`);
+    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/ssfg\/cpu\.uclamp\.min)/, `echo "${d.uclampSsfg}"$2`);
+    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/touch\/cpu\.uclamp\.min)/, `echo "${d.uclampTouch}"$2`);
+    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/multimedia\/cpu\.uclamp\.min)/, `echo "${d.uclampMm}"$2`);
+    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/rt\/cpu\.uclamp\.min)/, `echo "${d.uclampRt}"$2`);
+    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/top-app\/cpu\.uclamp\.min)/, `echo "${d.uclampTopApp}"$2`);
+    if(mode==='fast'){
+      blk = blk.replace(/walt_up_rate_limit_us "\d+" "\d+"/, `walt_up_rate_limit_us "${d.walt1}" "${d.walt2}"`);
+    }
+    out = out.replace(re, 'if [[ $action == "'+mode+'" ]]; then'+blk+'\nfi');
+  });
+  return out;
+}
+
+/* heredoc 写文件（内容经 quoted-EOF 原样落盘） */
+async function writeFile(path, content){
+  const body = content.replace(/\r/g,'');
+  const cmd = 'cat > "'+path+'" <<\'COLORFC_WUI_EOF\'\n'+body+(body.endsWith('\n')?'':'\n')+'COLORFC_WUI_EOF';
+  const r = await exec(cmd);
+  return r.errno===0 && !/COLORFC_WUI_EOF/.test(r.stderr);
+}
+
+/* ============ 调速器 ============ */
+const PRESETS=['conservative','walt','ips','sugov_next','scx','hmbird','powersave','performance','schedutil'];
+const GOV_SLIDERS={
+  conservative:[
+    {k:'upThreshold',t:'升频阈值',min:1,max:100,step:1,suf:'%'},
+    {k:'downThreshold',t:'降频阈值',min:1,max:100,step:1,suf:'%'},
+    {k:'freqStep',t:'调频步进',min:1,max:100,step:1,suf:'%'},
+    {k:'samplingRate',t:'采样周期',min:1000,max:200000,step:1000,div:1000,suf:' ms'},
+  ],
+  scx:[{k:'targetLoads',t:'目标负载',min:1,max:100,step:1,suf:'%'}],
+};
+
+function parseGovScript(text){
+  const d = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:''};
+  d.governor = (text.match(/echo "?([\w.-]+)"? > \S*scaling_governor/)||[])[1]||'';
+  d.upThreshold = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/up_threshold/)||[])[1]||'';
+  d.downThreshold = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/down_threshold/)||[])[1]||'';
+  d.freqStep = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/freq_step/)||[])[1]||'';
+  d.samplingRate = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/sampling_rate/)||[])[1]||'';
+  d.targetLoads = (text.match(/echo "?([\w.-]+)"? > \S*scx\/target_loads/)||[])[1]||'';
+  return d;
+}
+
+function buildGovScript(text, d){
+  let out = text;
+  out = out.replace(/(echo "?)[\w.-]+("? > \S*scaling_governor)/g, '$1'+d.governor+'$2');
+  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/up_threshold)/g, '$1'+d.upThreshold+'$2');
+  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/down_threshold)/g, '$1'+d.downThreshold+'$2');
+  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/freq_step)/g, '$1'+d.freqStep+'$2');
+  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/sampling_rate)/g, '$1'+d.samplingRate+'$2');
+  out = out.replace(/(echo "?)[\w.-]+("? > \S*scx\/target_loads)/g, '$1'+d.targetLoads+'$2');
+  return out;
+}
+
+async function loadGov(){
+  if(form!=='dispatch') return;
+  const file = GOV_FILES[govMode];
+  if(demoMode){
+    govData = parseGovScript(DEMO_GOV[govMode]);
+  }else{
+    govCur = await shOut(`cat /sys/devices/system/cpu/cpufreq/policy7/scaling_governor 2>/dev/null`);
+    const t = await shOut(`cat ${MOD}/${activeScheme}/${file} 2>/dev/null`);
+    govData = parseGovScript(t);
+    if(!govData.governor) govData.governor = govCur || 'scx';
+    if(!GOV_SLIDERS[govData.governor]){
+      ['upThreshold','downThreshold','freqStep','samplingRate','targetLoads'].forEach(k=>{
+        if(!govData[k]) govData[k]='0';
+      });
+    }
+  }
+  $('govNow').textContent = govCur || (demoMode?'scx':'--');
+  const chips=$('govChips'); chips.innerHTML='';
+  MODE_KEYS.forEach((k,i)=>{
+    const c=document.createElement('button');
+    c.className='chip'+(k===govMode?' on':'');
+    c.innerHTML=`<span class="dot" style="background:${MODE_COLORS[i]}"></span>${MODE_NAMES[k]}`;
+    c.style.borderColor = k===govMode?MODE_COLORS[i]:'';
+    c.onclick=()=>{govMode=k;loadGov();};
+    chips.appendChild(c);
+  });
+  $('govDesc').textContent = MODE_DESC[MODE_KEYS.indexOf(govMode)];
+  renderDd(); renderGovSliders();
+  $('govFileHint').textContent = '写入 ' + activeScheme + '/' + file + '（' + (activeScheme==='a'?'A':'B') + '方案）· 保存后如为当前运行模式则立即应用';
+}
+
+function ddToggle(e){ e.stopPropagation(); $('dd').classList.toggle('open'); }
+document.addEventListener('click',()=>$('dd').classList.remove('open'));
+function renderDd(){
+  $('ddLabel').textContent = govData.governor;
+  const L=$('ddList'); L.innerHTML='';
+  PRESETS.forEach(p=>{
+    const it=document.createElement('div');
+    it.className='it'+(p===govData.governor?' on':'');
+    it.textContent=p;
+    it.onclick=()=>{ govData.governor=p; $('dd').classList.remove('open');
+      renderDd(); renderGovSliders(); };
+    L.appendChild(it);
+  });
+}
+function renderGovSliders(){
+  const box=$('govSliders'); box.innerHTML='';
+  const defs=GOV_SLIDERS[govData.governor];
+  if(!defs){ box.innerHTML=`<div class="gv-note" style="margin:4px 2px">该调速器无附加参数，保存即切换生效</div>`; return; }
+  defs.forEach(d=>{
+    const row=document.createElement('div'); row.className='sl';
+    row.innerHTML=`<label>${d.t}</label>
+      <input type="range" min="${d.min}" max="${d.max}" step="${d.step}"
+        value="${govData[d.k]||0}">
+      <output></output>`;
+    const inp=row.querySelector('input'), out=row.querySelector('output');
+    const upd=()=>{ const v=+inp.value; govData[d.k]=v;
+      out.textContent=(d.div?v/d.div:v)+d.suf;
+      const p=(v-d.min)/(d.max-d.min)*100; inp.style.setProperty('--p',p+'%'); };
+    inp.oninput=upd; upd(); box.appendChild(row);
+  });
+}
+async function saveGov(){
+  if(demoMode){ toast('演示模式：真机保存将写入调速器脚本'); return; }
+  const file = GOV_FILES[govMode];
+  const t = await shOut(`cat ${MOD}/${activeScheme}/${file} 2>/dev/null`);
+  const merged = buildGovScript(t, govData);
+  const ok = await writeFile(`${MOD}/${activeScheme}/${file}`, merged);
+  if(!ok){ toast('写入失败'); return; }
+  if(govMode===curMode){
+    const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
+    await exec(`sh ${MOD}/script/main.sh ${govMode} ${MOD}/files ${peiz}`);
+    toast('已保存并实时应用');
+  }else{
+    toast('已保存（切换到该模式时生效）');
+  }
+  $('govNow').textContent = govCur;
+}
+
+/* ============ 页面切换 ============ */
+function go(p){
+  ['home','modes','gov'].forEach(k=>{
+    $('pg-'+k).classList.toggle('on',k===p);
+    $('nb-'+k).classList.toggle('on',k===p);
+  });
+  if(p==='home') refreshHome();
+  if(p==='modes') loadModes();
+  if(p==='gov') loadGov();
+}
+
+/* ============ 演示数据 ============ */
+const DEMO_CONF = `SOC_PLAT=$(getprop ro.board.platform)
+if [[ $action == "powersave" ]]; then
+	echo "powersave" > $pan1
+    $mokzdz/A/opt2 0
+    $mokzdz/A/conservative.sh
+    $mokzdz/A/json_cpu_max_min "42" "5"
+    $mokzdz/A/llcc.sh set_max_freq 350000
+    echo "6" > /dev/cpuctl/display/cpu.uclamp.min
+    echo "5" > /dev/cpuctl/ssfg/cpu.uclamp.min
+    echo "8" > /dev/cpuctl/touch/cpu.uclamp.min
+    echo "6" > /dev/cpuctl/multimedia/cpu.uclamp.min
+    echo "3" > /dev/cpuctl/rt/cpu.uclamp.min
+    echo "10" > /dev/cpuctl/top-app/cpu.uclamp.min
+fi
+if [[ $action == "balance" ]]; then
+	echo "balance" > $pan1
+    $mokzdz/A/opt2 26
+    $mokzdz/A/scx1.sh
+    $mokzdz/A/json_cpu_max_min "64" "20"
+    $mokzdz/A/llcc.sh set_max_freq 680000
+    echo "30" > /dev/cpuctl/display/cpu.uclamp.min
+    echo "28" > /dev/cpuctl/ssfg/cpu.uclamp.min
+    echo "40" > /dev/cpuctl/touch/cpu.uclamp.min
+    echo "32" > /dev/cpuctl/multimedia/cpu.uclamp.min
+    echo "40" > /dev/cpuctl/rt/cpu.uclamp.min
+    echo "26" > /dev/cpuctl/top-app/cpu.uclamp.min
+fi
+if [[ $action == "performance" ]]; then
+	echo "performance" > $pan1
+    $mokzdz/A/opt2 52
+    $mokzdz/A/scx2.sh
+    $mokzdz/A/json_cpu_max_min "90" "35"
+    $mokzdz/A/llcc.sh set_max_freq 1220000
+    echo "78" > /dev/cpuctl/display/cpu.uclamp.min
+    echo "76" > /dev/cpuctl/ssfg/cpu.uclamp.min
+    echo "92" > /dev/cpuctl/touch/cpu.uclamp.min
+    echo "80" > /dev/cpuctl/multimedia/cpu.uclamp.min
+    echo "92" > /dev/cpuctl/rt/cpu.uclamp.min
+    echo "74" > /dev/cpuctl/top-app/cpu.uclamp.min
+fi
+if [[ $action == "fast" ]]; then
+	echo "fast" > $pan1
+	$mokzdz/A/walt_up_rate_limit_us "0" "1500"
+    $mokzdz/A/opt2 88
+    $mokzdz/A/scx3.sh
+    $mokzdz/A/llcc.sh set_max_freq 1800000
+    $mokzdz/A/json_cpu_max_min "100" "42"
+    echo "82" > /dev/cpuctl/display/cpu.uclamp.min
+    echo "80" > /dev/cpuctl/ssfg/cpu.uclamp.min
+    echo "94" > /dev/cpuctl/touch/cpu.uclamp.min
+    echo "84" > /dev/cpuctl/multimedia/cpu.uclamp.min
+    echo "94" > /dev/cpuctl/rt/cpu.uclamp.min
+    echo "78" > /dev/cpuctl/top-app/cpu.uclamp.min
+fi
+`;
+const DEMO_GOV = {
+  powersave:'echo "conservative" > scaling_governor\necho "95" > conservative/up_threshold\necho "90" > conservative/down_threshold\necho "1" > conservative/freq_step\necho "8000" > conservative/sampling_rate\n',
+  balance:'echo "scx" > scaling_governor\necho "90" > scx/target_loads\n',
+  performance:'echo "scx" > scaling_governor\necho "85" > scx/target_loads\n',
+  fast:'echo "walt" > scaling_governor\necho "70" > scx/target_loads\n',
+};
+
+/* ============ 启动 ============ */
+(async ()=>{
+  if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); return; }
+  await detectForm();
+  renderFormCard();
+  refreshHome();
+})();
+</script>
+</body>
+</html>

@@ -207,28 +207,5 @@ chmod 0777 /sys/devices/system
 
 
 
-if ! pgrep -f "webui/server.py" >/dev/null 2>&1; then
-(
-  while true; do
-    PY=""
-    for p in /data/data/com.termux/files/usr/bin/python3 \
-             /data/data/com.termux/files/usr/bin/python \
-             /system/bin/python3 /system/bin/python; do
-      [ -x "$p" ] && PY="$p" && break
-    done
-    if [ -n "$PY" ]; then
-      export LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib:$LD_LIBRARY_PATH
-      export HOME=/data/data/com.termux/files/home
-      export COLOR_WEBUI_DATA="/data/adb/colorFC_webui_data.json"
-      cd "/data/adb/modules/colorFC/webui" 2>/dev/null || break
-      nohup "$PY" server.py >/dev/null 2>&1 &
-      
-      while true; do
-        sleep 60
-        pgrep -f "webui/server.py" >/dev/null 2>&1 || break
-      done
-    fi
-    sleep 30
-  done
-) &
-fi
+# WebUI 已迁移为 KernelSU 标准接口：管理器直接加载 webroot/index.html（ksu.exec 桥）
+# 旧版 Python 本地服务器方案（webui/server.py）已移除

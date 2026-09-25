@@ -9,14 +9,10 @@
         </intent>
     </queries>
 
-    <!-- 迷你悬浮窗监视器 -->
+    <!-- 悬浮窗监视器 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <!-- 帧率录制曲线图保存（Android 9 及以下写公共图片目录） -->
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
 
     <application
         android:label="@string/app_name"

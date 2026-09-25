@@ -4,8 +4,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -14,15 +12,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.View;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.InputStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
@@ -36,6 +29,8 @@ import Color.fc.view.Warp;
 public class MainActivity extends ThemedActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    /** 悬浮窗权限申请请求码 */
+    private static final int REQ_OVERLAY = 0x6CB2;
     private SocInfo soc;
     private boolean rooted = false;
     private double peakWatts = 0;
@@ -46,8 +41,12 @@ public class MainActivity extends ThemedActivity {
     private TextView rootBadge;
     private TextView powerValue, powerStatus, currentValue, voltageValue, peakValue, cellBadge;
     private TextView batteryLevel, batteryTemp;
-    /** 迷你悬浮窗文字按钮（点击显隐，无开关） */
+    /** 悬浮窗管理按钮（点击弹出监视悬浮窗功能列表） */
     private TextView monitorToggle;
+    /** 悬浮窗管理弹窗实例（授权返回后同步开关状态用） */
+    private OverlayManagerSheet ovlSheet;
+    /** 等待悬浮窗权限授权的监视器类型 */
+    private int pendingOvl = -1;
     /** 功耗统计按钮（点击展开/收起近 3 小时曲线） */
     private TextView histToggle;
     private LinearLayout powerHistBox;
@@ -90,7 +89,6 @@ public class MainActivity extends ThemedActivity {
         batteryTemp = findViewById(R.id.batteryTemp);
 
         // 记录卡片：按压动效
-        Warp.press(findViewById(R.id.menuFrameRecords));
         Warp.press(findViewById(R.id.menuPowerRecords));
 
         // 主题设置入口
@@ -103,9 +101,9 @@ public class MainActivity extends ThemedActivity {
         startCpuLoop();
         AppLimitService.ensure(this);   // 已配置单应用负载限制则确保执行服务在跑
 
-        // 迷你悬浮窗文字显隐悬浮窗（无开关）
+        // 悬浮窗管理：点击弹出监视悬浮窗功能列表（负载/进程/迷你/温度，各自开关）
         monitorToggle = findViewById(R.id.monitorToggle);
-        monitorToggle.setOnClickListener(v -> toggleMonitor(!MonitorService.running));
+        monitorToggle.setOnClickListener(v -> showOverlayManager());
 
         // 功耗统计：展开/收起近 3 小时曲线
         histToggle = findViewById(R.id.histToggle);
@@ -117,8 +115,6 @@ public class MainActivity extends ThemedActivity {
         histHint = findViewById(R.id.histHint);
         powerHistBox.setOnClickListener(v -> PowerHistoryManager.openDetail(this));
 
-        // 帧率录制记录卡片
-        findViewById(R.id.menuFrameRecords).setOnClickListener(v -> showFrameRecords());
         // 功耗记录卡片：Scene 样式详细记录
         findViewById(R.id.menuPowerRecords).setOnClickListener(v -> PowerHistoryManager.openDetail(this));
 
@@ -198,7 +194,15 @@ public class MainActivity extends ThemedActivity {
     protected void onResume() {
         super.onResume();
         updateCellModeFromPrefs();
-        // 回到前台时同步悬浮窗按钮状态（服务可能已被通知栏/菜单关闭）
+        // 授权返回：自动开启等待中的监视器（照搬 Kin 权限回调行为）
+        if (pendingOvl >= 0) {
+            int t = pendingOvl;
+            pendingOvl = -1;
+            if (Settings.canDrawOverlays(this)) setOvlEnabled(t, true);
+        }
+        // 弹窗仍开着：窗内（✕/长按）可能已关闭监视器，重读 Prefs 同步开关
+        if (ovlSheet != null && ovlSheet.isShowing()) ovlSheet.syncStates();
+        // 回到前台时同步悬浮窗按钮状态（服务可能已被通知栏/窗内关闭）
         syncMonitorUi();
     }
 
@@ -207,37 +211,51 @@ public class MainActivity extends ThemedActivity {
         super.onPause();
     }
 
-    /** 迷你悬浮窗按钮状态：运行中主题色，未运行次要色 */
+    /** 悬浮窗管理按钮状态：任一监视窗开启主题色，否则次要色 */
     private void syncMonitorUi() {
-        if (monitorToggle != null) {
-            monitorToggle.setTextColor(MonitorService.running
-                    ? getResources().getColor(R.color.accent)
-                    : getResources().getColor(R.color.textSecondary));
+        if (monitorToggle == null) return;
+        SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
+        boolean any = false;
+        for (String k : MonitorService.PREF_KEYS) {
+            if (p.getBoolean(k, false)) {
+                any = true;
+                break;
+            }
         }
+        monitorToggle.setTextColor(any
+                ? getResources().getColor(R.color.accent)
+                : getResources().getColor(R.color.textSecondary));
     }
 
-    /** 点击"监视器"文字启停前台服务（无开关） */
-    private void toggleMonitor(boolean on) {
-        if (on) {
-            if (!Settings.canDrawOverlays(this)) {
-                syncMonitorUi();
-                Toast.makeText(this, "请先授予悬浮窗权限后重试", Toast.LENGTH_LONG).show();
-                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName())));
-                return;
-            }
-            startForegroundService(new Intent(this, MonitorService.class));
-        } else {
-            // 服务运行且胶囊处于隐藏状态：点击按钮优先恢复菜单胶囊而不是停止服务
-            SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
-            if (MonitorService.running && p.getBoolean("mon_pill_hidden", false)) {
-                Intent it = new Intent(this, MonitorService.class);
-                it.setAction("show_pill");
-                startForegroundService(it);
-            } else {
-                stopService(new Intent(this, MonitorService.class));
-            }
+    /** 点击"悬浮窗管理"：弹出监视悬浮窗功能列表（负载/进程/迷你/温度各自开关） */
+    private void showOverlayManager() {
+        if (ovlSheet != null && ovlSheet.isShowing()) {
+            ovlSheet.dismiss();
+            return;
         }
+        ovlSheet = new OverlayManagerSheet(this, new OverlayManagerSheet.Host() {
+            @Override
+            public void onOvlToggle(int type, boolean on) {
+                setOvlEnabled(type, on);
+            }
+
+            @Override
+            public void onOvlNeedPermission(int type) {
+                pendingOvl = type;
+                Toast.makeText(MainActivity.this, "请先授予悬浮窗权限后重试", Toast.LENGTH_LONG).show();
+                startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName())), REQ_OVERLAY);
+            }
+        });
+        ovlSheet.show();
+    }
+
+    /** 监视器开关落地：持久化 + 显示/隐藏对应悬浮窗（照搬 Kin Prefs + FloatWindowService） */
+    private void setOvlEnabled(int type, boolean on) {
+        getSharedPreferences("colorfc", MODE_PRIVATE)
+                .edit().putBoolean(MonitorService.PREF_KEYS[type], on).apply();
+        if (on) MonitorService.show(this, type);
+        else MonitorService.hide(this, type);
         syncMonitorUi();
     }
 
@@ -494,89 +512,6 @@ public class MainActivity extends ThemedActivity {
                 }
             });
         }).start();
-    }
-
-    /** 帧率录制记录列表：点击条目查看曲线图 */
-    private void showFrameRecords() {
-        new Thread(() -> {
-            final List<FrameRecordStore.Rec> recs = FrameRecordStore.list(this);
-            final String[] items = new String[recs.size()];
-            SimpleDateFormat df = new SimpleDateFormat("MM-dd HH:mm", Locale.US);
-            for (int i = 0; i < recs.size(); i++) {
-                FrameRecordStore.Rec r = recs.get(i);
-                items[i] = String.format(Locale.US, "%s · %d:%02d · 均%.0fHz · CPU峰%.0f%%",
-                        df.format(new Date(r.t)), r.dur / 60000, (r.dur / 1000) % 60,
-                        r.avgFps, r.maxCpu);
-            }
-            runOnUiThread(() -> {
-                if (recs.isEmpty()) {
-                    new AlertDialog.Builder(this)
-                            .setTitle("帧率录制记录")
-                            .setMessage("暂无录制\n\n开启【监视器功能】→ 点击状态栏\"监视器\"展开列表 → 打开\"帧率记录器\"，"
-                                    + "点击帧率窗口开始录制，再次点击停止并自动保存曲线图（帧率 / CPU线程负载 / CPU使用率）")
-                            .setPositiveButton("关闭", null)
-                            .show();
-                    return;
-                }
-                new AlertDialog.Builder(this)
-                        .setTitle("帧率录制记录")
-                        .setItems(items, (d, w) -> showRecordImage(recs.get(w)))
-                        .setNeutralButton("清空", (d, w) -> confirmClearRecords())
-                        .setPositiveButton("关闭", null)
-                        .show();
-            });
-        }).start();
-    }
-
-    /** 展开查看录制曲线图 */
-    private void showRecordImage(FrameRecordStore.Rec r) {
-        new Thread(() -> {
-            Bitmap bmp = null;
-            try {
-                if (r.ref != null && r.ref.startsWith("content://")) {
-                    try (InputStream is = getContentResolver().openInputStream(Uri.parse(r.ref))) {
-                        bmp = BitmapFactory.decodeStream(is);
-                    }
-                } else if (r.ref != null) {
-                    bmp = BitmapFactory.decodeFile(r.ref);
-                }
-            } catch (Exception ignored) {
-            }
-            final Bitmap fb = bmp;
-            runOnUiThread(() -> {
-                if (fb == null) {
-                    Toast.makeText(this, "曲线图已被删除或无法读取", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                ImageView iv = new ImageView(this);
-                iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                iv.setAdjustViewBounds(true);
-                iv.setImageBitmap(fb);
-                ScrollView sv = new ScrollView(this);
-                sv.addView(iv);
-                new AlertDialog.Builder(this)
-                        .setTitle(String.format(Locale.US, "录制 %d:%02d · 均%.0fHz",
-                                r.dur / 60000, (r.dur / 1000) % 60, r.avgFps))
-                        .setView(sv)
-                        .setPositiveButton("关闭", null)
-                        .show();
-            });
-        }).start();
-    }
-
-    /** 清空帧率录制记录（含图片） */
-    private void confirmClearRecords() {
-        new AlertDialog.Builder(this)
-                .setTitle("清空录制记录")
-                .setMessage("将删除全部录制记录及曲线图，确定？")
-                .setPositiveButton("清空", (d, w) -> new Thread(() -> {
-                    FrameRecordStore.clear(this);
-                    runOnUiThread(() -> {
-                        Toast.makeText(this, "已清空录制记录", Toast.LENGTH_SHORT).show();
-                    });
-                }).start())
-                .setNegativeButton("取消", null)
-                .show();
     }
 
     /** 电芯模式切换：并联双电芯机型电压 4.4V 与单芯无异，只能手动指定 */

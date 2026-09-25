@@ -5,185 +5,475 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.graphics.Bitmap;
+import android.content.pm.PackageManager;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.provider.MediaStore;
-import android.text.SpannableStringBuilder;
-import android.text.Spanned;
-import android.text.style.ForegroundColorSpan;
+import android.os.Vibrator;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileReader;
-import java.io.OutputStream;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Date;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Scene 款多监视器悬浮窗架构：
- * - 状态栏药丸（置顶、可拖动、长按锁定）：点击展开"监视器功能"列表，收纳全部监视器开关
- *   （负载监视器 / 帧率记录器 / 线程监视器 / 温度监视器 + 关闭监视器）
- * - 负载监视器：三圆环（CPU/GPU/电池）+ 密集数据行 + 底部 #PWR 条；
- *   单击 展开/折叠，双击 关闭窗口，长按 锁定/解锁位置
- * - 帧率记录器：独立 FPS 窗口（不并入负载监视器），点击开始/停止录制并保存
- * - 线程监视器：前台应用 CPU 占用最高的 6 条线程，点击关闭窗口
- * - 温度监视器：CPU/SOC/BAT 温度，点击关闭窗口
- * - 全部窗口可拖动（含状态栏上方，FLAG_LAYOUT_IN_SCREEN），长按锁定后不可拖
- * - 帧率检测：单次 shell 合并调用 + 增量差分 + 瞬时失败保持上一有效值
- * - 功耗 500ms 采样（与主页电芯模式同步），GPU/集群/温度 2s 扫描，线程 1s 采样
+ * 悬浮窗管理器（1:1 照搬 Kin-app FloatWindowService/OverlayWindows 架构，仿 Metric）：
+ * - 单前台服务同时管理多个独立监视悬浮窗，各自开关互不影响：
+ *   负载监视器（三环胶囊，点击展开参数网格）/ 进程监视器（top 进程列表，双击结束）
+ *   迷你监视器（顶部居中细条，点击穿透）/ 温度监视器（BAT/CPU/GPU/DDR 四行）
+ *   帧率记录器与源码一致暂时下线（不在选择列表显示）
+ * - 窗口全部可拖动（迷你条除外，其点击穿透）；移动阈值 3dp 内抬手 = 单击，
+ *   500ms 未动 = 长按（负载/温度窗关闭）；无吸边/无落点记忆（源码行为）
+ * - 采样：CPU /proc/stat 差分（免 root）、GPU/集群/温度 2s 扫描、FPS SF 增量差分、
+ *   功耗 PowerMonitor（与主页电芯模式同步）、进程 toybox top（回退 /proc 差分）
+ * - 服务生命周期：全部窗口关闭 → 自动停止；被杀后 START_STICKY 按 Prefs 恢复
  */
 public class MonitorService extends Service {
 
-    /** 主页开关状态同步用 */
+    /** 主页按钮状态同步用 */
     public static volatile boolean running = false;
-    /** 录制最短时长 */
-    private static final long MIN_REC_MS = 3000;
 
-    // 监视器索引
-    private static final int M_LOAD = 0, M_FPS = 1, M_THR = 2, M_TEMP = 3, M_PWR = 4;
-    private static final String[] MON_KEYS = {"mon_load", "mon_fps", "mon_thr", "mon_temp", "mon_pwr"};
-    private static final String[] MON_LABELS = {"负载监视器", "帧率记录器", "线程监视器", "温度监视器", "功耗监视器"};
+    // ===== 窗口类型（顺序 = 功能列表顺序） =====
+    public static final int T_LOAD = 0, T_PROCESS = 1, T_MINI = 2, T_TEMP = 3, N_TYPES = 4;
+    /** 持久化开关键（照搬 Kin Prefs ovl_*，悬浮窗管理列表与主页共用） */
+    public static final String[] PREF_KEYS = {"ovl_load", "ovl_process", "ovl_mini", "ovl_temp"};
 
     private WindowManager wm;
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private float dp;
+    private int dp(float v) {
+        return Math.round(v * dp);
+    }
+
+    // ===== 各窗口持有 =====
+    private final View[] win = new View[N_TYPES];
+    private final boolean[] winOpen = new boolean[N_TYPES];
+    private OverlayWindow[] wins = new OverlayWindow[N_TYPES];
+
+    // ===== 采样状态 =====
     /** 电芯模式（与主页同步）：0=自动校准 1=强制单电芯 2=强制双电芯 */
     private int cellMode = 0;
-
-    // ===== 药丸 + 功能列表 =====
-    private TextView pill;
-    /** 菜单胶囊隐藏状态（长按胶囊隐藏，通知栏「显示菜单」恢复） */
-    private boolean pillHidden = false;
-    private LinearLayout listPanel;
-    private TextView listTitle, listQuit;
-    private final TextView[] listRows = new TextView[5];
-    private boolean listOpen = false;
-
-    // ===== 各监视器窗口 =====
-    private final View[] win = new View[5];
-    private final WindowManager.LayoutParams[] wlp = new WindowManager.LayoutParams[5];
-    private final boolean[] winOpen = new boolean[5];
-    // 负载监视器
-    private RingsView rings;
-    private LinearLayout detailBox, clusterBox;
-    private TextView rowRam, rowCpu, rowGpu, rowBat;
-    private boolean expanded = false;
-    // 帧率记录器
-    private TextView fpsText;
-    // 功耗监视器
-    private TextView pwrBig;
-    // 线程监视器
-    private final TextView[] thrRows = new TextView[6];
-    // 温度监视器
-    private TextView tempText;
-
-    /** 长按锁定位置（全部窗口包括药丸共用；每次启动服务恢复可拖动） */
-    private boolean locked = false;
-    private long lastTapAt = 0;
-    private Runnable pendingTap;
-
-    // ===== 显示缓存（工作线程写 / UI 读） =====
-    private volatile double cW = -1;       // 功耗 W（已按电芯模式修正）
-    private volatile double cV = -1, cA = -1;   // 电压 V / 电流 A
-    private volatile double cBusy = -1;    // CPU 总占用 %
-    private volatile double cCpuM = 0;      // CPU 最高频 MHz
-    private volatile double cGpuM = 0;      // GPU 频率 MHz
-    private volatile int coreOnline = -1, coreTotal = -1;   // 在线核心数/总核心数（照搬 Kin coreOnline 语义）
-    private volatile double cCpuT = 0, cSocT = 0, cBatT = 0;
-    private volatile float cHz = 0;         // 实时帧率
-    private volatile float batPct = -1;     // 电量 %
-    private volatile float ramPct = -1, ramUsedG = 0;
-    private volatile float gpuLoad = -1;    // GPU 负载 %（不可读时 -1）
-    private double gpuMax = 0;              // GPU 最大频率 MHz
-    private volatile long recShown = 0;    // 录制已进行时长 ms
-
-    // CPU 集群（policy）
-    private static final int MAX_CL = 3;
-    private volatile int nCluster = 0;
-    private final double[] clFreq = new double[MAX_CL];
-    private final float[] clBusy = new float[MAX_CL];
-    private final String[] clLbl = new String[MAX_CL];
-    private int[][] clMap;                  // 集群 → 核心编号
-    private int rowsBuilt = 0;              // 已创建的集群行数
-
-    // CPU 占用差分基准（快速循环）
     private long lastIdle = -1, lastTotal = -1;
-    // 录制 500ms 循环基准
-    private long recLastIdle = -1, recLastTotal = -1;
     private long[] lastCoreIdle, lastCoreTotal;
     private int coreCount = 0;
-
-    // ===== 实时帧率 =====
-    private String fpsLayer, fpsPkg;   // 前台应用图层
-    private long sfPrevNewest = -1;     // SF latency 增量基准（最近帧时间戳 ns）
-    private long gfxFrames = -1;       // gfxinfo 总渲染帧数差分基准
-    private long gfxAt;
-    // 瞬时检测失败时保持上一有效值，防止 "--fps" 闪烁
+    private float peakHz = 0;
+    private String fpsLayer, fpsPkg;
+    private long sfPrevNewest = -1;
+    private long gfxFrames = -1, gfxAt;
     private float lastGoodHz = 0;
     private long lastGoodAt = 0;
-    // 本机面板最高刷新率（帧率显示硬顶，检测失败时回退 240）
-    private float peakHz = 0;
+    private int tick = 0;
 
-    // ===== 线程监视器 =====
-    private Map<Integer, long[]> thrPrev;   // tid → [utime]
-    private long thrLastAt = 0;
-    private double thrTck = 100;
-    private int thrPid = 0;          // 前台应用 pid 缓存
-    private long thrPidAt = 0;       // 上次解析 pid 的时间
+    /** 上次快照（窗口懒更新用） */
+    private Snap lastSnap;
 
-    // ===== 帧率录制 =====
-    private boolean recording = false;
-    private long recStart;
-    private final ArrayList<Long> ts = new ArrayList<>();
-    private final ArrayList<Float> fps = new ArrayList<>();
-    private final ArrayList<Float> cpuTot = new ArrayList<>();
-    private final ArrayList<float[]> cores = new ArrayList<>();
+    // ===== 进程采样（top 主路径 + /proc 差分回退，照搬 Kin ProcSampler） =====
+    private boolean topUsable = true;
+    private long lastTotalJiffies = -1;
+    private final Map<Integer, Long> lastProcJiffies = new HashMap<>();
 
-    private static final int[] CORE_COLORS = {
-            0xFF00E5FF, 0xFF22D3EE, 0xFF10B981, 0xFFF59E0B,
-            0xFFEF4444, 0xFF8B5CF6, 0xFFEC4899, 0xFF84CC16
-    };
+    // ==================== 生命周期 ====================
 
-    // Scene 款配色：标签浅灰 / 数值纯白 / 次要信息暗灰
-    private static final int COL_LABEL = 0xFF98A2B3;
-    private static final int COL_VALUE = 0xFFF2F4F8;
-    private static final int COL_DIM = 0xFF7D8696;
-    private static final int COL_GREEN = 0xFF34C759;
-    private static final int COL_ORANGE = 0xFFFF9500;
-    private static final int COL_RED = 0xFFEF4444;
+    @Override
+    public IBinder onBind(Intent i) {
+        return null;
+    }
 
-    /** 慢速扫描：GPU 频率/负载/最高频、CPU 各集群频率、集群拓扑、温区 */
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!Settings.canDrawOverlays(this)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        String action = intent != null ? intent.getAction() : null;
+        int type = typeOf(intent != null ? intent.getStringExtra("type") : null);
+        if ("show".equals(action) && type >= 0) {
+            showWindow(type);
+        } else if ("hide".equals(action) && type >= 0) {
+            hideWindow(type);
+        } else {
+            syncFromPrefs();   // 服务重建（START_STICKY，intent 为空）按 Prefs 恢复
+        }
+        return START_STICKY;
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        running = true;
+        dp = getResources().getDisplayMetrics().density;
+        wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
+        try {
+            float pk = 0;
+            android.hardware.display.DisplayManager dm =
+                    (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
+            for (android.view.Display d : dm.getDisplays()) {
+                for (android.view.Display.Mode m : d.getSupportedModes()) {
+                    pk = Math.max(pk, m.getRefreshRate());
+                }
+            }
+            if (pk > 30) peakHz = pk;
+        } catch (Exception ignored) {
+        }
+        startForeground(0x6CB1, notif(0));
+        ui.postDelayed(this::sampleLoop, 300);
+    }
+
+    @Override
+    public void onDestroy() {
+        running = false;
+        ui.removeCallbacksAndMessages(null);
+        for (int i = 0; i < N_TYPES; i++) {
+            if (win[i] != null && win[i].getParent() != null) {
+                try {
+                    wm.removeView(win[i]);
+                } catch (Exception ignored) {
+                }
+            }
+            win[i] = null;
+            wins[i] = null;
+            winOpen[i] = false;
+        }
+        super.onDestroy();
+    }
+
+    static int typeOf(String id) {
+        if (id == null) return -1;
+        switch (id) {
+            case "load": return T_LOAD;
+            case "process": return T_PROCESS;
+            case "mini": return T_MINI;
+            case "temp": return T_TEMP;
+        }
+        return -1;
+    }
+
+    // ==================== 窗口工厂 / 显隐 ====================
+
+    private OverlayWindow factory(int type) {
+        OverlayWindow w;
+        switch (type) {
+            case T_LOAD: w = new LoadOverlayWindow(0xFF0FA5A5); break;
+            case T_PROCESS: w = new ProcessOverlayWindow(0xFF34A853); break;
+            case T_MINI: w = new MiniOverlayWindow(0xFFFF8A34); break;
+            default: w = new TempOverlayWindow(0xFFF97316); break;
+        }
+        final int t = type;
+        w.onCloseRequest = () -> requestClose(t);
+        return w;
+    }
+
+    /** 窗内关闭（✕ / 长按）：持久化关闭并隐藏（防 START_STICKY 重建复活，照搬 Kin） */
+    private void requestClose(int type) {
+        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
+                .putBoolean(PREF_KEYS[type], false).apply();
+        hideWindow(type);
+    }
+
+    /** Metric 各窗固定初始落点(dp)：负载/进程 (16,96)，温度 (16,168)，迷你顶部居中 */
+    private int[] initialPos(int type) {
+        if (type == T_TEMP) return new int[]{dp(16), dp(168)};
+        return new int[]{dp(16), dp(96)};
+    }
+
+    private WindowManager.LayoutParams buildLp(int type) {
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                android.graphics.PixelFormat.TRANSLUCENT);
+        if (type == T_MINI) {
+            // Metric 迷你条：+NOT_TOUCHABLE +LAYOUT_NO_LIMITS，高 12dp 顶部居中 y=0
+            lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+            lp.height = dp(12);
+            lp.width = WindowManager.LayoutParams.WRAP_CONTENT;
+            lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+            lp.x = 0;
+            lp.y = 0;
+            if (Build.VERSION.SDK_INT >= 28) {
+                lp.layoutInDisplayCutoutMode =
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
+        } else {
+            lp.gravity = Gravity.TOP | Gravity.START;
+            int[] p = initialPos(type);
+            lp.x = p[0];
+            lp.y = p[1];
+        }
+        return lp;
+    }
+
+    private void showWindow(int type) {
+        if (winOpen[type]) return;
+        OverlayWindow w = factory(type);
+        View v = w.getRootView();
+        WindowManager.LayoutParams lp = buildLp(type);
+        try {
+            wm.addView(v, lp);
+        } catch (Exception e) {
+            if (noneOpen()) stopSelf();
+            return;
+        }
+        win[type] = v;
+        wins[type] = w;
+        winOpen[type] = true;
+        if (type != T_MINI) attachDrag(type, w, v);
+        if (lastSnap != null) w.onTick(new TickData(lastSnap, null));
+        updateNotif();
+    }
+
+    private void hideWindow(int type) {
+        if (!winOpen[type]) {
+            if (noneOpen()) stopSelf();
+            return;
+        }
+        winOpen[type] = false;
+        try {
+            wm.removeView(win[type]);
+        } catch (Exception ignored) {
+        }
+        win[type] = null;
+        wins[type] = null;
+        if (noneOpen()) stopSelf();
+        else updateNotif();
+    }
+
+    private boolean noneOpen() {
+        for (boolean b : winOpen) if (b) return false;
+        return true;
+    }
+
+    /** 服务重建：按 Prefs 恢复各窗口 */
+    private void syncFromPrefs() {
+        SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
+        for (int i = 0; i < N_TYPES; i++) {
+            if (p.getBoolean(PREF_KEYS[i], false)) showWindow(i);
+        }
+        if (noneOpen()) stopSelf();
+    }
+
+    // ==================== 拖动 + 单击/长按分发（照搬 Kin：阈值 3dp / 长按 500ms） ====================
+
+    private void attachDrag(int type, OverlayWindow w, View v) {
+        final float[] down = new float[2];
+        final int[] start = new int[2];
+        final boolean[] moved = new boolean[1];
+        final boolean[] longFired = new boolean[1];
+        final Runnable longRun = () -> {
+            if (!moved[0]) {
+                longFired[0] = true;
+                try {
+                    w.onLongPress();
+                } catch (Exception ignored) {
+                }
+            }
+        };
+        v.setOnTouchListener((view, ev) -> {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) view.getLayoutParams();
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    down[0] = ev.getRawX();
+                    down[1] = ev.getRawY();
+                    start[0] = lp.x;
+                    start[1] = lp.y;
+                    moved[0] = false;
+                    longFired[0] = false;
+                    view.postDelayed(longRun, 500);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    int dx = (int) (ev.getRawX() - down[0]);
+                    int dy = (int) (ev.getRawY() - down[1]);
+                    if (!moved[0] && (Math.abs(dx) > dp(3) || Math.abs(dy) > dp(3))) {
+                        moved[0] = true;
+                        view.removeCallbacks(longRun);
+                    }
+                    lp.x = start[0] + dx;
+                    lp.y = start[1] + dy;
+                    try {
+                        wm.updateViewLayout(view, lp);
+                    } catch (Exception ignored) {
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    view.removeCallbacks(longRun);
+                    if (!moved[0] && !longFired[0]) {
+                        try {
+                            w.onTap();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    view.removeCallbacks(longRun);
+                    return true;
+            }
+            return false;
+        });
+    }
+
+    // ==================== 采样循环（1s 一拍，照搬 Kin sampleLoop） ====================
+
+    private void sampleLoop() {
+        final boolean needProc = tick % 2 == 0 && winOpen[T_PROCESS];
+        new Thread(() -> {
+            final Snap s = new Snap();
+            try {
+                readCpu(s);                       // /proc/stat 差分（总 + 每核）
+            } catch (Exception ignored) {
+            }
+            try {
+                scanSlow(s);                      // GPU/集群/温度（shell，2s 节流）
+            } catch (Exception ignored) {
+            }
+            if (winOpen[T_LOAD] || winOpen[T_MINI]) {
+                try {
+                    s.fps = currentFps();
+                } catch (Exception ignored) {
+                }
+            }
+            if (winOpen[T_LOAD] || winOpen[T_MINI] || winOpen[T_TEMP]) {
+                try {
+                    readPower(s);                 // 功耗 + 电池温度/电量
+                } catch (Exception ignored) {
+                }
+            }
+            final List<Proc> procs = needProc ? sampleProcs() : null;
+            final TickData d = new TickData(s, procs);
+            lastSnap = s;
+            ui.post(() -> {
+                for (int i = 0; i < N_TYPES; i++) {
+                    if (winOpen[i] && wins[i] != null) {
+                        try {
+                            wins[i].onTick(d);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            });
+            tick++;
+            ui.postDelayed(this::sampleLoop, 1000);
+        }).start();
+    }
+
+    // ==================== 快照数据 ====================
+
+    static class Cluster {
+        int mhz;
+        int[] cpus;
+    }
+
+    static class Snap {
+        int cpuLoadPct = -1;
+        int[] coreLoadPct;
+        int[] coreMhz;
+        List<Cluster> clusters = Collections.emptyList();
+        int gpuLoadPct = -1, gpuMhz = -1, ddrMhz = -1;
+        float ramUsedPct = -1;
+        double cpuTempC = -999, gpuTempC = -999, ddrTempC = -999, battTempC = -999;
+        float fps = -1, watt = 0, battPct = -1;
+    }
+
+    static class Proc {
+        int pid;
+        String name;
+        float cpuPct;
+    }
+
+    static class TickData {
+        final Snap snap;
+        final List<Proc> procs;
+
+        TickData(Snap s, List<Proc> p) {
+            snap = s;
+            procs = p;
+        }
+    }
+
+    // ==================== CPU 占用（/proc/stat 差分，免 root） ====================
+
+    private void readCpu(Snap s) {
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
+            String line = r.readLine();       // 首行 cpu 总
+            if (line != null && line.startsWith("cpu ")) {
+                String[] p = line.split("\\s+");
+                long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
+                long total = 0;
+                for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
+                if (lastIdle >= 0 && total > lastTotal) {
+                    s.cpuLoadPct = (int) Math.max(0, Math.min(100,
+                            100.0 * (total - lastTotal - (idle - lastIdle)) / (total - lastTotal)));
+                }
+                lastIdle = idle;
+                lastTotal = total;
+            }
+            List<long[]> cur = new ArrayList<>();
+            while ((line = r.readLine()) != null) {
+                if (!line.startsWith("cpu") || line.startsWith("cpu ")) continue;
+                String[] p = line.split("\\s+");
+                long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
+                long total = 0;
+                for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
+                cur.add(new long[]{idle, total});
+            }
+            int n = cur.size();
+            coreCount = Math.max(coreCount, n);
+            if (n > 0) {
+                if (lastCoreIdle == null || lastCoreIdle.length != n) {
+                    lastCoreIdle = new long[n];
+                    lastCoreTotal = new long[n];
+                    for (int i = 0; i < n; i++) {
+                        lastCoreIdle[i] = cur.get(i)[0];
+                        lastCoreTotal[i] = cur.get(i)[1];
+                    }
+                } else {
+                    int[] out = new int[n];
+                    for (int i = 0; i < n; i++) {
+                        long di = cur.get(i)[0] - lastCoreIdle[i];
+                        long dt = cur.get(i)[1] - lastCoreTotal[i];
+                        out[i] = dt > 0 ? (int) Math.max(0, Math.min(100, 100.0 * (dt - di) / dt)) : 0;
+                        lastCoreIdle[i] = cur.get(i)[0];
+                        lastCoreTotal[i] = cur.get(i)[1];
+                    }
+                    s.coreLoadPct = out;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    // ==================== 慢速扫描（GPU/集群/温度/RAM/DDR，shell 合并单次调用） ====================
+
     private static final String SCAN =
             "g=$(cat /sys/class/kgsl/kgsl-3d0/gpuclk 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq 2>/dev/null);"
@@ -194,25 +484,213 @@ public class MonitorService extends Service {
                     + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null);"
                     + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/gpuload 2>/dev/null);"
                     + "echo \"GL:$gl\";"
-                    + "gm=$(cat /sys/class/kgsl/kgsl-3d0/max_gpuclk 2>/dev/null);"
-                    + "[ -n \"$gm\" ] || gm=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/max_freq 2>/dev/null);"
-                    + "[ -n \"$gm\" ] || gm=$(cat /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies 2>/dev/null | awk '{print $NF}');"
-                    + "echo \"GM:$gm\";"
+                    + "d=$(cat /sys/class/devfreq/*ddr*/cur_freq 2>/dev/null);"
+                    + "[ -n \"$d\" ] || d=$(cat /sys/class/devfreq/*qcom,mem*/cur_freq 2>/dev/null);"
+                    + "echo \"D:$d\";"
                     + "for q in /sys/devices/system/cpu/cpufreq/policy*; do "
-                    + "echo \"Q:$(cat $q/scaling_cur_freq 2>/dev/null)\"; done;"
-                    + "r=\"\"; for q in /sys/devices/system/cpu/cpufreq/policy*; do "
-                    + "r=\"$r$(cat $q/related_cpu 2>/dev/null);\"; done; echo \"R:$r\";"
-                    + "n=\"\"; for c in /sys/devices/system/cpu/cpu[0-9]*; do "
-                    + "o=$(cat $c/online 2>/dev/null); [ -z \"$o\" ] && o=1; "
-                    + "n=\"$n $o\"; done; echo \"N:$n\";"
+                    + "echo \"Q:$(cat $q/scaling_cur_freq 2>/dev/null):$(cat $q/related_cpu 2>/dev/null)\"; done;"
                     + "for z in /sys/class/thermal/thermal_zone*; do "
                     + "[ -f \"$z/temp\" ] || continue; "
                     + "echo \"T:$(cat \"$z/type\" 2>/dev/null):$(cat \"$z/temp\" 2>/dev/null)\"; done";
 
-    /**
-     * 帧率检测合并为单次 shell 调用（降低 su 往返延迟与偶发失败）：
-     * P: 前台包名 → gfxinfo 总渲染帧数（纯数字行）→ L: 择优图层 → SF --latency 数据
-     */
+    private volatile long lastScanAt = 0;
+    private volatile String scanCache = "";
+    /** 每核频率缓存（cluster 折算到核） */
+    private volatile int[] cachedCoreMhz;
+    private volatile List<Cluster> cachedClusters;
+    private volatile int cachedGpuMhz = -1, cachedGpuLoad = -1, cachedDdrMhz = -1;
+    private volatile double cachedCpuT = -999, cachedGpuT = -999, cachedDdrT = -999;
+
+    private void scanSlow(Snap s) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastScanAt < 1900) {
+            // 复用上一轮结果（2s 扫描，1s 一拍）
+            s.gpuMhz = cachedGpuMhz;
+            s.gpuLoadPct = cachedGpuLoad;
+            s.ddrMhz = cachedDdrMhz;
+            s.clusters = cachedClusters != null ? cachedClusters : Collections.emptyList();
+            s.coreMhz = cachedCoreMhz;
+            s.cpuTempC = cachedCpuT;
+            s.gpuTempC = cachedGpuT;
+            s.ddrTempC = cachedDdrT;
+            s.ramUsedPct = lastRamPct;
+            return;
+        }
+        lastScanAt = now;
+        String out = "";
+        try {
+            RootShell.Result r = RootShell.exec(SCAN);
+            if (r.ok() && r.out != null) out = r.out;
+        } catch (Exception ignored) {
+        }
+        List<Cluster> cls = new ArrayList<>();
+        List<String> freqs = new ArrayList<>();
+        for (String line : out.split("\\n")) {
+            if (line.startsWith("G:")) {
+                cachedGpuMhz = (int) Math.round(parseGpuHzToMhz(line.substring(2).trim()));
+            } else if (line.startsWith("GL:")) {
+                cachedGpuLoad = parseGpuLoad(line);
+            } else if (line.startsWith("D:")) {
+                try {
+                    double v = Double.parseDouble(line.substring(2).trim());
+                    if (v > 0) cachedDdrMhz = v < 3000 ? (int) v : (int) Math.round(v / 1e6);
+                } catch (Exception ignored) {
+                }
+            } else if (line.startsWith("Q:")) {
+                freqs.add(line.substring(2));
+            }
+        }
+        // Q:freq:related_cpus
+        for (String q : freqs) {
+            int c = q.lastIndexOf(':');
+            if (c <= 0) continue;
+            try {
+                int mhz = (int) Math.round(Double.parseDouble(q.substring(0, c).trim()) / 1000.0);
+                String[] cs = q.substring(c + 1).trim().split("\\s+");
+                List<Integer> cpus = new ArrayList<>();
+                for (String x : cs) {
+                    try {
+                        cpus.add(Integer.parseInt(x.trim()));
+                    } catch (Exception ignored) {
+                    }
+                }
+                if (!cpus.isEmpty()) {
+                    Cluster cl = new Cluster();
+                    cl.mhz = mhz;
+                    cl.cpus = new int[cpus.size()];
+                    for (int i = 0; i < cpus.size(); i++) cl.cpus[i] = cpus.get(i);
+                    cls.add(cl);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        cachedClusters = cls;
+        // 每核频率 = 所在集群频率
+        if (!cls.isEmpty()) {
+            int maxCpu = 0;
+            for (Cluster cl : cls) for (int c : cl.cpus) maxCpu = Math.max(maxCpu, c);
+            int[] cm = new int[maxCpu + 1];
+            for (Cluster cl : cls) for (int c : cl.cpus) cm[c] = cl.mhz;
+            cachedCoreMhz = cm;
+        }
+        cachedCpuT = parseZoneTemp(out, "cpu", -999);
+        cachedGpuT = parseZoneTemp(out, "gpu", -999);
+        cachedDdrT = parseZoneTemp(out, "ddr", -999);
+        readMem();
+        s.gpuMhz = cachedGpuMhz;
+        s.gpuLoadPct = cachedGpuLoad;
+        s.ddrMhz = cachedDdrMhz;
+        s.clusters = cls;
+        s.coreMhz = cachedCoreMhz;
+        s.cpuTempC = cachedCpuT;
+        s.gpuTempC = cachedGpuT;
+        s.ddrTempC = cachedDdrT;
+        s.ramUsedPct = lastRamPct;
+    }
+
+    private volatile float lastRamPct = -1;
+
+    private void readMem() {
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/meminfo"))) {
+            long total = -1, avail = -1;
+            String l;
+            while ((l = r.readLine()) != null) {
+                if (total < 0 && l.startsWith("MemTotal:")) {
+                    total = Long.parseLong(l.split("\\s+")[1]);
+                } else if (avail < 0 && l.startsWith("MemAvailable:")) {
+                    avail = Long.parseLong(l.split("\\s+")[1]);
+                } else if (total >= 0 && avail >= 0) break;
+            }
+            if (total > 0 && avail >= 0) lastRamPct = 100f * (total - avail) / total;
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** GPU 频率：kgsl gpuclk 直接为 MHz，devfreq 为 Hz */
+    private double parseGpuHzToMhz(String v) {
+        try {
+            double d = Double.parseDouble(v);
+            if (d <= 0) return 0;
+            if (d < 3000) return d;    // MHz
+            if (d < 1_000_000) return d / 1000;
+            return d / 1e6;
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    /** GPU 负载 %（>100 视作十分位百分比） */
+    private int parseGpuLoad(String line) {
+        try {
+            String s = line.substring(3).trim().replace("%", "");
+            s = s.replaceAll("[^0-9.].*$", "").trim();
+            if (s.isEmpty()) return -1;
+            float v = Float.parseFloat(s);
+            if (v > 100 && v <= 1000) v /= 10f;
+            return (int) Math.max(0, Math.min(100, v));
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    /** 分类温区最大值（℃）：cpu=cpu/apc/big / gpu=gpu / ddr=ddr */
+    private double parseZoneTemp(String out, String kind, double fallback) {
+        double max = 0;
+        try {
+            for (String line : out.split("\\n")) {
+                if (!line.startsWith("T:")) continue;
+                String body = line.substring(2);
+                int idx = body.lastIndexOf(':');
+                if (idx <= 0) continue;
+                String ty = body.substring(0, idx).toLowerCase();
+                double v;
+                try {
+                    v = Double.parseDouble(body.substring(idx + 1).trim());
+                } catch (Exception e) {
+                    continue;
+                }
+                if (v > 1000) v = v / 1000.0;
+                if (v <= 0 || v > 120) continue;
+                boolean hit = false;
+                switch (kind) {
+                    case "cpu": hit = ty.contains("cpu") || ty.contains("apc") || ty.contains("big"); break;
+                    case "gpu": hit = ty.contains("gpu"); break;
+                    case "ddr": hit = ty.contains("ddr"); break;
+                }
+                if (hit) max = Math.max(max, v);
+            }
+        } catch (Exception ignored) {
+        }
+        return max > 0 ? max : fallback;
+    }
+
+    // ==================== 功耗 + 电池（与主页电芯模式同步） ====================
+
+    private void readPower(Snap s) {
+        try {
+            PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
+            if (st != null) {
+                double w = PowerMonitor.applyCellMode(st, cellMode);
+                if (w != 0 && !Double.isInfinite(w)) s.watt = (float) w;
+                if (st.tempC > 0) s.battTempC = st.tempC;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            Intent b = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (b != null) {
+                int lvl = b.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int sc = b.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                if (lvl >= 0 && sc > 0) s.battPct = 100f * lvl / sc;
+                int t = b.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
+                if (t > 0) s.battTempC = t / 10f;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    // ==================== 实时帧率（SF latency 增量差分，照搬旧实现） ====================
+
     private static final String FPS_CMD =
             "f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
                     + "p=$(echo \"$f\" | grep -oE '[A-Za-z0-9_.]+/' | head -1); p=${p%/};"
@@ -228,1574 +706,17 @@ public class MonitorService extends Service {
                     + " [ -n \"$l\" ] && dumpsys SurfaceFlinger --latency \"$l\" 2>/dev/null;"
                     + "fi";
 
-    @Override
-    public IBinder onBind(Intent i) {
-        return null;
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && "stop".equals(intent.getAction())) {
-            stopSelf();
-            return START_NOT_STICKY;
+    private float currentFps() {
+        Float f = realFps();
+        if (f != null && f > 0) {
+            lastGoodHz = f;
+            lastGoodAt = SystemClock.elapsedRealtime();
+            return f;
         }
-        if (intent != null && "show_pill".equals(intent.getAction())) {
-            showPill();   // 通知栏「显示菜单」：恢复监视器菜单胶囊
-            return START_STICKY;
-        }
-        return START_STICKY;
+        return lastGoodAt > 0 ? lastGoodHz : 0f;
     }
 
-    @Override
-    public void onCreate() {
-        super.onCreate();
-        running = true;
-        SharedPreferences p = getSharedPreferences("colorfc", MODE_PRIVATE);
-        cellMode = p.getInt("cellMode", 0);
-        expanded = p.getBoolean("mon_expanded", false);
-        pillHidden = p.getBoolean("mon_pill_hidden", false);
-        locked = false;   // 不再自动锁定位置：每次启动均为可拖动状态（长按锁定仅本次会话内生效）
-        for (int i = 0; i < 5; i++) winOpen[i] = p.getBoolean(MON_KEYS[i], i == M_LOAD);
-        startForeground(1, notif());
-        wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        try {   // 本机最高刷新率：所有显示设备支持模式的峰值
-            float pk = 0;
-            android.hardware.display.DisplayManager dm =
-                    (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
-            for (android.view.Display d : dm.getDisplays()) {
-                for (android.view.Display.Mode m : d.getSupportedModes()) {
-                    pk = Math.max(pk, m.getRefreshRate());
-                }
-            }
-            if (pk > 30) peakHz = pk;
-        } catch (Exception ignored) {
-        }
-        buildListPanel();
-        buildPill();
-        buildLoadWin();
-        buildFpsWin();
-        buildThrWin();
-        buildTempWin();
-        buildPwrWin();
-        for (int i = 0; i < 5; i++) if (winOpen[i]) addWin(i);
-        ui.postDelayed(this::fastLoop, 200);
-        ui.postDelayed(this::slowLoop, 800);
-        ui.postDelayed(this::threadLoop, 600);
-    }
-
-    @Override
-    public void onDestroy() {
-        running = false;
-        ui.removeCallbacksAndMessages(null);
-        if (recording) stopRec(false);
-        for (int i = 0; i < 5; i++) {
-            if (win[i] != null && win[i].getParent() != null) {
-                try {
-                    wm.removeView(win[i]);
-                } catch (Exception ignored) {
-                }
-            }
-        }
-        if (listPanel != null && listPanel.getParent() != null) {
-            try {
-                wm.removeView(listPanel);
-            } catch (Exception ignored) {
-            }
-        }
-        if (pill != null) {
-            try {
-                wm.removeView(pill);
-            } catch (Exception ignored) {
-            }
-        }
-        super.onDestroy();
-    }
-
-    // ==================== 通用 ====================
-
-    private int dp(float v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
-    /** Scene 式悬浮窗背景：深灰半透明（≈83%），无描边无阴影 */
-    private GradientDrawable winBg(int radius) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xD425272C);
-        bg.setCornerRadius(radius);
-        return bg;
-    }
-
-    private WindowManager.LayoutParams overlayLp(int gravity) {
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,   // 可拖到状态栏上
-                PixelFormat.TRANSLUCENT);
-        lp.gravity = gravity;
-        return lp;
-    }
-
-    private TextView mkText(String s, int color, float sizeSp) {
-        TextView tv = new TextView(this);
-        tv.setTextColor(color);
-        tv.setTextSize(sizeSp);
-        tv.setTypeface(Typeface.MONOSPACE);
-        tv.setText(s);
-        return tv;
-    }
-
-    private LinearLayout mkBox(int radius, int padH, int padV) {
-        LinearLayout b = new LinearLayout(this);
-        b.setOrientation(LinearLayout.VERTICAL);
-        b.setBackground(winBg(radius));
-        b.setPadding(dp(padH), dp(padV), dp(padH), dp(padV));
-        return b;
-    }
-
-    private boolean hit(View v, MotionEvent e) {
-        int[] loc = new int[2];
-        v.getLocationOnScreen(loc);
-        return e.getRawX() >= loc[0] && e.getRawX() <= loc[0] + v.getWidth()
-                && e.getRawY() >= loc[1] && e.getRawY() <= loc[1] + v.getHeight();
-    }
-
-    // ==================== 窗口显隐 ====================
-
-    private void addWin(int idx) {
-        try {
-            wm.addView(win[idx], wlp[idx]);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void showWin(int idx) {
-        if (winOpen[idx]) return;
-        winOpen[idx] = true;
-        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                .putBoolean(MON_KEYS[idx], true).apply();
-        addWin(idx);
-        if (idx == M_THR) thrPrev = null;   // 线程基准重建
-        if (idx == M_LOAD) updateUi();
-        syncList();
-    }
-
-    private void hideWin(int idx) {
-        if (!winOpen[idx]) return;
-        winOpen[idx] = false;
-        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                .putBoolean(MON_KEYS[idx], false).apply();
-        try {
-            wm.removeView(win[idx]);
-        } catch (Exception ignored) {
-        }
-        if (idx == M_FPS && recording) stopRec(true);   // 窗口关闭时保存录制
-        if (idx == M_LOAD) {
-            // 负载监视器关闭：CPU 差分基准失效，避免重开后跨周期误算
-            lastIdle = -1;
-            lastTotal = -1;
-            lastCoreIdle = null;
-        }
-        syncList();
-    }
-
-    // ==================== 状态栏药丸（置顶、可拖动、长按锁定） + 功能列表 ====================
-
-    private void buildPill() {
-        pill = new TextView(this);
-        pill.setTypeface(Typeface.MONOSPACE);
-        pill.setTextSize(10);
-        pill.setTextColor(COL_VALUE);
-        pill.setText("监视器 ▾");
-        pill.setBackground(winBg(dp(12)));
-        pill.setPadding(dp(10), dp(3), dp(10), dp(3));
-        // 长按隐藏过的胶囊启动时不再显示（通知栏「显示菜单」恢复）
-        if (!pillHidden) {
-            wm.addView(pill, overlayLp(Gravity.TOP | Gravity.START));
-            pill.post(() -> {
-                try {
-                    WindowManager.LayoutParams p = (WindowManager.LayoutParams) pill.getLayoutParams();
-                    p.x = Math.max(0, (getResources().getDisplayMetrics().widthPixels - pill.getWidth()) / 2);
-                    p.y = dp(2);
-                    wm.updateViewLayout(pill, p);
-                } catch (Exception ignored) {
-                }
-            });
-        }
-        pill.setOnTouchListener(pillTouch);
-    }
-
-    /** 长按胶囊：隐藏监视器菜单（通知栏「显示菜单」恢复） */
-    private void hidePill() {
-        try {
-            wm.removeView(pill);
-        } catch (Exception ignored) {
-        }
-        pillHidden = true;
-        if (listOpen) toggleList();   // 同步收起功能列表
-        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                .putBoolean("mon_pill_hidden", true).apply();
-    }
-
-    /** 通知栏「显示菜单」：恢复胶囊（置顶状态栏居中） */
-    private void showPill() {
-        pillHidden = false;
-        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                .putBoolean("mon_pill_hidden", false).apply();
-        try {
-            if (pill.getParent() == null) {
-                pill.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-                WindowManager.LayoutParams lp = overlayLp(Gravity.TOP | Gravity.START);
-                lp.x = Math.max(0, (getResources().getDisplayMetrics().widthPixels - pill.getMeasuredWidth()) / 2);
-                lp.y = dp(2);
-                wm.addView(pill, lp);
-            }
-        } catch (Exception ignored) {
-        }
-        Toast.makeText(this, "监视器菜单已恢复", Toast.LENGTH_SHORT).show();
-    }
-
-    /** 药丸触摸：可拖动 + 长按隐藏菜单 + 单击展开列表（与其他窗口手势一致） */
-    private final View.OnTouchListener pillTouch = new View.OnTouchListener() {
-        private float sx, sy, dx, dy;
-        private long downAt;
-        private boolean moved, longFired;
-        private final Runnable longRun = new Runnable() {
-            @Override
-            public void run() {
-                if (!moved) {
-                    longFired = true;
-                    hidePill();   // 长按胶囊：隐藏监视器菜单
-                }
-            }
-        };
-
-        @Override
-        public boolean onTouch(View v, MotionEvent e) {
-            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) v.getLayoutParams();
-            switch (e.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    sx = e.getRawX();
-                    sy = e.getRawY();
-                    dx = sx - lp.x;
-                    dy = sy - lp.y;
-                    downAt = System.currentTimeMillis();
-                    moved = false;
-                    longFired = false;
-                    ui.postDelayed(longRun, 500);
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    if (Math.abs(e.getRawX() - sx) > dp(12) || Math.abs(e.getRawY() - sy) > dp(12)) {
-                        moved = true;
-                        ui.removeCallbacks(longRun);
-                    }
-                    if (!locked && !longFired) {
-                        lp.x = (int) (e.getRawX() - dx);
-                        lp.y = (int) (e.getRawY() - dy);
-                        try {
-                            wm.updateViewLayout(v, lp);
-                            if (listOpen) positionList();   // 列表跟随药丸移动
-                        } catch (Exception ignored) {
-                        }
-                    }
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    ui.removeCallbacks(longRun);
-                    if (longFired || moved) return true;
-                    if (System.currentTimeMillis() - downAt < 350) toggleList();
-                    return true;
-            }
-            return false;
-        }
-    };
-
-    private void toggleList() {
-        listOpen = !listOpen;
-        if (listOpen) {
-            syncList();
-            WindowManager.LayoutParams lp = overlayLp(Gravity.TOP | Gravity.START);
-            lp.x = dp(2);
-            lp.y = dp(2);
-            wm.addView(listPanel, lp);
-            positionList();   // 展开在药丸所在位置正下方
-        } else {
-            try {
-                wm.removeView(listPanel);
-            } catch (Exception ignored) {
-            }
-        }
-        pill.setText(listOpen ? "监视器 ▴" : "监视器 ▾");
-    }
-
-    /** 列表位置：药丸正下方（水平居中对齐药丸），越界自动夹回屏幕内 */
-    private void positionList() {
-        try {
-            WindowManager.LayoutParams pl = (WindowManager.LayoutParams) pill.getLayoutParams();
-            listPanel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-            int lw = listPanel.getMeasuredWidth(), lh = listPanel.getMeasuredHeight();
-            int sw = getResources().getDisplayMetrics().widthPixels;
-            int sh = getResources().getDisplayMetrics().heightPixels;
-            int x = pl.x + pill.getWidth() / 2 - lw / 2;
-            if (x + lw > sw - dp(2)) x = sw - dp(2) - lw;
-            if (x < dp(2)) x = dp(2);
-            int y = pl.y + pill.getHeight() + dp(6);
-            if (y + lh > sh - dp(2)) y = Math.max(dp(2), sh - dp(2) - lh);
-            WindowManager.LayoutParams ll = (WindowManager.LayoutParams) listPanel.getLayoutParams();
-            ll.gravity = Gravity.TOP | Gravity.START;
-            ll.x = x;
-            ll.y = y;
-            wm.updateViewLayout(listPanel, ll);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void buildListPanel() {
-        listPanel = mkBox(dp(10), 10, 8);
-        listTitle = mkText("监视器功能", COL_VALUE, 10);
-        listTitle.setPadding(0, 0, 0, dp(2));
-        listPanel.addView(listTitle);
-        for (int i = 0; i < 5; i++) {
-            listRows[i] = mkText("", COL_VALUE, 10);
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            p.topMargin = dp(3);
-            listRows[i].setLayoutParams(p);
-            listPanel.addView(listRows[i]);
-        }
-        listQuit = mkText("关闭监视器", COL_RED, 10);
-        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        qp.topMargin = dp(5);
-        listQuit.setLayoutParams(qp);
-        listPanel.addView(listQuit);
-
-        listPanel.setOnTouchListener((v, e) -> {
-            if (e.getAction() != MotionEvent.ACTION_UP) return true;
-            if (hit(listTitle, e)) {
-                toggleList();
-                return true;
-            }
-            for (int i = 0; i < 5; i++) {
-                if (hit(listRows[i], e)) {
-                    if (winOpen[i]) hideWin(i);
-                    else showWin(i);
-                    return true;
-                }
-            }
-            if (hit(listQuit, e)) stopSelf();
-            return true;
-        });
-        syncList();
-    }
-
-    /** 功能列表状态同步：✓ 开启（纯白）/ ✗ 关闭（暗灰） */
-    private void syncList() {
-        for (int i = 0; i < 5; i++) {
-            String mark = winOpen[i] ? "✓ " : "✗ ";
-            SpannableStringBuilder b = new SpannableStringBuilder();
-            int s = b.length();
-            b.append(mark);
-            b.setSpan(new ForegroundColorSpan(winOpen[i] ? COL_GREEN : 0xFF566373),
-                    s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            s = b.length();
-            b.append(MON_LABELS[i]);
-            b.setSpan(new ForegroundColorSpan(winOpen[i] ? COL_VALUE : COL_DIM),
-                    s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            listRows[i].setText(b);
-        }
-    }
-
-    // ==================== 各监视器窗口构建 ====================
-
-    /** 负载监视器：三圆环 + 密集数据行 + 底部 #PWR 条（FPS 独立，不合并） */
-    private void buildLoadWin() {
-        LinearLayout root = mkBox(dp(14), 10, 8);
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.HORIZONTAL);
-        rings = new RingsView();
-        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        rp.rightMargin = dp(12);
-        body.addView(rings, rp);
-
-        detailBox = new LinearLayout(this);
-        detailBox.setOrientation(LinearLayout.VERTICAL);
-        rowRam = mkText("", COL_VALUE, 10);
-        rowCpu = mkText("", COL_VALUE, 10);
-        clusterBox = new LinearLayout(this);
-        clusterBox.setOrientation(LinearLayout.VERTICAL);
-        rowGpu = mkText("", COL_VALUE, 10);
-        rowBat = mkText("", COL_VALUE, 10);
-        detailBox.addView(rowRam);
-        detailBox.addView(rowCpu);
-        detailBox.addView(clusterBox);
-        detailBox.addView(rowGpu);
-        detailBox.addView(rowBat);
-        body.addView(detailBox);
-        root.addView(body);
-
-        applyExpanded();
-        win[M_LOAD] = root;
-        wlp[M_LOAD] = overlayLp(Gravity.TOP | Gravity.START);
-        wlp[M_LOAD].x = dp(14);
-        wlp[M_LOAD].y = dp(110);
-        root.setOnTouchListener(new WinTouch(M_LOAD));
-    }
-
-    private void applyExpanded() {
-        rings.setVertical(expanded);
-        detailBox.setVisibility(expanded ? View.VISIBLE : View.GONE);
-    }
-
-    private void setExpanded(boolean v) {
-        if (expanded == v) return;
-        expanded = v;
-        getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                .putBoolean("mon_expanded", v).apply();
-        applyExpanded();
-        updateUi();
-    }
-
-    /** 帧率记录器：独立窗口，点击开始/停止录制 */
-    private void buildFpsWin() {
-        LinearLayout root = mkBox(dp(12), 10, 6);
-        fpsText = mkText("#FPS --", COL_VALUE, 11);
-        root.addView(fpsText);
-        win[M_FPS] = root;
-        wlp[M_FPS] = overlayLp(Gravity.TOP | Gravity.START);
-        wlp[M_FPS].x = dp(14);
-        wlp[M_FPS].y = dp(260);
-        root.setOnTouchListener(new WinTouch(M_FPS));
-    }
-
-    /** 线程监视器：前台应用 CPU 占用 TOP6 线程 */
-    private void buildThrWin() {
-        LinearLayout root = mkBox(dp(12), 10, 6);
-        TextView title = mkText("线程 TOP6", COL_LABEL, 9);
-        root.addView(title);
-        for (int i = 0; i < 6; i++) {
-            thrRows[i] = mkText("--", COL_VALUE, 10);
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            p.topMargin = dp(2);
-            thrRows[i].setLayoutParams(p);
-            root.addView(thrRows[i]);
-        }
-        win[M_THR] = root;
-        wlp[M_THR] = overlayLp(Gravity.TOP | Gravity.START);
-        wlp[M_THR].x = dp(14);
-        wlp[M_THR].y = dp(340);
-        root.setOnTouchListener(new WinTouch(M_THR));
-    }
-
-    /** 温度监视器：CPU/SOC/BAT 温度 */
-    private void buildTempWin() {
-        LinearLayout root = mkBox(dp(12), 10, 6);
-        tempText = mkText("--", COL_VALUE, 10);
-        root.addView(tempText);
-        win[M_TEMP] = root;
-        wlp[M_TEMP] = overlayLp(Gravity.TOP | Gravity.START);
-        wlp[M_TEMP].x = dp(14);
-        wlp[M_TEMP].y = dp(420);
-        root.setOnTouchListener(new WinTouch(M_TEMP));
-    }
-
-    /** 功耗监视器：仅显示 数字+W */
-    private void buildPwrWin() {
-        LinearLayout root = mkBox(dp(12), 10, 6);
-        pwrBig = mkText("--W", COL_VALUE, 11);
-        root.addView(pwrBig);
-        win[M_PWR] = root;
-        wlp[M_PWR] = overlayLp(Gravity.TOP | Gravity.START);
-        wlp[M_PWR].x = dp(14);
-        wlp[M_PWR].y = dp(500);
-        root.setOnTouchListener(new WinTouch(M_PWR));
-    }
-
-    // ==================== 窗口触摸：拖动 + 长按锁定 + 各自点击行为 ====================
-
-    /**
-     * 负载监视器：单击 展开/折叠，双击 关闭窗口
-     * 帧率记录器：单击 开始/停止录制
-     * 线程/温度/功耗监视器：单击无动作（关闭走功能列表）
-     * 所有窗口：可拖动（未锁定时），长按 锁定/解锁位置
-     */
-    private class WinTouch implements View.OnTouchListener {
-        private final int idx;
-        private float sx, sy, dx, dy;
-        private long downAt;
-        private boolean moved, longFired;
-        private final Runnable longRun = new Runnable() {
-            @Override
-            public void run() {
-                if (!moved) {
-                    longFired = true;
-                    toggleLock();
-                }
-            }
-        };
-
-        WinTouch(int idx) {
-            this.idx = idx;
-        }
-
-        @Override
-        public boolean onTouch(View v, MotionEvent e) {
-            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) v.getLayoutParams();
-            switch (e.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    sx = e.getRawX();
-                    sy = e.getRawY();
-                    dx = sx - lp.x;
-                    dy = sy - lp.y;
-                    downAt = System.currentTimeMillis();
-                    moved = false;
-                    longFired = false;
-                    ui.postDelayed(longRun, 500);
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    if (Math.abs(e.getRawX() - sx) > dp(12) || Math.abs(e.getRawY() - sy) > dp(12)) {
-                        moved = true;
-                        ui.removeCallbacks(longRun);
-                    }
-                    if (!locked && !longFired) {
-                        lp.x = (int) (e.getRawX() - dx);
-                        lp.y = (int) (e.getRawY() - dy);
-                        try {
-                            wm.updateViewLayout(v, lp);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    ui.removeCallbacks(longRun);
-                    if (longFired || moved) return true;
-                    if (System.currentTimeMillis() - downAt < 350) onTap(e);
-                    return true;
-            }
-            return false;
-        }
-
-        private void onTap(MotionEvent e) {
-            // 所有窗口统一：双击关闭，单击延迟 300ms 执行各自主行为（防止双击误触发）
-            long now = System.currentTimeMillis();
-            if (now - lastTapAt < 300) {
-                lastTapAt = 0;
-                if (pendingTap != null) {
-                    ui.removeCallbacks(pendingTap);
-                    pendingTap = null;
-                }
-                hideWin(idx);
-                return;
-            }
-            lastTapAt = now;
-            pendingTap = () -> {
-                pendingTap = null;
-                switch (idx) {
-                    case M_LOAD:   // 单击展开/折叠
-                        setExpanded(!expanded);
-                        break;
-                    case M_FPS:    // 单击开始/停止录制
-                        toggleRec();
-                        break;
-                    // M_THR / M_TEMP / M_PWR：单击无动作
-                }
-            };
-            ui.postDelayed(pendingTap, 300);
-        }
-    }
-
-    /** 长按切换位置锁定（仅当前会话内生效，重启服务后恢复可拖动） */
-    private void toggleLock() {
-        locked = !locked;
-        Toast.makeText(this, locked ? "位置已锁定 · 再次长按解锁" : "位置已解锁，可自由拖动",
-                Toast.LENGTH_SHORT).show();
-        // 解锁任意窗口时，若菜单胶囊处于隐藏状态则自动恢复
-        if (!locked && pillHidden) {
-            showPill();
-        }
-    }
-
-    // ==================== Scene 款三圆环（CPU/GPU/电池） ====================
-
-    private class RingsView extends View {
-        RingsView() {
-            super(MonitorService.this);
-        }
-
-        private boolean vertical = false;
-        private float pC, pG, pB;
-        private String iC = "--", iG = "--", iB = "--";
-        private String sC = "--", sG = "--", sB = "--";
-        private final RectF rect = new RectF();
-
-        void setVertical(boolean v) {
-            vertical = v;
-            requestLayout();
-        }
-
-        void data(float c, String ic, String sc,
-                  float g, String ig, String sg,
-                  float b, String ib, String sb) {
-            pC = c; iC = ic; sC = sc;
-            pG = g; iG = ig; sG = sg;
-            pB = b; iB = ib; sB = sb;
-            invalidate();
-        }
-
-        @Override
-        protected void onMeasure(int wms, int hms) {
-            int d = dp(34), gap = dp(12), lab = dp(13);
-            if (vertical) {
-                setMeasuredDimension(d, 3 * (d + lab) + 2 * dp(8));
-            } else {
-                setMeasuredDimension(3 * d + 2 * gap, d + lab);
-            }
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            int d = dp(34), lab = dp(13), gap = dp(12);
-            float stroke = dp(3);
-            float r = d / 2f - stroke / 2;
-
-            Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
-            track.setStyle(Paint.Style.STROKE);
-            track.setStrokeWidth(stroke);
-            track.setStrokeCap(Paint.Cap.ROUND);
-            track.setColor(0x26FFFFFF);
-
-            Paint prog = new Paint(track);
-
-            Paint inside = new Paint(Paint.ANTI_ALIAS_FLAG);
-            inside.setColor(COL_VALUE);
-            inside.setTextSize(dp(8));
-            inside.setTextAlign(Paint.Align.CENTER);
-
-            Paint sub = new Paint(Paint.ANTI_ALIAS_FLAG);
-            sub.setColor(0xFFB0B8C4);
-            sub.setTextSize(dp(8.5f));
-            sub.setTextAlign(Paint.Align.CENTER);
-
-            float[] pcts = {pC, pG, pB};
-            int[] cols = {COL_GREEN, COL_GREEN, pB <= 25 ? COL_ORANGE : COL_GREEN};
-            String[] ins = {iC, iG, iB};
-            String[] subs = {sC, sG, sB};
-
-            for (int i = 0; i < 3; i++) {
-                float cx = vertical ? d / 2f : d / 2f + i * (d + gap);
-                float cy = vertical ? d / 2f + i * (d + lab + dp(8)) : d / 2f;
-                float top = vertical ? i * (d + lab + dp(8)) : 0;
-                rect.set(cx - r, cy - r, cx + r, cy + r);
-                c.drawArc(rect, 0, 360, false, track);
-                prog.setColor(cols[i]);
-                float p = Math.max(0, Math.min(100, pcts[i]));
-                if (p > 0.5f) c.drawArc(rect, -90, 3.6f * p, false, prog);
-                c.drawText(ins[i], cx, cy + dp(3), inside);
-                c.drawText(subs[i], cx, top + d + dp(10), sub);
-            }
-        }
-    }
-
-    // ==================== 界面刷新 ====================
-
-    /** "标签 数值" 两段式行：浅灰标签 + 着色数值 */
-    private void setRow(TextView tv, String label, String value, int valueColor) {
-        SpannableStringBuilder b = new SpannableStringBuilder();
-        int s = b.length();
-        b.append(label);
-        b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        b.append(' ');
-        s = b.length();
-        b.append(value);
-        b.setSpan(new ForegroundColorSpan(valueColor), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        tv.setText(b);
-    }
-
-    private void updateUi() {
-        // 负载监视器
-        if (winOpen[M_LOAD]) {
-            float cpuP = cBusy >= 0 ? (float) cBusy : 0;
-            float gpuP = gpuLoad >= 0 ? gpuLoad
-                    : (gpuMax > 0 && cGpuM > 0 ? (float) Math.min(100, 100 * cGpuM / gpuMax) : 0);
-            float batP = batPct >= 0 ? batPct : 0;
-            rings.data(
-                    cpuP, String.format(Locale.US, "%.0f", cpuP),
-                    cCpuM > 0 ? String.format(Locale.US, "%.0fMHz", cCpuM) : "--",
-                    gpuP, String.format(Locale.US, "%.0f", gpuP),
-                    cGpuM > 0 ? String.format(Locale.US, "%.0fMHz", cGpuM) : "--",
-                    batP, String.format(Locale.US, "%.0f%%", batP),
-                    cBatT > 0 ? String.format(Locale.US, "%.1f℃", cBatT) : "--");
-            if (expanded) {
-                ensureClusterRows();
-                setRow(rowRam, "#RAM", ramPct >= 0
-                        ? String.format(Locale.US, "%.0f%% · %.1fG", ramPct, ramUsedG) : "--", COL_VALUE);
-                setRow(rowCpu, "#CPU", (coreTotal > 0
-                        ? String.format(Locale.US, "%d/%d核 · ", coreOnline, coreTotal) : "")
-                        + (cCpuT > 0 ? String.format(Locale.US, "%.1f℃", cCpuT) : "--"), tColor(cCpuT));
-                TextView[] rows = clusterRows();
-                for (int i = 0; i < nCluster && i < rows.length; i++) {
-                    setRow(rows[i], "#" + clLbl[i],
-                            String.format(Locale.US, "%.0fMHz · %.0f%%", clFreq[i], clBusy[i]), COL_VALUE);
-                }
-                setRow(rowGpu, "#GPU", gpuLoad >= 0
-                        ? String.format(Locale.US, "%.0fMHz · %.0f%%", cGpuM, gpuLoad)
-                        : String.format(Locale.US, "%.0fMHz", cGpuM), COL_VALUE);
-                setRow(rowBat, "#BAT", batPct >= 0
-                        ? String.format(Locale.US, "%.0f%% · %.1f℃", batPct, cBatT) : "--", tColor(cBatT));
-            }
-        }
-
-        // 功耗监视器：仅 数字+W
-        if (winOpen[M_PWR]) {
-            pwrBig.setText(cW >= 0 ? String.format(Locale.US, "%.2fW", cW) : "--W");
-        }
-
-        // 帧率记录器
-        if (winOpen[M_FPS]) {
-            SpannableStringBuilder b = new SpannableStringBuilder();
-            if (recording) {
-                int s = b.length();
-                b.append(String.format(Locale.US, "● %02d:%02d",
-                        recShown / 60000, (recShown / 1000) % 60));
-                b.setSpan(new ForegroundColorSpan(COL_RED), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                s = b.length();
-                b.append(String.format(Locale.US, " %.1ffps", cHz > 0 ? cHz : 0));
-                b.setSpan(new ForegroundColorSpan(COL_VALUE), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            } else {
-                int s = b.length();
-                b.append("#FPS");
-                b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                b.append(' ');
-                s = b.length();
-                b.append(cHz > 0 ? String.format(Locale.US, "%.1f", cHz) : "--");
-                b.setSpan(new ForegroundColorSpan(COL_VALUE), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            fpsText.setText(b);
-        }
-
-        // 温度监视器
-        if (winOpen[M_TEMP]) {
-            SpannableStringBuilder b = new SpannableStringBuilder();
-            appendTemp(b, "CPU", cCpuT);
-            b.append("  ");
-            appendTemp(b, "SOC", cSocT);
-            b.append("  ");
-            appendTemp(b, "BAT", cBatT);
-            tempText.setText(b);
-        }
-    }
-
-    private void appendTemp(SpannableStringBuilder b, String label, double v) {
-        int s = b.length();
-        b.append(label);
-        b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        b.append(' ');
-        s = b.length();
-        b.append(v > 0 ? String.format(Locale.US, "%.1f℃", v) : "--");
-        b.setSpan(new ForegroundColorSpan(tColor(v)), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-    }
-
-    /** 温度着色：≥75 红 ≥60 橙 其余 Scene 纯白 */
-    private static int tColor(double t) {
-        return t >= 75 ? COL_RED : t >= 60 ? 0xFFF59E0B : COL_VALUE;
-    }
-
-    private TextView[] clusterRows() {
-        int n = clusterBox.getChildCount();
-        TextView[] out = new TextView[n];
-        for (int i = 0; i < n; i++) out[i] = (TextView) clusterBox.getChildAt(i);
-        return out;
-    }
-
-    /** 集群行按需创建（集群数量在首次慢速扫描后确定） */
-    private void ensureClusterRows() {
-        if (rowsBuilt == nCluster || nCluster <= 0) return;
-        clusterBox.removeAllViews();
-        for (int i = 0; i < nCluster && i < MAX_CL; i++) {
-            TextView tv = mkText("--", COL_VALUE, 10);
-            clusterBox.addView(tv);
-        }
-        rowsBuilt = nCluster;
-    }
-
-    // ==================== 快速循环（500ms：功耗/电量/CPU/帧率） ====================
-
-    private void fastLoop() {
-        new Thread(() -> {
-            try {
-                PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
-                if (st != null) {
-                    // 与主页一致的电芯模式修正（显示与记录同步）
-                    cW = PowerMonitor.applyCellMode(st, cellMode);
-                    cV = st.volts;
-                    cA = st.amps;
-                    cBatT = st.tempC;
-                    st.watts = cW;
-                    PowerHistoryManager.record(this, st);
-                } else {
-                    cW = -1;
-                    cV = -1;
-                    cA = -1;
-                }
-            } catch (Exception ignored) {
-            }
-            readBattery();
-            if (winOpen[M_LOAD]) {
-                cBusy = readCpuBusy();
-                aggClusters(readCores());
-            }
-            if (winOpen[M_FPS] || recording) cHz = currentFps();
-            ui.post(this::updateUi);
-            ui.postDelayed(this::fastLoop, 500);
-        }).start();
-    }
-
-    /** 电量 %：ACTION_BATTERY_CHANGED 粘性广播（免 root） */
-    private void readBattery() {
-        try {
-            Intent b = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-            if (b != null) {
-                int lvl = b.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-                int sc = b.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-                if (lvl >= 0 && sc > 0) batPct = 100f * lvl / sc;
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    /** 按集群聚合每核心占用 % */
-    private void aggClusters(float[] coreBusy) {
-        if (coreBusy == null) return;
-        if (clMap == null || nCluster <= 0) {
-            float sum = 0;
-            for (float v : coreBusy) sum += v;
-            clBusy[0] = coreBusy.length > 0 ? sum / coreBusy.length : 0;
-            return;
-        }
-        for (int c = 0; c < nCluster && c < clMap.length; c++) {
-            float sum = 0;
-            int n = 0;
-            for (int core : clMap[c]) {
-                if (core >= 0 && core < coreBusy.length) {
-                    sum += coreBusy[core];
-                    n++;
-                }
-            }
-            clBusy[c] = n > 0 ? sum / n : 0;
-        }
-    }
-
-    // ==================== 慢速循环（2s：GPU/CPU 集群/温度/RAM） ====================
-
-    private void slowLoop() {
-        new Thread(() -> {
-            if (winOpen[M_LOAD] || winOpen[M_TEMP]) {
-                String out = "";
-                try {
-                    RootShell.Result r = RootShell.exec(SCAN);
-                    if (r.ok() && r.out != null) out = r.out;
-                } catch (Exception ignored) {
-                }
-                int q = 0;
-                for (String line : out.split("\\n")) {
-                    if (line.startsWith("G:")) {
-                        double g = parseGpu(line);
-                        cGpuM = g > 0 ? g / 1e6 : 0;
-                    } else if (line.startsWith("GL:")) {
-                        gpuLoad = parseGpuLoad(line);
-                    } else if (line.startsWith("GM:")) {
-                        double m = parseGpuMax(line);
-                        if (m > 0) gpuMax = m;
-                    } else if (line.startsWith("Q:")) {
-                        try {
-                            double f = Double.parseDouble(line.substring(2).trim());
-                            if (q < MAX_CL) clFreq[q] = f / 1000;   // kHz → MHz
-                        } catch (Exception ignored) {
-                        }
-                        q++;
-                    } else if (line.startsWith("R:") && clMap == null) {
-                        buildClusterMap(line.substring(2));
-                    } else if (line.startsWith("N:")) {
-                        // 核心在线状态（照搬 Kin-app：cpuN 无 online 节点按在线算）
-                        int total = 0, on = 0;
-                        for (String t : line.substring(2).trim().split("\\s+")) {
-                            if (t.isEmpty()) continue;
-                            total++;
-                            if (!"0".equals(t)) on++;
-                        }
-                        if (total > 0) {
-                            coreOnline = on;
-                            coreTotal = total;
-                        }
-                    }
-                }
-                if (nCluster <= 0) nCluster = Math.min(MAX_CL, Math.max(1, q));
-                double max = 0;
-                for (int i = 0; i < nCluster; i++) max = Math.max(max, clFreq[i]);
-                cCpuM = max;
-                double cpuT = parseZoneTemp(out, "cpu", cBatT);
-                cCpuT = cpuT;
-                cSocT = parseZoneTemp(out, "soc", cpuT);
-                readMem();
-            }
-            ui.post(this::updateUi);
-            ui.postDelayed(this::slowLoop, 2000);
-        }).start();
-    }
-
-    /** R 行解析：related_cpu 拓扑 → 集群映射与标签（如 0-3 / 4-7） */
-    private void buildClusterMap(String r) {
-        try {
-            List<int[]> map = new ArrayList<>();
-            List<String> lbl = new ArrayList<>();
-            for (String seg : r.split(";")) {
-                seg = seg.trim();
-                if (seg.isEmpty()) continue;
-                String[] cs = seg.split("\\s+");
-                int[] cores = new int[cs.length];
-                for (int i = 0; i < cs.length; i++) cores[i] = Integer.parseInt(cs[i].trim());
-                if (cores.length == 0) continue;
-                map.add(cores);
-                lbl.add(cores[0] + "-" + cores[cores.length - 1]);
-                if (map.size() >= MAX_CL) break;
-            }
-            if (!map.isEmpty()) {
-                clMap = map.toArray(new int[0][]);
-                for (int i = 0; i < clMap.length; i++) clLbl[i] = lbl.get(i);
-                nCluster = clMap.length;
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    /** /proc/meminfo → 已用百分比 + 已用 GB */
-    private void readMem() {
-        try (BufferedReader r = new BufferedReader(new FileReader("/proc/meminfo"))) {
-            long total = -1, avail = -1;
-            String l;
-            while ((l = r.readLine()) != null) {
-                if (total < 0 && l.startsWith("MemTotal:")) {
-                    total = Long.parseLong(l.split("\\s+")[1]);
-                } else if (avail < 0 && l.startsWith("MemAvailable:")) {
-                    avail = Long.parseLong(l.split("\\s+")[1]);
-                } else if (total >= 0 && avail >= 0) break;
-            }
-            if (total > 0 && avail >= 0) {
-                ramPct = 100f * (total - avail) / total;
-                ramUsedG = (total - avail) / 1048576f;
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    // ==================== 线程监视器循环（250ms 实时） ====================
-
-    private void threadLoop() {
-        new Thread(() -> {
-            if (winOpen[M_THR]) sampleThreads();
-            ui.postDelayed(this::threadLoop, 250);
-        }).start();
-    }
-
-    /** 前台应用线程 CPU 占用：pid 缓存 + 单次 awk 全量读取（250ms 实时差分） */
-    private void sampleThreads() {
-        try {
-            long now = SystemClock.elapsedRealtime();
-            if (thrPid <= 0 || now - thrPidAt > 4000) {   // 前台 pid 每 4 秒解析一次（切换应用自动跟随）
-                String rs = "f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
-                        + "p=$(echo \"$f\" | grep -oE '[A-Za-z0-9_.]+/' | head -1); p=${p%/};"
-                        + "echo \"K:$(getconf CLK_TCK 2>/dev/null)\";"
-                        + "pid=$(pidof \"$p\" 2>/dev/null | cut -d' ' -f1); echo \"I:$pid\";";
-                RootShell.Result r0 = RootShell.exec(rs, 8);
-                if (r0.ok() && r0.out != null) {
-                    for (String line : r0.out.split("\\n")) {
-                        String t = line.trim();
-                        if (t.startsWith("K:")) {
-                            try {
-                                double k = Double.parseDouble(t.substring(2).trim());
-                                if (k > 0) thrTck = k;
-                            } catch (Exception ignored) {
-                            }
-                        } else if (t.startsWith("I:")) {
-                            try {
-                                thrPid = Integer.parseInt(t.substring(2).trim());
-                            } catch (Exception ignored) {
-                                thrPid = 0;
-                            }
-                        }
-                    }
-                }
-                thrPidAt = now;
-                if (thrPid <= 0) return;   // 拿不到 pid：保持上一次显示
-            }
-            String cmd = "if [ -d /proc/" + thrPid + " ]; then echo TZQ7_;"
-                    + " awk '{n=split(FILENAME,a,\"/\"); print a[n-1] \" \" $14+$15}' /proc/" + thrPid + "/task/*/stat 2>/dev/null;"
-                    + " echo NZQ7_; cat /proc/" + thrPid + "/task/*/comm 2>/dev/null; echo EZQ7_;"
-                    + " else echo DEADZQ7_; fi";
-            RootShell.Result r = RootShell.exec(cmd, 4);
-            if (!r.ok() || r.out == null) return;
-            long now2 = SystemClock.elapsedRealtime();
-            Map<Integer, long[]> cur = new HashMap<>();
-            List<Integer> order = new ArrayList<>();   // stat 输出顺序（升序 tid）
-            List<String> names = new ArrayList<>();    // comm 输出顺序（与 stat 同 glob 序）
-            int mode = 0;   // 0 头 / 1 stat / 2 comm
-            for (String line : r.out.split("\\n")) {
-                if (line.equals("TZQ7_")) { mode = 1; continue; }
-                if (line.equals("NZQ7_")) { mode = 2; continue; }
-                if (line.equals("EZQ7_")) break;
-                if (line.equals("DEADZQ7_")) { thrPid = 0; return; }
-                if (mode == 1) {
-                    int sp = line.indexOf(' ');
-                    if (sp <= 0) continue;
-                    try {
-                        int tid = Integer.parseInt(line.substring(0, sp).trim());
-                        long u = Long.parseLong(line.substring(sp + 1).trim());
-                        cur.put(tid, new long[]{u});
-                        order.add(tid);
-                    } catch (Exception ignored) {
-                    }
-                } else if (mode == 2) {
-                    String nm = line.trim();
-                    names.add(nm.isEmpty() ? "?" : nm);
-                }
-            }
-            if (cur.isEmpty()) return;
-            // 名称按输出顺序与 tid 对位（仅展示用）
-            Map<Integer, String> nmOf = new HashMap<>();
-            for (int i = 0; i < order.size() && i < names.size(); i++) nmOf.put(order.get(i), names.get(i));
-            if (thrPrev != null && now2 > thrLastAt) {
-                double dt = (now2 - thrLastAt) / 1000.0;
-                List<double[]> top = new ArrayList<>();   // {pct, tid}
-                // 逐线程差分：同 tid 对位，按真实采样间隔折算占用率
-                for (Map.Entry<Integer, long[]> en : cur.entrySet()) {
-                    long[] prev = thrPrev.get(en.getKey());
-                    if (prev == null) continue;
-                    long d = en.getValue()[0] - prev[0];
-                    if (d <= 0) continue;
-                    double pct = Math.min(999, d / thrTck / dt * 100);
-                    top.add(new double[]{pct, en.getKey()});
-                }
-                top.sort(Comparator.comparingDouble(a -> -a[0]));
-                List<double[]> pick = top.subList(0, Math.min(6, top.size()));
-                final String[] txt = new String[6];
-                for (int i = 0; i < 6; i++) {
-                    if (i < pick.size()) {
-                        double pct = pick.get(i)[0];
-                        String nm = nmOf.get((int) pick.get(i)[1]);
-                        if (nm == null) nm = "?";
-                        if (nm.length() > 14) nm = nm.substring(0, 14);
-                        txt[i] = String.format(Locale.US, "%s %.0f%%", nm, pct);
-                    } else txt[i] = null;
-                }
-                ui.post(() -> {
-                    for (int i = 0; i < 6; i++) {
-                        if (txt[i] == null) continue;   // 无增量数据：保持上一次显示，不回落 "--"
-                        {
-                            int sp = txt[i].lastIndexOf(' ');
-                            SpannableStringBuilder b = new SpannableStringBuilder();
-                            int s = b.length();
-                            b.append(txt[i].substring(0, sp));
-                            b.setSpan(new ForegroundColorSpan(COL_LABEL), s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                            b.append(' ');
-                            s = b.length();
-                            b.append(txt[i].substring(sp + 1));
-                            double pct = Double.parseDouble(txt[i].substring(sp + 1).replace("%", ""));
-                            b.setSpan(new ForegroundColorSpan(
-                                            pct >= 80 ? COL_RED : pct >= 50 ? 0xFFF59E0B : COL_VALUE),
-                                    s, b.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                            thrRows[i].setText(b);
-                        }
-                    }
-                });
-            }
-            thrPrev = cur;
-            thrLastAt = now2;
-        } catch (Exception ignored) {
-        }
-    }
-
-    // ==================== 帧率录制（500ms，最短 3 秒） ====================
-
-    private void toggleRec() {
-        if (!recording) {
-            recording = true;
-            recStart = System.currentTimeMillis();
-            recShown = 0;
-            ts.clear();
-            fps.clear();
-            cpuTot.clear();
-            cores.clear();
-            recLastIdle = -1;
-            recLastTotal = -1;
-            lastCoreIdle = null;
-            Toast.makeText(this, "开始录制（至少 3 秒），再次点击停止并保存", Toast.LENGTH_SHORT).show();
-            recSample();
-        } else {
-            stopRec(true);
-        }
-    }
-
-    private void stopRec(boolean toast) {
-        recording = false;
-        long dur = System.currentTimeMillis() - recStart;
-        int n = ts.size();
-        if (dur < MIN_REC_MS || n < 4) {
-            if (toast) Toast.makeText(this, "录制不足 3 秒，未保存", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (toast) Toast.makeText(this, "录制完成，正在生成曲线图…", Toast.LENGTH_SHORT).show();
-        final int fn = n;
-        new Thread(() -> saveChart(fn)).start();
-    }
-
-    private void recSample() {
-        if (!recording) return;
-        new Thread(() -> {
-            float hz = currentFps();
-            Double busy = recCpuTotal();
-            float[] coreBusy = readCores();
-            if (!recording) return;
-            long now = System.currentTimeMillis();
-            if (busy != null && coreBusy != null) {
-                ts.add(now - recStart);
-                fps.add(hz);
-                cpuTot.add(busy.floatValue());
-                cores.add(coreBusy);
-            }
-            cHz = hz;
-            recShown = now - recStart;
-            ui.post(this::updateUi);
-            ui.postDelayed(this::recSample, 500);
-        }).start();
-    }
-
-    /** /proc/stat 总行差分（录制专用基准）→ CPU 总占用 % */
-    private Double recCpuTotal() {
-        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
-            String l = r.readLine();
-            if (l == null || !l.startsWith("cpu ")) return null;
-            String[] p = l.split("\\s+");
-            long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
-            long total = 0;
-            for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
-            if (recLastIdle >= 0 && total > recLastTotal) {
-                double busy = 100.0 * (total - recLastTotal - (idle - recLastIdle)) / (total - recLastTotal);
-                recLastIdle = idle;
-                recLastTotal = total;
-                return Math.max(0, Math.min(100, busy));
-            }
-            recLastIdle = idle;
-            recLastTotal = total;
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    /** /proc/stat cpu0..cpuN 差分 → 每核心占用 % */
-    private float[] readCores() {
-        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
-            List<long[]> cur = new ArrayList<>();
-            String line;
-            while ((line = r.readLine()) != null) {
-                if (!line.startsWith("cpu") || line.startsWith("cpu ")) continue;
-                String[] p = line.split("\\s+");
-                long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
-                long total = 0;
-                for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
-                cur.add(new long[]{idle, total});
-            }
-            int n = cur.size();
-            coreCount = Math.max(coreCount, n);
-            if (n == 0) return null;
-            if (lastCoreIdle == null || lastCoreIdle.length != n) {
-                lastCoreIdle = new long[n];
-                lastCoreTotal = new long[n];
-                for (int i = 0; i < n; i++) {
-                    lastCoreIdle[i] = cur.get(i)[0];
-                    lastCoreTotal[i] = cur.get(i)[1];
-                }
-                return null;
-            }
-            float[] out = new float[n];
-            for (int i = 0; i < n; i++) {
-                long di = cur.get(i)[0] - lastCoreIdle[i];
-                long dt = cur.get(i)[1] - lastCoreTotal[i];
-                out[i] = dt > 0 ? (float) Math.max(0, Math.min(100, 100.0 * (dt - di) / dt)) : 0;
-                lastCoreIdle[i] = cur.get(i)[0];
-                lastCoreTotal[i] = cur.get(i)[1];
-            }
-            return out;
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    // ==================== 曲线图渲染与保存 ====================
-
-    private void saveChart(int n) {
-        try {
-            Bitmap bmp = renderChart(n);
-            String name = "rec_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-                    .format(new Date(recStart)) + ".png";
-            String[] res = writePng(bmp, name);
-            if (res != null) {
-                long dur = ts.get(n - 1);
-                FrameRecordStore.add(this, recStart, dur, n, coreCount, fps, cpuTot, res[1], name);
-                final String msg = "已保存: " + res[0];
-                ui.post(() -> Toast.makeText(MonitorService.this, msg, Toast.LENGTH_LONG).show());
-            } else {
-                ui.post(() -> Toast.makeText(MonitorService.this, "保存失败", Toast.LENGTH_LONG).show());
-            }
-        } catch (Exception e) {
-            ui.post(() -> Toast.makeText(MonitorService.this,
-                    "保存失败: " + e, Toast.LENGTH_LONG).show());
-        }
-    }
-
-    /** @return {展示路径, 读取引用(content uri 或绝对路径)}，失败 null */
-    private String[] writePng(Bitmap bmp, String name) {
-        try {
-            if (Build.VERSION.SDK_INT >= 29) {
-                ContentValues v = new ContentValues();
-                v.put(MediaStore.Images.Media.DISPLAY_NAME, name);
-                v.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
-                v.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ColorFC");
-                Uri uri = getContentResolver()
-                        .insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
-                if (uri != null) {
-                    try (OutputStream os = getContentResolver().openOutputStream(uri)) {
-                        bmp.compress(Bitmap.CompressFormat.PNG, 100, os);
-                    }
-                    return new String[]{"Pictures/ColorFC/" + name, uri.toString()};
-                }
-            } else {
-                File dir = new File(Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_PICTURES), "ColorFC");
-                if (dir.isDirectory() || dir.mkdirs()) {
-                    File f = new File(dir, name);
-                    try (FileOutputStream fo = new FileOutputStream(f)) {
-                        bmp.compress(Bitmap.CompressFormat.PNG, 100, fo);
-                    }
-                    return new String[]{f.getAbsolutePath(), f.getAbsolutePath()};
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        // 兜底：应用外部私有目录
-        try {
-            File dir = new File(getExternalFilesDir(null), "ColorFC");
-            if (dir.isDirectory() || dir.mkdirs()) {
-                File f = new File(dir, name);
-                try (FileOutputStream fo = new FileOutputStream(f)) {
-                    bmp.compress(Bitmap.CompressFormat.PNG, 100, fo);
-                }
-                return new String[]{f.getAbsolutePath(), f.getAbsolutePath()};
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    private Bitmap renderChart(int n) {
-        int W = 1080, H = 1750;
-        Bitmap bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(bmp);
-        c.drawColor(0xFF0D1520);
-
-        Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);   // 标题
-        tp.setColor(0xFFE6EDF3);
-        tp.setTextSize(40);
-        tp.setTypeface(Typeface.DEFAULT_BOLD);
-        Paint sp = new Paint(Paint.ANTI_ALIAS_FLAG);   // 副文字
-        sp.setColor(0xFF8B949E);
-        sp.setTextSize(26);
-        Paint hp = new Paint(Paint.ANTI_ALIAS_FLAG);   // 小标题
-        hp.setColor(0xFF00E5FF);
-        hp.setTextSize(30);
-        hp.setTypeface(Typeface.DEFAULT_BOLD);
-
-        // ===== 标题区 =====
-        long dur = ts.get(n - 1);
-        SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
-        c.drawText("帧率录制报告", 40, 66, tp);
-        c.drawText(String.format(Locale.US, "%s ｜ 时长 %d:%02d ｜ 采样 %d 条",
-                df.format(new Date(recStart)), dur / 60000, (dur / 1000) % 60, n), 40, 108, sp);
-
-        float x0 = 40, w = W - 80;
-
-        // ===== 图1: 屏幕帧率 =====
-        float y1 = 150;
-        c.drawText("实时帧率 (fps)", x0, y1 + 34, hp);
-        c.drawText(fpsStats(), x0, y1 + 70, sp);
-        drawSeries(c, x0, y1 + 90, w, 300,
-                new float[][]{toFloat(fps)}, new int[]{0xFF00E5FF},
-                niceMax(maxOf(fps, 120)));
-
-        // ===== 图2: CPU 总占用 =====
-        float y2 = y1 + 90 + 300 + 70;
-        c.drawText("CPU 实时使用率 (%)", x0, y2 + 34, hp);
-        c.drawText(cpuStats(), x0, y2 + 70, sp);
-        drawSeries(c, x0, y2 + 90, w, 300,
-                new float[][]{toFloat(cpuTot)}, new int[]{0xFFF59E0B}, 100);
-
-        // ===== 图3: 各核心负载 =====
-        float y3 = y2 + 90 + 300 + 70;
-        int cc = Math.min(coreCount, 8);
-        c.drawText("CPU 线程负载 (%)", x0, y3 + 34, hp);
-        StringBuilder legend = new StringBuilder();
-        float[][] series = new float[cc][];
-        int[] colors = new int[cc];
-        for (int k = 0; k < cc; k++) {
-            series[k] = coreSeries(k);
-            colors[k] = CORE_COLORS[k % CORE_COLORS.length];
-            if (k > 0) legend.append("  ");
-            legend.append("C").append(k);
-        }
-        c.drawText(legend.toString(), x0, y3 + 70, sp);
-        drawSeries(c, x0, y3 + 90, w, 420, series, colors, 100);
-
-        return bmp;
-    }
-
-    private String fpsStats() {
-        float min = Float.MAX_VALUE, max = 0, sum = 0;
-        for (float v : fps) {
-            if (v > 0) {
-                min = Math.min(min, v);
-                max = Math.max(max, v);
-                sum += v;
-            }
-        }
-        int cnt = fps.size();
-        return String.format(Locale.US, "平均 %.1f ｜ 最低 %.0f ｜ 最高 %.0f",
-                cnt > 0 ? sum / cnt : 0, min == Float.MAX_VALUE ? 0 : min, max);
-    }
-
-    private String cpuStats() {
-        float max = 0, sum = 0;
-        for (float v : cpuTot) {
-            max = Math.max(max, v);
-            sum += v;
-        }
-        int cnt = cpuTot.size();
-        return String.format(Locale.US, "平均 %.1f%% ｜ 峰值 %.1f%%",
-                cnt > 0 ? sum / cnt : 0, max);
-    }
-
-    private float[] toFloat(ArrayList<Float> list) {
-        float[] a = new float[list.size()];
-        for (int i = 0; i < a.length; i++) a[i] = list.get(i);
-        return a;
-    }
-
-    private float maxOf(ArrayList<Float> list, float def) {
-        float m = 0;
-        for (float v : list) m = Math.max(m, v);
-        return m > 0 ? m : def;
-    }
-
-    private float niceMax(float v) {
-        if (v <= 30) return 30;
-        if (v <= 60) return 60;
-        if (v <= 90) return 90;
-        if (v <= 120) return 120;
-        if (v <= 144) return 144;
-        return (float) (Math.ceil(v / 60.0) * 60);
-    }
-
-    /** 取第 k 核心的序列 */
-    private float[] coreSeries(int k) {
-        float[] a = new float[cores.size()];
-        for (int i = 0; i < cores.size(); i++) {
-            float[] s = cores.get(i);
-            a[i] = k < s.length ? s[k] : 0;
-        }
-        return a;
-    }
-
-    /** 绘制曲线组：网格 + Y轴刻度 + 多条折线 */
-    private void drawSeries(Canvas c, float x, float y, float w, float h,
-                            float[][] series, int[] colors, float vmax) {
-        Paint grid = new Paint(Paint.ANTI_ALIAS_FLAG);
-        grid.setColor(0x1AFFFFFF);
-        grid.setStrokeWidth(1);
-        Paint axis = new Paint(Paint.ANTI_ALIAS_FLAG);
-        axis.setColor(0xFF303D4D);
-        axis.setStrokeWidth(2);
-        Paint lab = new Paint(Paint.ANTI_ALIAS_FLAG);
-        lab.setColor(0xFF6B7785);
-        lab.setTextSize(22);
-
-        // 背景板
-        Paint panel = new Paint(Paint.ANTI_ALIAS_FLAG);
-        panel.setColor(0xFF111C28);
-        c.drawRoundRect(x - 16, y - 12, x + w + 16, y + h + 16, 14, 14, panel);
-
-        // 水平网格 + Y 刻度
-        for (int i = 0; i <= 4; i++) {
-            float gy = y + h * i / 4f;
-            c.drawLine(x, gy, x + w, gy, grid);
-            c.drawText(String.format(Locale.US, "%.0f", vmax * (4 - i) / 4f),
-                    x + 6, gy - 5, lab);
-        }
-        // 垂直网格
-        for (int i = 1; i < 6; i++) {
-            float gx = x + w * i / 6f;
-            c.drawLine(gx, y, gx, y + h, grid);
-        }
-        // 边框
-        c.drawLine(x, y, x + w, y, axis);
-        c.drawLine(x, y + h, x + w, y + h, axis);
-        c.drawLine(x, y, x, y + h, axis);
-        c.drawLine(x + w, y, x + w, y + h, axis);
-
-        if (series.length == 0 || series[0].length < 2) return;
-
-        // X 轴时间刻度
-        long total = ts.get(ts.size() - 1);
-        for (int i = 0; i <= 3; i++) {
-            long t = total * i / 3;
-            String s = t >= 60000 ? String.format(Locale.US, "%dm", t / 60000)
-                    : String.format(Locale.US, "%ds", t / 1000);
-            float tx = x + w * i / 3f;
-            c.drawText(s, Math.min(tx + 4, x + w - 40), y + h + 44, lab);
-        }
-
-        // 折线
-        for (int k = 0; k < series.length; k++) {
-            float[] d = series[k];
-            int n = d.length;
-            if (n < 2) continue;
-            Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
-            line.setColor(colors[k]);
-            line.setStyle(Paint.Style.STROKE);
-            line.setStrokeWidth(4);
-            Path path = new Path();
-            for (int i = 0; i < n; i++) {
-                float px = x + w * i / (float) (n - 1);
-                float py = y + h - (float) (Math.max(0, Math.min(vmax, d[i])) / vmax) * h;
-                if (i == 0) path.moveTo(px, py);
-                else path.lineTo(px, py);
-            }
-            c.drawPath(path, line);
-        }
-    }
-
-    // ==================== 常规解析工具 ====================
-
-    /** /proc/stat 首行差分 → CPU 总占用 %（快速循环） */
-    private double readCpuBusy() {
-        try {
-            BufferedReader r = new BufferedReader(new FileReader("/proc/stat"));
-            String l = r.readLine();
-            r.close();
-            if (l == null || !l.startsWith("cpu ")) return -1;
-            String[] p = l.split("\\s+");
-            long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
-            long total = 0;
-            for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
-            if (lastIdle >= 0 && total > lastTotal) {
-                double busy = 100.0 * (total - lastTotal - (idle - lastIdle)) / (total - lastTotal);
-                lastIdle = idle;
-                lastTotal = total;
-                return Math.max(0, Math.min(100, busy));
-            }
-            lastIdle = idle;
-            lastTotal = total;
-        } catch (Exception ignored) {
-        }
-        return -1;
-    }
-
-    /** GPU 频率（Hz）：kgsl gpuclk 直接为 MHz，devfreq 为 Hz */
-    private double parseGpu(String out) {
-        try {
-            for (String line : out.split("\\n")) {
-                if (line.startsWith("G:")) {
-                    double v = Double.parseDouble(line.substring(2).trim());
-                    if (v <= 0) return 0;
-                    if (v < 3000) return v * 1e6;     // MHz
-                    return v;                          // Hz
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return 0;
-    }
-
-    /** GPU 负载 %：gpu_load / gpu_busy_percentage / gpuload（>100 视作十分位百分比） */
-    private float parseGpuLoad(String line) {
-        try {
-            String s = line.substring(3).trim().replace("%", "");
-            s = s.replaceAll("[^0-9.].*$", "").trim();
-            if (s.isEmpty()) return -1;
-            float v = Float.parseFloat(s);
-            if (v > 100 && v <= 1000) v /= 10f;
-            return Math.max(0, Math.min(100, v));
-        } catch (Exception ignored) {
-        }
-        return -1;
-    }
-
-    /** GPU 最大频率（MHz）：<3000 视作 MHz，<1e6 视作 kHz，其余视作 Hz */
-    private double parseGpuMax(String line) {
-        try {
-            double v = Double.parseDouble(line.substring(3).trim());
-            if (v <= 0) return 0;
-            if (v < 3000) return v;
-            if (v < 1_000_000) return v / 1000;
-            return v / 1e6;
-        } catch (Exception ignored) {
-        }
-        return 0;
-    }
-
-    /**
-     * 分类温区最大值（℃）：
-     * - cpu: 含 cpu/apc/big 的温区，回退电池温度
-     * - soc: 含 soc 的温区，回退 CPU 温度
-     */
-    private double parseZoneTemp(String out, String kind, double fallback) {
-        double max = 0;
-        try {
-            for (String line : out.split("\\n")) {
-                if (!line.startsWith("T:")) continue;
-                String body = line.substring(2);
-                int idx = body.lastIndexOf(':');
-                if (idx <= 0) continue;
-                String ty = body.substring(0, idx).toLowerCase();
-                double v = Double.parseDouble(body.substring(idx + 1).trim());
-                if (v > 1000) v = v / 1000.0;              // 毫摄氏度 → ℃
-                if (v <= 0 || v > 120) continue;
-                boolean hit = "cpu".equals(kind)
-                        ? (ty.contains("cpu") || ty.contains("apc") || ty.contains("big"))
-                        : ty.contains("soc");
-                if (hit) max = Math.max(max, v);
-            }
-        } catch (Exception ignored) {
-        }
-        return Math.max(max, fallback);
-    }
-
-    // ==================== 实时帧率（真实渲染帧率，非面板刷新率） ====================
-
-    /**
-     * 实时帧率（增量差分：两次轮询间新增帧 ÷ 跨越时长，停止渲染即归零）：
-     * 1. SurfaceFlinger --latency：前台图层新增帧（游戏 SurfaceView 也计入）
-     * 2. dumpsys gfxinfo：前台应用总渲染帧数差分（--latency 无数据时）
-     * 全部 shell 工作合并为单次调用（FPS_CMD），降低偶发失败与延迟；
-     * 返回 null = 本次检测失败（命令异常/无焦点），0 = 确认空闲
-     */
+    /** 增量差分帧率：SF --latency 新增帧 ÷ 跨越时长；无数据回退 gfxinfo 总帧差分 */
     private Float realFps() {
         try {
             RootShell.Result r = RootShell.exec(FPS_CMD, 8);
@@ -1816,18 +737,15 @@ public class MonitorService extends Service {
                     continue;
                 }
                 if (t.isEmpty()) continue;
-                if (!afterL) {                 // L 之前的纯数字行 = gfxinfo 帧计数
+                if (!afterL) {
                     long v = parseNs(t);
                     if (v >= 0) gfx = v;
                     continue;
                 }
-                // SF latency 行：取第二列 actual_present_time
                 String[] col = t.split("\\s+");
                 long ts = col.length >= 2 ? parseNs(col[1]) : parseNs(col[0]);
                 if (ts < 1_000_000_000L || ts >= Long.MAX_VALUE / 2) continue;
                 if (ts > newest) newest = ts;
-                // 去重：掉帧/持帧时 SF 会按 vsync 重复写入同一 actual_present_time，
-                // 重复时间戳不计入帧数，防止瞬时算出超过面板刷新率的值
                 if (sfPrevNewest > 0 && ts > sfPrevNewest && ts != lastTs) {
                     fresh++;
                     lastTs = ts;
@@ -1835,8 +753,6 @@ public class MonitorService extends Service {
             }
             if (pkg != null && pkg.isEmpty()) pkg = null;
             if (layer != null && layer.isEmpty()) layer = null;
-
-            // 图层或应用变化：重置差分基准，防止跨应用误算
             boolean changed = !eq(layer, fpsLayer) || !eq(pkg, fpsPkg);
             if (changed) {
                 sfPrevNewest = -1;
@@ -1844,12 +760,11 @@ public class MonitorService extends Service {
             }
             fpsLayer = layer;
             fpsPkg = pkg;
-
             if (layer != null && newest > 0) {
-                if (sfPrevNewest <= 0) {          // 首次：仅建立基准，本轮用 gfx 兜底
+                if (sfPrevNewest <= 0) {
                     sfPrevNewest = newest;
                 } else if (newest <= sfPrevNewest) {
-                    return 0f;                    // 本轮无新帧 → 确认空闲
+                    return 0f;
                 } else {
                     double span = (newest - sfPrevNewest) / 1e9;
                     sfPrevNewest = newest;
@@ -1865,7 +780,7 @@ public class MonitorService extends Service {
                     gfxAt = now;
                     return Math.max(0f, Math.min(peakHz > 0 ? peakHz : 240f, f));
                 }
-                gfxFrames = gfx;                  // 首次或计数回绕：仅建立基准
+                gfxFrames = gfx;
                 gfxAt = now;
             }
         } catch (Exception ignored) {
@@ -1873,25 +788,6 @@ public class MonitorService extends Service {
         return null;
     }
 
-    private static boolean eq(String a, String b) {
-        return a == null ? b == null : a.equals(b);
-    }
-
-    /**
-     * 检测失败或空闲（无新帧）时保持上一有效值——首次成功后不再回落 "--"，
-     * 仅在从未取得过有效帧率时显示 "--"
-     */
-    private float currentFps() {
-        Float f = realFps();
-        if (f != null && f > 0) {
-            lastGoodHz = f;
-            lastGoodAt = SystemClock.elapsedRealtime();
-            return f;
-        }
-        return lastGoodAt > 0 ? lastGoodHz : 0f;
-    }
-
-    /** 安全解析纳秒时间戳 */
     private static long parseNs(String s) {
         try {
             return Long.parseLong(s.trim());
@@ -1900,24 +796,1097 @@ public class MonitorService extends Service {
         }
     }
 
-    private Notification notif() {
+    private static boolean eq(String a, String b) {
+        return a == null ? b == null : a.equals(b);
+    }
+
+    // ==================== 进程采样（照搬 Kin ProcSampler：top 主路径 + /proc 差分回退） ====================
+
+    private List<Proc> sampleProcs() {
+        if (topUsable) {
+            try {
+                RootShell.Result r = RootShell.exec(
+                        "top -b -n 1 -o PID,%CPU,RES,CMDLINE -s 2 2>/dev/null | head -n 400", 10);
+                String out = r.ok() && r.out != null ? r.out : "";
+                List<Proc> rows = new ArrayList<>();
+                for (String line : out.split("\\n")) {
+                    String[] parts = line.trim().split("\\s+", 4);
+                    if (parts.length < 4) continue;
+                    int pid;
+                    float cpu;
+                    try {
+                        pid = Integer.parseInt(parts[0]);
+                        cpu = Float.parseFloat(parts[1]);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    rows.add(mkProc(pid, parts[3], cpu));
+                }
+                if (rows.size() >= 3) {
+                    rows.sort((a, b) -> Float.compare(b.cpuPct, a.cpuPct));
+                    return rows.size() > 48 ? rows.subList(0, 48) : rows;
+                }
+                topUsable = false;
+            } catch (Exception ignored) {
+            }
+        }
+        return procFallback();
+    }
+
+    private static Proc mkProc(int pid, String cmd, float cpu) {
+        String first = cmd.trim().split(" ")[0];
+        int sp = first.lastIndexOf('/');
+        String b = sp >= 0 ? first.substring(sp + 1) : first;
+        if (b.isEmpty()) b = cmd.trim();
+        if (b.length() > 15) b = b.substring(0, 15);
+        Proc p = new Proc();
+        p.pid = pid;
+        p.name = b;
+        p.cpuPct = cpu;
+        return p;
+    }
+
+    /** /proc 差分回退（top 不可用） */
+    private List<Proc> procFallback() {
+        int ncpu = Math.max(1, Runtime.getRuntime().availableProcessors());
+        String dump = "";
+        try {
+            RootShell.Result r = RootShell.exec(
+                    "for p in /proc/[0-9]*; do echo \"@@$(basename $p) $(cat $p/stat 2>/dev/null)\"; done", 10);
+            if (r.ok() && r.out != null) dump = r.out;
+        } catch (Exception ignored) {
+        }
+        long total = -1;
+        try (BufferedReader br = new BufferedReader(new FileReader("/proc/stat"))) {
+            String l = br.readLine();
+            if (l != null && l.startsWith("cpu ")) {
+                String[] p = l.trim().split("\\s+");
+                long sum = 0;
+                for (int i = 1; i < p.length; i++) {
+                    try {
+                        sum += Long.parseLong(p[i]);
+                    } catch (Exception ignored) {
+                    }
+                }
+                total = sum;
+            }
+        } catch (Exception ignored) {
+        }
+        long prevTotal = lastTotalJiffies;
+        lastTotalJiffies = total;
+        Map<Integer, Long> cur = new HashMap<>();
+        List<Proc> rows = new ArrayList<>();
+        for (String raw : dump.split("\\n")) {
+            if (!raw.startsWith("@@")) continue;
+            String body = raw.substring(2);
+            int sp = body.indexOf(' ');
+            if (sp <= 0) continue;
+            int pid;
+            try {
+                pid = Integer.parseInt(body.substring(0, sp));
+            } catch (Exception e) {
+                continue;
+            }
+            String stat = body.substring(sp + 1);
+            int open = stat.indexOf('('), close = stat.lastIndexOf(')');
+            if (open <= 0 || close <= open) continue;   // 非法 stat 行
+            String name = stat.substring(open + 1, close);
+            if (name.isEmpty()) name = String.valueOf(pid);
+            if (name.length() > 15) name = name.substring(0, 15);
+            String after = stat.substring(close + 1).trim();
+            String[] f = after.split("\\s+");
+            long j = -1;
+            if (f.length > 12) {
+                try {
+                    j = Long.parseLong(f[11]) + Long.parseLong(f[12]);   // utime + stime
+                } catch (Exception ignored) {
+                }
+            }
+            if (j < 0) continue;
+            cur.put(pid, j);
+            Proc p = new Proc();
+            p.pid = pid;
+            p.name = name;
+            p.cpuPct = -1;
+            rows.add(p);
+        }
+        List<Proc> out = new ArrayList<>();
+        if (prevTotal > 0 && total > prevTotal) {
+            double dTotal = total - prevTotal;
+            for (Proc p : rows) {
+                Long prev = lastProcJiffies.get(p.pid);
+                if (prev == null) continue;
+                double dj = cur.get(p.pid) - prev;
+                if (dj <= 0) continue;
+                p.cpuPct = (float) Math.max(0.1f, Math.min(100f * ncpu, dj / dTotal * 100.0 * ncpu));
+                out.add(p);
+            }
+        }
+        lastProcJiffies.clear();
+        lastProcJiffies.putAll(cur);
+        out.sort((a, b) -> Float.compare(b.cpuPct, a.cpuPct));
+        return out.size() > 48 ? out.subList(0, 48) : out;
+    }
+
+    // ==================== 通知 ====================
+
+    private Notification notif(int n) {
         NotificationManager nm = getSystemService(NotificationManager.class);
-        NotificationChannel ch = new NotificationChannel("monitor",
-                "负载监视器", NotificationManager.IMPORTANCE_LOW);
-        nm.createNotificationChannel(ch);
-        PendingIntent close = PendingIntent.getService(this, 1,
-                new Intent(this, MonitorService.class).setAction("stop"),
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        PendingIntent show = PendingIntent.getService(this, 2,
-                new Intent(this, MonitorService.class).setAction("show_pill"),
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this, "monitor")
-                .setContentTitle("监视器功能运行中")
-                .setContentText("点击「监视器」展开功能 · 长按胶囊隐藏 · 长按窗口锁定位置")
+        if (nm != null && nm.getNotificationChannel("float_mgr") == null) {
+            nm.createNotificationChannel(new NotificationChannel("float_mgr",
+                    "悬浮监视器", NotificationManager.IMPORTANCE_MIN));
+        }
+        PendingIntent pi = PendingIntent.getActivity(this, 0,
+                new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Builder(this, "float_mgr")
+                .setContentTitle("悬浮监视器运行中")
+                .setContentText(Math.max(1, n) + " 个监视悬浮窗")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
-                .addAction(new Notification.Action.Builder(null, "显示菜单", show).build())
-                .addAction(new Notification.Action.Builder(null, "关闭", close).build())
+                .setContentIntent(pi)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .build();
+    }
+
+    private void updateNotif() {
+        int n = 0;
+        for (boolean b : winOpen) if (b) n++;
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.notify(0x6CB1, notif(n));
+    }
+
+    // ==================== 供主页调用的开关入口（照搬 Kin FloatWindowService.show/hide） ====================
+
+    public static void show(Context ctx, int type) {
+        Intent it = new Intent(ctx, MonitorService.class).setAction("show")
+                .putExtra("type", typeId(type));
+        ctx.startForegroundService(it);
+    }
+
+    public static void hide(Context ctx, int type) {
+        try {
+            ctx.startService(new Intent(ctx, MonitorService.class).setAction("hide")
+                    .putExtra("type", typeId(type)));
+        } catch (Exception ignored) {
+        }
+    }
+
+    static String typeId(int type) {
+        switch (type) {
+            case T_LOAD: return "load";
+            case T_PROCESS: return "process";
+            case T_MINI: return "mini";
+            default: return "temp";
+        }
+    }
+
+    // ============================================================
+    // 悬浮窗窗体（1:1 照搬 Kin OverlayWindows：配色/尺寸/手势/动画）
+    // ============================================================
+
+    /** Metric 配色：深色玻璃 + 白字分层 */
+    private static final int WHITE = Color.WHITE;
+    private static final int WHITE92 = Color.argb(235, 255, 255, 255);
+    private static final int WHITE90 = Color.argb(230, 255, 255, 255);
+    private static final int WHITE80 = Color.argb(204, 255, 255, 255);
+    private static final int WHITE74 = Color.argb(189, 255, 255, 255);
+    private static final int GREY = Color.argb(158, 255, 255, 255);
+    private static final int ORANGE = Color.parseColor("#FFB300");
+    private static final int RED = Color.parseColor("#EF5350");
+    private static final int GREEN = Color.parseColor("#00E676");
+    private static final int GLASS_BASE = Color.rgb(0x26, 0x2A, 0x30);
+
+    /** 窗体抽象基类：玻璃底 + monospace 文本（照搬 Kin OverlayWindow） */
+    abstract class OverlayWindow {
+        Runnable onCloseRequest;
+
+        abstract View getRootView();
+
+        abstract void onTick(TickData t);
+
+        void onTap() {
+        }
+
+        void onLongPress() {
+        }
+
+        View getRoot() {
+            return getRootView();
+        }
+
+        TextView mono(float sizeSp, int color) {
+            return mono(sizeSp, color, true);
+        }
+
+        TextView mono(float sizeSp, int color, boolean bold) {
+            TextView tv = new TextView(MonitorService.this);
+            tv.setTextColor(color);
+            tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, sizeSp);
+            tv.setTypeface(bold ? Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                    : Typeface.MONOSPACE);
+            tv.setIncludeFontPadding(false);
+            tv.setMaxLines(1);
+            return tv;
+        }
+
+        /** 液态玻璃底：竖向渐变 + 白色亮边 */
+        GradientDrawable glassBg(int cornerDp) {
+            int alpha = (int) (0.46f * 255);
+            int top = Color.argb((int) (alpha * 0.92f),
+                    Math.min(255, Color.red(GLASS_BASE) + 36),
+                    Math.min(255, Color.green(GLASS_BASE) + 36),
+                    Math.min(255, Color.blue(GLASS_BASE) + 36));
+            int bottom = Color.argb(alpha,
+                    Color.red(GLASS_BASE), Color.green(GLASS_BASE), Color.blue(GLASS_BASE));
+            GradientDrawable g = new GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
+            g.setCornerRadius(dp(cornerDp));
+            g.setStroke(Math.max(1, Math.round(0.8f * dp)), Color.argb(56, 255, 255, 255));
+            return g;
+        }
+
+        /** 圆形图标钮：白 10% 圆底 + 白 74% 字符 */
+        TextView circleBtn(String glyph, float sizeSp, Runnable onClick) {
+            TextView tv = mono(sizeSp, WHITE74);
+            tv.setText(glyph);
+            tv.setGravity(Gravity.CENTER);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setShape(GradientDrawable.OVAL);
+            bg.setColor(Color.argb(26, 255, 255, 255));
+            tv.setBackground(bg);
+            tv.setOnClickListener(v -> {
+                try {
+                    onClick.run();
+                } catch (Exception ignored) {
+                }
+            });
+            return tv;
+        }
+
+        String fmtMhz(int mhz) {
+            return mhz <= 0 ? "-- MHz" : mhz + "MHz";
+        }
+    }
+
+    /** 限高滚动容器（照搬 Kin MaxHeightScrollView） */
+    static class MaxHeightScrollView extends android.widget.ScrollView {
+        private final int maxHPx;
+        private final boolean exact;
+
+        MaxHeightScrollView(android.content.Context ctx, int maxHPx, boolean exact) {
+            super(ctx);
+            this.maxHPx = maxHPx;
+            this.exact = exact;
+            setVerticalScrollBarEnabled(false);
+            setOverScrollMode(View.OVER_SCROLL_NEVER);
+        }
+
+        @Override
+        protected void onMeasure(int wms, int hms) {
+            int mode = exact ? View.MeasureSpec.EXACTLY : View.MeasureSpec.AT_MOST;
+            super.onMeasure(wms, View.MeasureSpec.makeMeasureSpec(maxHPx, mode));
+        }
+    }
+
+    /** 环形进度表（照搬 Kin RingView：白@0.2 轨道 + 阈值色进度弧，420ms 补间） */
+    class RingView extends View {
+        private float shownPct = 0f, targetPct = 0f;
+        private android.animation.ValueAnimator anim;
+        private final float inset;
+        private final RectF bounds = new RectF();
+        private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Runnable onShown;
+
+        RingView(float strokePx) {
+            super(MonitorService.this);
+            inset = strokePx / 2f + 1f;
+            trackPaint.setStyle(Paint.Style.STROKE);
+            trackPaint.setStrokeWidth(strokePx);
+            trackPaint.setColor(Color.argb(51, 255, 255, 255));
+            arcPaint.setStyle(Paint.Style.STROKE);
+            arcPaint.setStrokeWidth(strokePx);
+            arcPaint.setStrokeCap(Paint.Cap.ROUND);
+            arcPaint.setColor(GREEN);
+        }
+
+        void set(int pct, int arcColor) {
+            arcPaint.setColor(arcColor);
+            float to = Math.max(0, Math.min(100, pct));
+            if (to == targetPct) {
+                invalidate();
+                return;
+            }
+            targetPct = to;
+            if (anim != null) anim.cancel();
+            anim = android.animation.ValueAnimator.ofFloat(shownPct, to);
+            anim.setDuration(420);
+            anim.setInterpolator(new android.view.animation.PathInterpolator(0.15f, 1f, 0.3f, 1f));
+            anim.addUpdateListener(a -> {
+                shownPct = (float) a.getAnimatedValue();
+                if (onShown != null) onShown.run();
+                invalidate();
+            });
+            anim.start();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            if (anim != null) anim.cancel();
+            anim = null;
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int ow, int oh) {
+            bounds.set(inset, inset, w - inset, h - inset);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            if (bounds.isEmpty()) return;
+            c.drawArc(bounds, 0f, 360f, false, trackPaint);
+            if (shownPct > 0f) c.drawArc(bounds, -90f, shownPct / 100f * 360f, false, arcPaint);
+        }
+    }
+
+    /**
+     * 负载监视器（照搬 Kin LoadOverlayWindow）：
+     * 收起 = 124×54dp 三环胶囊（CPU/GPU/电量）；展开 = 参数网格（#RAM/#CPU/各簇各核/#FPS/#PWR）
+     * 单击展开/收起（420/360ms 形变），长按关闭
+     */
+    class LoadOverlayWindow extends OverlayWindow {
+        private class RingCol {
+            final LinearLayout col;
+            final RingView ring;
+            final TextView center, below;
+
+            RingCol(String centerText) {
+                ring = new RingView(dp(4));
+                center = mono(7, WHITE);
+                center.setText(centerText);
+                center.setGravity(Gravity.CENTER);
+                FrameLayout frame = new FrameLayout(MonitorService.this);
+                frame.addView(ring, new FrameLayout.LayoutParams(dp(32), dp(32)));
+                frame.addView(center, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+                below = mono(6, WHITE);
+                below.setText("-- MHz");
+                below.setGravity(Gravity.CENTER);
+                col = new LinearLayout(MonitorService.this);
+                col.setOrientation(LinearLayout.VERTICAL);
+                col.setGravity(Gravity.CENTER_HORIZONTAL);
+                col.addView(frame, new LinearLayout.LayoutParams(dp(32), dp(32)));
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(32), dp(8));
+                blp.topMargin = dp(2);
+                col.addView(below, blp);
+            }
+        }
+
+        private final int ringSize = dp(32);
+        private final RingCol hCpu = new RingCol("CPU"), hGpu = new RingCol("GPU"), hBat = new RingCol("--");
+        private final RingCol vCpu = new RingCol("CPU"), vGpu = new RingCol("GPU"), vBat = new RingCol("--");
+
+        private final LinearLayout collapsedRow = new LinearLayout(MonitorService.this);
+        private final LinearLayout grid = new LinearLayout(MonitorService.this);
+        private final List<TextView[]> gridRows = new ArrayList<>();
+        private final LinearLayout expandedBox = new LinearLayout(MonitorService.this);
+        private final FrameLayout shell = new FrameLayout(MonitorService.this);
+        private final FrameLayout root = new FrameLayout(MonitorService.this);
+        private boolean expanded = false;
+        private TickData last;
+        private android.animation.ValueAnimator morph;
+
+        LoadOverlayWindow(int accent) {
+            collapsedRow.setOrientation(LinearLayout.HORIZONTAL);
+            collapsedRow.setGravity(Gravity.CENTER);
+            collapsedRow.setPadding(dp(6), dp(6), dp(6), dp(6));
+            collapsedRow.addView(hCpu.col);
+            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            glp.leftMargin = dp(8);
+            glp.rightMargin = dp(8);
+            collapsedRow.addView(hGpu.col, glp);
+            collapsedRow.addView(hBat.col);
+
+            grid.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout ringsColV = new LinearLayout(MonitorService.this);
+            ringsColV.setOrientation(LinearLayout.VERTICAL);
+            ringsColV.setGravity(Gravity.CENTER_HORIZONTAL);
+            ringsColV.addView(vCpu.col);
+            LinearLayout.LayoutParams r2 = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            r2.topMargin = dp(5);
+            ringsColV.addView(vGpu.col, r2);
+            ringsColV.addView(vBat.col, r2);
+            expandedBox.setOrientation(LinearLayout.HORIZONTAL);
+            expandedBox.setGravity(Gravity.CENTER_VERTICAL);
+            expandedBox.setPadding(dp(6), dp(6), dp(6), dp(6));
+            expandedBox.addView(ringsColV, new LinearLayout.LayoutParams(dp(44),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            plp.leftMargin = Math.round(1.5f * dp);
+            expandedBox.addView(grid, plp);
+            expandedBox.setVisibility(View.GONE);
+            expandedBox.setAlpha(0f);
+
+            shell.setClipChildren(true);
+            shell.setClipToPadding(true);
+            shell.setBackground(glassBg(16));
+            shell.addView(collapsedRow, new FrameLayout.LayoutParams(dp(124), dp(54)));
+            shell.addView(expandedBox, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+            root.setClipChildren(true);
+            root.addView(shell, new FrameLayout.LayoutParams(dp(124), dp(54)));
+
+            vBat.ring.onShown = () -> vBat.center.setText(Math.round(vBat.ring.shownPct) + "%");
+            hBat.ring.onShown = () -> hBat.center.setText(Math.round(hBat.ring.shownPct) + "%");
+        }
+
+        @Override
+        View getRootView() {
+            return root;
+        }
+
+        @Override
+        void onTap() {
+            setExpanded(!expanded);
+        }
+
+        @Override
+        void onLongPress() {
+            if (onCloseRequest != null) onCloseRequest.run();
+        }
+
+        /** 弧色阈值（Metric）：<70 绿 / <90 琥珀 / ≥90 红 */
+        private int loadColor(int pct) {
+            if (pct < 70) return GREEN;
+            if (pct < 90) return ORANGE;
+            return RED;
+        }
+
+        /** 展开尺寸公式：行数 = 5 + Σ(每簇核数+1)；高 = max(136, 8.5×行+2)+12；宽 134（无 IPC） */
+        private int[] expandedSize() {
+            List<Cluster> cls = last != null && last.snap.clusters != null
+                    ? last.snap.clusters : Collections.emptyList();
+            int coreRows = 0;
+            for (Cluster c : cls) coreRows += c.cpus.length + 1;
+            if (coreRows == 0) coreRows = Math.max(
+                    last != null && last.snap.coreLoadPct != null ? last.snap.coreLoadPct.length : 0,
+                    last != null && last.snap.coreMhz != null ? last.snap.coreMhz.length : 0);
+            int rows = 5 + coreRows;
+            int w = dp(134);
+            int h = Math.round((Math.max(136f, 8.5f * rows + 2f) + 12f) * dp);
+            return new int[]{w, h};
+        }
+
+        private void setExpanded(boolean want) {
+            if (expanded == want) return;
+            expanded = want;
+            if (morph != null) morph.cancel();
+            if (want) renderGrid(last);
+            View show = want ? expandedBox : collapsedRow;
+            View hide = want ? collapsedRow : expandedBox;
+            show.setVisibility(View.VISIBLE);
+            int[] to = want ? expandedSize() : new int[]{dp(124), dp(54)};
+            if (want) {
+                FrameLayout.LayoutParams lpE = (FrameLayout.LayoutParams) expandedBox.getLayoutParams();
+                lpE.width = to[0];
+                lpE.height = to[1];
+                expandedBox.setLayoutParams(lpE);
+            }
+            int fromW = shell.getWidth() > 0 ? shell.getWidth() : dp(124);
+            int fromH = shell.getHeight() > 0 ? shell.getHeight() : dp(54);
+            FrameLayout.LayoutParams lpS = (FrameLayout.LayoutParams) shell.getLayoutParams();
+            morph = android.animation.ValueAnimator.ofFloat(0f, 1f);
+            morph.setDuration(want ? 420 : 360);
+            morph.setInterpolator(new android.view.animation.PathInterpolator(0.15f, 1f, 0.3f, 1f));
+            final boolean w = want;
+            morph.addUpdateListener(a -> {
+                float f = a.getAnimatedFraction();
+                lpS.width = (int) (fromW + (to[0] - fromW) * f);
+                lpS.height = (int) (fromH + (to[1] - fromH) * f);
+                shell.setLayoutParams(lpS);
+                show.setAlpha(f);
+                hide.setAlpha(1f - f);
+            });
+            morph.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(android.animation.Animator a) {
+                    if (w) {
+                        hide.setVisibility(View.GONE);
+                        hide.setAlpha(1f);
+                        lpS.width = to[0];
+                        lpS.height = to[1];
+                        shell.setLayoutParams(lpS);
+                    }
+                }
+            });
+            morph.start();
+        }
+
+        @Override
+        void onTick(TickData t) {
+            last = t;
+            Snap s = t.snap;
+            int cpu = Math.max(0, s.cpuLoadPct);
+            int topMhz = -1;
+            if (s.clusters != null) for (Cluster c : s.clusters) topMhz = Math.max(topMhz, c.mhz);
+            String cpuBelow = fmtMhz(topMhz);
+            int gpu = Math.max(0, s.gpuLoadPct);
+            String gpuBelow = fmtMhz(s.gpuMhz);
+            int batt = s.battPct >= 0 ? (int) s.battPct : -1;
+            int battArc = Math.max(0, batt);
+            int battColor = loadColor(batt >= 0 ? 100 - batt : 0);
+            String battBelow = s.battTempC > 0
+                    ? String.format(Locale.US, "%.0f℃", s.battTempC) : "--℃";
+
+            RingCol[][] pairs = {{hCpu, vCpu}, {hGpu, vGpu}, {hBat, vBat}};
+            for (int i = 0; i < pairs.length; i++) {
+                int arc, color;
+                String below;
+                if (i == 0) {
+                    arc = cpu;
+                    color = loadColor(cpu);
+                    below = cpuBelow;
+                } else if (i == 1) {
+                    arc = gpu;
+                    color = loadColor(gpu);
+                    below = gpuBelow;
+                } else {
+                    arc = battArc;
+                    color = battColor;
+                    below = battBelow;
+                }
+                for (RingCol rc : pairs[i]) {
+                    rc.ring.set(arc, color);
+                    rc.below.setText(below);
+                }
+            }
+            if (expanded && (morph == null || !morph.isRunning())) {
+                renderGrid(t);
+                int[] wh = expandedSize();
+                FrameLayout.LayoutParams lpE = (FrameLayout.LayoutParams) expandedBox.getLayoutParams();
+                if (lpE.width != wh[0] || lpE.height != wh[1]) {
+                    lpE.width = wh[0];
+                    lpE.height = wh[1];
+                    expandedBox.setLayoutParams(lpE);
+                    FrameLayout.LayoutParams lpS = (FrameLayout.LayoutParams) shell.getLayoutParams();
+                    lpS.width = wh[0];
+                    lpS.height = wh[1];
+                    shell.setLayoutParams(lpS);
+                }
+            }
+        }
+
+        /** 展开参数网格：#RAM / DDR / #CPU / 各簇 #0-3 MHz + 每核 负载% 频率M / #FPS / #PWR */
+        private void renderGrid(TickData t) {
+            Snap s = t != null ? t.snap : null;
+            List<String[]> rows = new ArrayList<>();
+            rows.add(new String[]{"#RAM", s != null && s.ramUsedPct >= 0
+                    ? Math.round(s.ramUsedPct) + "%" : "--"});
+            rows.add(new String[]{"DDR", s != null && s.ddrMhz > 0 ? String.valueOf(s.ddrMhz) : "--"});
+            rows.add(new String[]{"#CPU", s != null && s.cpuTempC > 0
+                    ? String.format(Locale.US, "%.0f℃", s.cpuTempC) : "--℃"});
+            int[] loads = s != null && s.coreLoadPct != null ? s.coreLoadPct : new int[0];
+            int[] freqs = s != null && s.coreMhz != null ? s.coreMhz : new int[0];
+            List<Cluster> cls = s != null && s.clusters != null ? s.clusters : Collections.emptyList();
+            if (!cls.isEmpty()) {
+                for (Cluster c : cls) {
+                    List<Integer> cpus = new ArrayList<>();
+                    for (int x : c.cpus) cpus.add(x);
+                    Collections.sort(cpus);
+                    String range = cpus.size() == 1 ? String.valueOf(cpus.get(0))
+                            : cpus.get(0) + "-" + cpus.get(cpus.size() - 1);
+                    rows.add(new String[]{"#" + range, c.mhz > 0 ? c.mhz + "MHz" : "-- MHz"});
+                    for (int cpu : cpus) {
+                        String ld = cpu < loads.length && loads[cpu] >= 0 ? loads[cpu] + "%" : "--";
+                        String f = cpu < freqs.length && freqs[cpu] > 0 ? freqs[cpu] + "M" : "--";
+                        rows.add(new String[]{ld, f});
+                    }
+                }
+            } else if (loads.length > 0 || freqs.length > 0) {
+                int n = Math.max(loads.length, freqs.length);
+                for (int cpu = 0; cpu < n; cpu++) {
+                    String ld = cpu < loads.length ? loads[cpu] + "%" : "--";
+                    String f = cpu < freqs.length && freqs[cpu] > 0 ? freqs[cpu] + "M" : "--";
+                    rows.add(new String[]{ld, f});
+                }
+            }
+            float fps = s != null ? s.fps : -1;
+            rows.add(new String[]{"#FPS", fps >= 0
+                    ? String.format(Locale.US, "%.1f", fps) : "0.0"});
+            float w = s != null ? s.watt : 0;
+            rows.add(new String[]{"#PWR", w != 0 && !Float.isInfinite(w) && !Float.isNaN(w)
+                    ? String.format(Locale.US, "%+.2fW", w) : "--W"});
+
+            if (gridRows.size() != rows.size()) {
+                grid.removeAllViews();
+                gridRows.clear();
+                for (int i = 0; i < rows.size(); i++) {
+                    TextView label = mono(7, WHITE90);
+                    label.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                    TextView value = mono(7, WHITE80);
+                    value.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                    LinearLayout box = new LinearLayout(MonitorService.this);
+                    box.setOrientation(LinearLayout.HORIZONTAL);
+                    box.setGravity(Gravity.CENTER_VERTICAL);
+                    box.addView(label, new LinearLayout.LayoutParams(dp(20),
+                            LinearLayout.LayoutParams.MATCH_PARENT));
+                    LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(dp(46),
+                            LinearLayout.LayoutParams.MATCH_PARENT);
+                    vlp.leftMargin = dp(10);
+                    box.addView(value, vlp);
+                    gridRows.add(new TextView[]{label, value});
+                    grid.addView(box, new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, Math.round(8.5f * dp)));
+                }
+            }
+            for (int i = 0; i < rows.size(); i++) {
+                gridRows.get(i)[0].setText(rows.get(i)[0]);
+                gridRows.get(i)[1].setText(rows.get(i)[1]);
+            }
+        }
+    }
+
+    /**
+     * 迷你监视器（照搬 Kin MiniOverlayWindow）：顶部居中细条（点击穿透），
+     * 四段：CPU（绿标+柱状图+最高簇频率）/ GPU（蓝标+频率）/ FPS（金标）/ PWR（粉标，功耗温度 9s 轮换）
+     */
+    class MiniOverlayWindow extends OverlayWindow {
+        private final int segGreen = Color.parseColor("#8DEB9A");
+        private final int segBlue = Color.parseColor("#8FB9FF");
+        private final int segGold = Color.parseColor("#FFD166");
+        private final int segPink = Color.parseColor("#FF8EA1");
+        private final MiniCoreBars bars = new MiniCoreBars(segGreen);
+        private final TextView vCpu = cell(WHITE), vGpu = cell(WHITE),
+                vFps = cell(WHITE), vPwr = cell(WHITE);
+        private final LinearLayout bar = new LinearLayout(MonitorService.this);
+        private long tick;
+
+        MiniOverlayWindow(int accent) {
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            bar.setPadding(dp(3), dp(1), dp(3), dp(1));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(8));
+            bg.setColor(Color.argb(217, 27, 29, 34));
+            bar.setBackground(bg);
+            seg(54, label("CPU", segGreen), bars, vCpu);
+            seg(32, label("GPU", segBlue), vGpu);
+            seg(36, label("FPS", segGold), vFps);
+            seg(46, label("PWR", segPink), vPwr);
+        }
+
+        private TextView label(String s, int color) {
+            TextView tv = cell(color);
+            tv.setText(s);
+            return tv;
+        }
+
+        private TextView cell(int color) {
+            TextView tv = new TextView(MonitorService.this);
+            tv.setTextColor(color);
+            tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 7);
+            tv.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+            tv.setIncludeFontPadding(false);
+            tv.setMaxLines(1);
+            return tv;
+        }
+
+        private void seg(int widthDp, View... views) {
+            LinearLayout segBox = new LinearLayout(MonitorService.this);
+            segBox.setOrientation(LinearLayout.HORIZONTAL);
+            segBox.setGravity(Gravity.CENTER_VERTICAL);
+            for (int i = 0; i < views.length; i++) {
+                LinearLayout.LayoutParams lp;
+                if (views[i] instanceof MiniCoreBars) {
+                    lp = new LinearLayout.LayoutParams(dp(18), dp(8));
+                } else {
+                    lp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                }
+                if (i > 0) lp.leftMargin = dp(1);
+                segBox.addView(views[i], lp);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(widthDp),
+                    LinearLayout.LayoutParams.MATCH_PARENT);
+            if (bar.getChildCount() > 0) lp.leftMargin = dp(1);
+            bar.addView(segBox, lp);
+        }
+
+        @Override
+        View getRootView() {
+            return bar;
+        }
+
+        @Override
+        void onTick(TickData t) {
+            tick++;
+            Snap s = t.snap;
+            int topMhz = -1;
+            if (s.clusters != null) for (Cluster c : s.clusters) topMhz = Math.max(topMhz, c.mhz);
+            vCpu.setText(topMhz > 0 ? String.valueOf(topMhz) : "--");
+            vGpu.setText(s.gpuMhz > 0 ? String.valueOf(s.gpuMhz) : "--");
+            if (s.coreLoadPct != null && s.coreLoadPct.length > 0) bars.set(s.coreLoadPct);
+            vFps.setText(s.fps >= 0 ? String.format(Locale.US, "%.1f", s.fps) : "0.0");
+            if (tick % 9 < 6) {
+                vPwr.setText(s.watt != 0 && !Float.isInfinite(s.watt) && !Float.isNaN(s.watt)
+                        ? String.format(Locale.US, "%+.2fW", s.watt) : "--W");
+            } else {
+                vPwr.setText(s.cpuTempC > 0 ? String.format(Locale.US, "%.1f℃", s.cpuTempC) : "--℃");
+            }
+        }
+    }
+
+    /** 每核负载柱状图（照搬 Kin MiniCoreBars） */
+    class MiniCoreBars extends View {
+        private int[] loads = new int[0];
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+
+        MiniCoreBars(int color) {
+            super(MonitorService.this);
+            paint.setColor(color);
+        }
+
+        void set(int[] coreLoads) {
+            loads = new int[coreLoads.length];
+            for (int i = 0; i < coreLoads.length; i++) {
+                loads[i] = Math.max(0, Math.min(100, coreLoads[i]));
+            }
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            int n = loads.length;
+            if (n == 0) return;
+            float w = getWidth(), h = getHeight();
+            float step = w / n;
+            float barW = Math.max(0.72f * step, dp);
+            float usable = h - 1.5f * dp;
+            for (int i = 0; i < n; i++) {
+                float bh = Math.max(loads[i] / 100f * usable, dp);
+                float x = i * step + (step - barW) / 2f;
+                float top = h - dp - bh;
+                rect.set(x, top, x + barW, h - dp);
+                c.drawRoundRect(rect, dp, dp, paint);
+            }
+        }
+    }
+
+    /**
+     * 温度监视器（照搬 Kin TempOverlayWindow）：83×54dp，BAT/CPU/GPU/DDR 每行 "%.1f℃"，
+     * temp≤0 整行隐藏；长按关闭
+     */
+    class TempOverlayWindow extends OverlayWindow {
+        private final TextView tBat, tCpu, tGpu, tDdr;
+        private final FrameLayout root = new FrameLayout(MonitorService.this);
+
+        TempOverlayWindow(int accent) {
+            LinearLayout card = new LinearLayout(MonitorService.this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(12), dp(7), dp(12), dp(7));
+            card.setGravity(Gravity.CENTER);
+            card.setBackground(glassBg(18));
+            tBat = tempRow();
+            tCpu = tempRow();
+            tGpu = tempRow();
+            tDdr = tempRow();
+            TextView[] all = {tBat, tCpu, tGpu, tDdr};
+            for (TextView tv : all) {
+                card.addView(tv, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, dp(10)));
+            }
+            root.addView(card, new FrameLayout.LayoutParams(dp(83), dp(54)));
+        }
+
+        private TextView tempRow() {
+            TextView tv = mono(8.5f, WHITE);
+            tv.setGravity(Gravity.CENTER_VERTICAL);
+            return tv;
+        }
+
+        @Override
+        View getRootView() {
+            return root;
+        }
+
+        @Override
+        void onLongPress() {
+            if (onCloseRequest != null) onCloseRequest.run();
+        }
+
+        private void line(TextView tv, String label, double c) {
+            if (c <= 0.0) {
+                tv.setVisibility(View.GONE);
+                return;
+            }
+            tv.setVisibility(View.VISIBLE);
+            tv.setText(String.format(Locale.US, "%s %.1f℃", label, c));
+        }
+
+        @Override
+        void onTick(TickData t) {
+            line(tBat, "BAT", t.snap.battTempC);
+            line(tCpu, "CPU", t.snap.cpuTempC);
+            line(tGpu, "GPU", t.snap.gpuTempC);
+            line(tDdr, "DDR", t.snap.ddrTempC);
+        }
+    }
+
+    /**
+     * 进程监视器（照搬 Kin ProcessOverlayWindow）：标题 + 全部/应用分段筛选 + ✕ 关闭；
+     * 48 行列表（图标 + 名称 + CPU%），行双击 root 结束进程；空数据居中空态
+     */
+    class ProcessOverlayWindow extends OverlayWindow {
+        private class Line {
+            final LinearLayout box;
+            final TextView icon, name, pct;
+
+            Line(LinearLayout box, TextView icon, TextView name, TextView pct) {
+                this.box = box;
+                this.icon = icon;
+                this.name = name;
+                this.pct = pct;
+            }
+        }
+
+        private boolean appsOnly = false;
+        private List<Proc> lastProcs;
+        private final TextView tabAll, tabApp;
+        private final View indicator;
+        private final List<Line> lines = new ArrayList<>();
+        private final String[] linePkgs = new String[48];
+        private final LinearLayout listBox = new LinearLayout(MonitorService.this);
+        private View listScroll;
+        private final TextView emptyView;
+        private final LinearLayout card = new LinearLayout(MonitorService.this);
+        private final View root = card;
+
+        ProcessOverlayWindow(int accent) {
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(10), dp(10), dp(10), dp(10));
+            card.setBackground(glassBg(18));
+
+            TextView tHead = mono(11, WHITE);
+            tHead.setText("进程");
+            tabAll = tab("全部", () -> setMode(false));
+            tabApp = tab("应用", () -> setMode(true));
+            indicator = new View(MonitorService.this);
+            GradientDrawable ind = new GradientDrawable();
+            ind.setCornerRadius(dp(10));
+            ind.setColor(Color.argb(46, 255, 255, 255));
+            indicator.setBackground(ind);
+            FrameLayout segTrack = new FrameLayout(MonitorService.this);
+            GradientDrawable track = new GradientDrawable();
+            track.setCornerRadius(dp(12));
+            track.setColor(Color.argb(26, 255, 255, 255));
+            segTrack.setBackground(track);
+            segTrack.setPadding(dp(2), dp(2), dp(2), dp(2));
+            segTrack.addView(indicator, new FrameLayout.LayoutParams(dp(34), dp(20)));
+            LinearLayout tabs = new LinearLayout(MonitorService.this);
+            tabs.setOrientation(LinearLayout.HORIZONTAL);
+            tabs.addView(tabAll, new LinearLayout.LayoutParams(dp(34), dp(20)));
+            tabs.addView(tabApp, new LinearLayout.LayoutParams(dp(34), dp(20)));
+            segTrack.addView(tabs);
+
+            LinearLayout header = new LinearLayout(MonitorService.this);
+            header.setOrientation(LinearLayout.HORIZONTAL);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            header.addView(tHead, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            header.addView(segTrack, new LinearLayout.LayoutParams(dp(72), dp(24)));
+            LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams(dp(24), dp(24));
+            xlp.leftMargin = dp(4);
+            header.addView(circleBtn("✕", 10, () -> {
+                if (onCloseRequest != null) onCloseRequest.run();
+            }), xlp);
+            card.addView(header, new LinearLayout.LayoutParams(dp(168),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+
+            for (int i = 0; i < 48; i++) {
+                TextView icon = new TextView(MonitorService.this);
+                icon.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 8);
+                icon.setGravity(Gravity.CENTER);
+                icon.setIncludeFontPadding(false);
+                TextView name = mono(9, WHITE);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                TextView pct = mono(10, WHITE74);
+                LinearLayout box = new LinearLayout(MonitorService.this);
+                box.setOrientation(LinearLayout.HORIZONTAL);
+                box.setGravity(Gravity.CENTER_VERTICAL);
+                box.addView(icon, new LinearLayout.LayoutParams(dp(16), dp(16)));
+                LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                nlp.leftMargin = dp(4);
+                box.addView(name, nlp);
+                LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                plp.leftMargin = dp(6);
+                box.addView(pct, plp);
+                final int idx = i;
+                android.view.GestureDetector gd = new android.view.GestureDetector(MonitorService.this,
+                        new android.view.GestureDetector.SimpleOnGestureListener() {
+                            @Override
+                            public boolean onDown(MotionEvent e) {
+                                return true;
+                            }
+
+                            @Override
+                            public boolean onDoubleTap(MotionEvent e) {
+                                killRow(idx);
+                                return true;
+                            }
+                        });
+                box.setOnTouchListener((v, ev) -> gd.onTouchEvent(ev));
+                lines.add(new Line(box, icon, name, pct));
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(21));
+                if (i > 0) blp.topMargin = dp(3);
+                listBox.addView(box, blp);
+            }
+            listBox.setOrientation(LinearLayout.VERTICAL);
+            MaxHeightScrollView scroll = new MaxHeightScrollView(MonitorService.this, dp(165), true);
+            scroll.addView(listBox);
+            listScroll = scroll;
+            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(168),
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            slp.topMargin = dp(5);
+            card.addView(scroll, slp);
+            emptyView = mono(9, GREY);
+            emptyView.setText("无进程数据");
+            emptyView.setGravity(Gravity.CENTER);
+            emptyView.setMinHeight(dp(96));
+            emptyView.setPadding(dp(12), 0, dp(12), 0);
+            emptyView.setVisibility(View.GONE);
+            card.addView(emptyView, new LinearLayout.LayoutParams(dp(168),
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            styleTabs();
+        }
+
+        private TextView tab(String label, Runnable onClick) {
+            TextView tv = mono(8, GREY, false);
+            tv.setText(label);
+            tv.setGravity(Gravity.CENTER);
+            tv.setOnClickListener(v -> onClick.run());
+            return tv;
+        }
+
+        @Override
+        View getRootView() {
+            return root;
+        }
+
+        private void killRow(int i) {
+            String pkg = i < linePkgs.length ? linePkgs[i] : null;
+            if (pkg == null || pkg.isEmpty()) return;
+            new Thread(() -> {
+                try {
+                    RootShell.exec("am force-stop " + pkg);
+                } catch (Exception ignored) {
+                }
+            }).start();
+            Toast.makeText(MonitorService.this, "已请求结束: " + pkg, Toast.LENGTH_SHORT).show();
+        }
+
+        private void setMode(boolean only) {
+            if (appsOnly == only) return;
+            appsOnly = only;
+            indicator.animate().translationX(only ? dp(34) : 0f)
+                    .setDuration(180)
+                    .setInterpolator(new android.view.animation.PathInterpolator(0.15f, 1f, 0.3f, 1f))
+                    .start();
+            styleTabs();
+            render();
+        }
+
+        private void styleTabs() {
+            tabAll.setTextColor(appsOnly ? GREY : WHITE92);
+            tabAll.setTypeface(Typeface.create(Typeface.MONOSPACE,
+                    appsOnly ? Typeface.NORMAL : Typeface.BOLD));
+            tabApp.setTextColor(appsOnly ? WHITE92 : GREY);
+            tabApp.setTypeface(Typeface.create(Typeface.MONOSPACE,
+                    appsOnly ? Typeface.BOLD : Typeface.NORMAL));
+        }
+
+        private String pkgOf(String name) {
+            int c = name.indexOf(':');
+            return (c > 0 ? name.substring(0, c) : name).trim();
+        }
+
+        // 图标 / 应用名缓存（进程名 → 字符/显示名）
+        private final Map<String, String> labelCache = new HashMap<>();
+
+        private String labelFor(String name) {
+            String pkg = pkgOf(name);
+            if (!pkg.contains(".")) return null;
+            if (labelCache.containsKey(name)) return labelCache.get(name);
+            String label = null;
+            try {
+                PackageManager pm = getPackageManager();
+                label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+            } catch (Exception ignored) {
+            }
+            if (labelCache.size() > 512) labelCache.clear();
+            labelCache.put(name, label);
+            return label;
+        }
+
+        private String iconFor(String name) {
+            String label = labelFor(name);
+            if (label != null) {
+                // 有应用：首字符当图标（无矢量图标资源，文本替代 Metric 的圆角图标）
+                String s = label.trim();
+                return s.isEmpty() ? "?" : s.substring(0, 1);
+            }
+            return "🐧";   // 原生/系统进程统一企鹅标示（照搬 Kin）
+        }
+
+        @Override
+        void onTick(TickData t) {
+            if (t.procs == null) return;
+            lastProcs = t.procs;
+            render();
+        }
+
+        private void render() {
+            List<Proc> all = lastProcs;
+            List<Proc> ps;
+            if (appsOnly) {
+                ps = new ArrayList<>();
+                List<String> seen = new ArrayList<>();
+                for (Proc p : all != null ? all : Collections.<Proc>emptyList()) {
+                    if (labelFor(p.name) == null) continue;
+                    String pkg = pkgOf(p.name);
+                    if (seen.contains(pkg)) continue;
+                    seen.add(pkg);
+                    ps.add(p);
+                }
+            } else {
+                ps = all != null ? all : Collections.<Proc>emptyList();
+            }
+            boolean empty = ps.isEmpty();
+            emptyView.setVisibility(empty ? View.VISIBLE : View.GONE);
+            listScroll.setVisibility(empty ? View.GONE : View.VISIBLE);
+            for (int i = 0; i < lines.size(); i++) {
+                Line l = lines.get(i);
+                Proc p = i < ps.size() ? ps.get(i) : null;
+                linePkgs[i] = p != null ? pkgOf(p.name) : null;
+                if (p == null) {
+                    l.box.setVisibility(View.GONE);
+                } else {
+                    l.box.setVisibility(View.VISIBLE);
+                    l.icon.setText(iconFor(p.name));
+                    String label = labelFor(p.name);
+                    l.name.setText(label != null ? label : p.name);
+                    l.pct.setText(String.format(Locale.US, "%.1f%%", p.cpuPct));
+                }
+            }
+        }
     }
 }

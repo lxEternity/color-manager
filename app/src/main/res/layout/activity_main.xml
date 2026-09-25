@@ -120,7 +120,7 @@
                         android:paddingEnd="9dp"
                         android:paddingTop="4dp"
                         android:paddingBottom="4dp"
-                        android:text="监视器"
+                        android:text="悬浮窗管理"
                         android:textColor="@color/textSecondary"
                         android:textSize="10sp" />
                 </LinearLayout>
@@ -416,40 +416,6 @@
                     android:layout_marginTop="8dp"
                     android:orientation="vertical"
                     android:visibility="gone" />
-            </LinearLayout>
-
-            <!-- 帧率录制记录 -->
-            <LinearLayout
-                android:id="@+id/menuFrameRecords"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_card"
-                android:padding="10dp">
-
-                <View
-                    android:layout_width="3dp"
-                    android:layout_height="18dp"
-                    android:background="#EF4444" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="10dp"
-                    android:text="帧率录制记录"
-                    android:textColor="@color/textPrimary"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    android:tint="#EF4444"
-                    android:contentDescription="帧率录制记录" />
             </LinearLayout>
 
             <!-- 功耗记录 -->

@@ -369,6 +369,23 @@ function exec(cmd){
   });
 }
 const shOut = async c => (await exec(c)).stdout.trim();
+/* ---- base64 单行回传读取 ----
+   部分管理器(KSU兼容壳)的 exec 回调对 stdout 中的引号/多行内容处理有兼容性问题
+   （内容被截断或回调不触发），导致读到空配置 → 页面显示默认值而非脚本值。
+   统一改走 base64（输出仅字母数字+/= 且单行），任何桥都能安全回传 */
+function b64d(s){
+  try{
+    const bin = atob((s||'').replace(/\s+/g,''));
+    const u8 = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(u8);
+  }catch(e){ return ''; }
+}
+async function readFileB64(path){
+  const b64 = await shOut(`base64 "${path}" 2>/dev/null | tr -d '\\n'`);
+  if(b64 && /^[A-Za-z0-9+/=]+$/.test(b64)) return b64d(b64);
+  return await shOut(`cat "${path}" 2>/dev/null`);   // 兜底：base64 不可用（老 toybox）
+}
 let toastT;
 function toast(t){ $('toast').textContent = t||''; $('toast').classList.add('show');
   clearTimeout(toastT); toastT=setTimeout(()=>$('toast').classList.remove('show'),2000); }
@@ -395,8 +412,7 @@ let modesData = {};            // 解析后的四模式参数
 let editMode = 'powersave';
 let govMode = 'powersave';    // 调速器页选中的模式
 let govData = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:'', hasBig:false};
-let socScheme = '';            // SOC 识别的方案（a/b/c，与 Color 管理器 APP 一致）
-let socInfo = null;            // {code, marketing, scheme, known}
+let socInfo = null;            // {code, marketing, scheme, known}（仅用于 SOC 提示展示）
 
 /* ============ 形态检测与切换 ============ */
 async function detectForm(){
@@ -597,10 +613,10 @@ async function detectSoc(){
   socInfo = row
     ? {code:row[1], marketing:row[2], scheme:row[3], known:true}
     : {code:p?p.toUpperCase():'--', marketing:'未知', scheme:'a', known:false};
-  socScheme = socInfo.scheme;
   return socInfo;
 }
-function schemeGovName(){ return socScheme==='b' ? 'conservative' : socScheme==='c' ? 'walt' : 'scx'; }
+/* 方案对应的调速器名：activeScheme 由 detectActiveConf 按调速器可用性判定（与 main.sh 一致） */
+function schemeGovName(){ return activeScheme==='b' ? 'conservative' : activeScheme==='c' ? 'walt' : 'scx'; }
 
 function parseConf(text){
   const data = {};
@@ -631,7 +647,9 @@ async function loadModes(){
     modesData = parseConf(DEMO_CONF); activeConf='config/a.all.sh';
   }else{
     await detectActiveConf();
-    confText = await shOut(`cat ${MOD}/${activeConf} 2>/dev/null`);
+    // 不用 cat 直读：脚本内容含引号/多行，部分管理器 exec 桥回传会截断 → 显示默认值而非脚本值
+    confText = await readFileB64(`${MOD}/${activeConf}`);
+    if(!confText) toast('读取 '+activeConf+' 失败，当前显示默认值');
     modesData = parseConf(confText);
   }
   const chips=$('modeChips'); chips.innerHTML='';
@@ -671,6 +689,7 @@ function renderMode(){
 
 async function saveMode(){
   if(demoMode){ toast('演示模式：真机保存将写入 ' + activeConf); return; }
+  if(!confText){ toast('配置读取失败，已阻止保存（防止清空脚本）'); return; }
   const text = buildConf(confText, modesData);
   const ok = await writeFile(`${MOD}/${activeConf}`, text);
   if(!ok){ toast('写入失败'); return; }
@@ -794,14 +813,18 @@ function buildGovScript(text, d){
 async function loadGov(){
   if(form!=='dispatch') return;
   await detectSoc();
+  // 方案选择与 script/main.sh 一致：按调速器可用性（scx→A / walt→C / conservative→B）。
+  // 不能只按 SOC 映射——自定义内核（如 8gen2 刷风驰内核）实际走 A 方案时，SOC 预设仍是 C
+  await detectActiveConf();
   const file = GOV_FILES[govMode];
   if(demoMode){
     govData = parseGovScript(DEMO_GOV[govMode]);
     if(!govData.governor) govData.governor = schemeGovName();
   }else{
-    // 模块调速器脚本目录为大写 A/B/C（socScheme 是小写方案号，直接拼路径会指向不存在的目录）
-    const govDir = socScheme==='b' ? 'B' : socScheme==='c' ? 'C' : 'A';
-    const t = await shOut(`cat ${MOD}/${govDir}/${file} 2>/dev/null`);
+    // 模块调速器脚本目录为大写 A/B/C（activeScheme 是小写方案号，直接拼路径会指向不存在的目录）
+    const govDir = activeScheme==='b' ? 'B' : activeScheme==='c' ? 'C' : 'A';
+    const t = await readFileB64(`${MOD}/${govDir}/${file}`);   // base64 单行回传，防引号/多行截断
+    if(!t) toast('读取 '+govDir+'/'+file+' 失败，当前显示默认值');
     govData = parseGovScript(t);
     if(!govData.governor) govData.governor = schemeGovName();
     if(!govSliderDefs()){
@@ -810,9 +833,10 @@ async function loadGov(){
       });
     }
   }
+  const sn = activeScheme==='a'?'1':activeScheme==='b'?'2':'3';
   $('socTip').textContent = socInfo.known
-    ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${socScheme==='a'?'1':socScheme==='b'?'2':'3'}`
-    : `当前SOC：${socInfo.code} → 默认加载方案1`;
+    ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${sn}`
+    : `当前SOC：${socInfo.code} → 按调速器检测加载方案 ${sn}`;
   $('govNow').textContent = schemeGovName();
   const chips=$('govChips'); chips.innerHTML='';
   MODE_KEYS.forEach((k,i)=>{
@@ -879,10 +903,12 @@ function renderGovSliders(){
 async function saveGov(){
   if(demoMode){ toast('演示模式：真机保存将写入调速器脚本'); return; }
   await detectSoc();
+  await detectActiveConf();          // 与 main.sh 一致按调速器可用性选方案
   const file = GOV_FILES[govMode];
-  // 调速器脚本目录为大写 A/B/C（小写 socScheme 拼路径会写到不存在的目录导致保存失败）
-  const govDir = socScheme==='b' ? 'B' : socScheme==='c' ? 'C' : 'A';
-  const t = await shOut(`cat ${MOD}/${govDir}/${file} 2>/dev/null`);
+  // 调速器脚本目录为大写 A/B/C（小写方案号拼路径会写到不存在的目录导致保存失败）
+  const govDir = activeScheme==='b' ? 'B' : activeScheme==='c' ? 'C' : 'A';
+  const t = await readFileB64(`${MOD}/${govDir}/${file}`);
+  if(!t){ toast('调速器脚本读取失败，已阻止保存（防止清空脚本）'); return; }
   const merged = buildGovScript(t, govData);
   const ok = await writeFile(`${MOD}/${govDir}/${file}`, merged);
   if(!ok){ toast('写入失败'); return; }
@@ -1156,25 +1182,30 @@ async function loadLog(){
       const cut = Math.floor(Date.now()/1000) - logRangeH*3600;
       const bs = Math.max(2, Math.ceil(logRangeH*3600/20000));
       const dbl = (cellMode===2 || (cellMode===0 && dualAutoCache===true)) ? 1 : 0;
-      let flist = [];
+      /* 文件名日期改在 JS 端按设备本地时区计算（等价 date +%Y%m%d）：
+         部分 toybox 不支持 `date -d "-N days"`，导致近3天/7天只能读到当天文件 */
+      const flist = [];
+      const nd = new Date();
       for(let i=0;i<days;i++){
-        const f = await shOut(`date -d "-${i} days" +%Y%m%d 2>/dev/null || date -v -${i}d +%Y%m%d 2>/dev/null`);
-        const d8 = (f||'').trim();
-        if(/^\d{8}$/.test(d8)) flist.push('pwlog-'+d8+'.csv');
+        const d = new Date(nd.getFullYear(), nd.getMonth(), nd.getDate()-i);
+        flist.push('pwlog-'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'.csv');
       }
-      flist.push('pwlog-'+(await shOut('date +%Y%m%d')).trim()+'.csv');
-      flist = [...new Set(flist)].map(f=>'/data/adb/colorFC_store/pwlog/'+f).join(' ');
-      const out = await shOut(
-        'for f in'+flist+'; do [ -f "$f" ] && cat "$f"; done | awk -F, '+
+      const files = [...new Set(flist)].map(f=>'/data/adb/colorFC_store/pwlog/'+f).join(' ');
+      /* CSV 列序（v1.64 起 pwlogd 写入）：时间,功率W,电压V,温度,电量,充放状态；
+         旧版为 5 列（时间,功率W,温度,电量,充放状态）——按列数区分解析 */
+      const awkCmd =
+        'for f in '+files+'; do [ -f "$f" ] && cat "$f"; done | awk -F, '+
         '-v cut='+cut+' -v bs='+bs+' -v dbl='+dbl+' \''+
         'NF>=5 && $1 ~ /^[0-9]+$/ {\n'+
         '  t=$1+0; if(t<cut) next;\n'+
-        '  w=$2+0; v=0; if(NF>=6) v=$6+0;\n'+
+        '  w=$2+0; v=0; chg=0; tp=-1;\n'+
+        '  if(NF>=6){ v=$3+0; chg=($6=="1")?1:0; if($4!="NA"&&$4!="") tp=$4+0 }\n'+
+        '  else { chg=($5=="1")?1:0; if($3!="NA"&&$3!="") tp=$3+0 }\n'+
         '  if(dbl && v>0 && v<5.5) w*=2;\n'+                       // 双芯口径且该行为单芯电压 → ×2
-        '  tp=$3+0; if(tp>600)tp/=100; else if(tp>60)tp/=10; if(!(tp>=0&&tp<=90)) tp=-1;\n'+
+        '  if(tp<0||tp>90) tp=-1;\n'+
         '  b=int(t/bs)*bs;\n'+
         '  S[b]+=w; C[b]++;\n'+
-        '  if($5=="1"){WC[b]+=w; NC[b]++; WCT+=w; NCT++} else {WD[b]+=w; ND[b]++; WDT+=w; NDT++}\n'+
+        '  if(chg){WC[b]+=w; NC[b]++; WCT+=w; NCT++} else {WD[b]+=w; ND[b]++; WDT+=w; NDT++}\n'+
         '  if(tp>=0){ST[b]+=tp; NT[b]++; if(tp>MT)MT=tp}\n'+
         '  if(N==0){T0=t;T1=t;LB=b;HB=b} else {if(t<T0)T0=t; if(t>T1)T1=t; if(b<LB)LB=b; if(b>HB)HB=b}\n'+
         '  N++\n'+
@@ -1185,7 +1216,12 @@ async function loadLog(){
         '    for(b=LB;b<=HB;b+=bs) if(C[b]>0)\n'+
         '      printf "%d,%.3f,%.1f,%d\\n", b, S[b]/C[b], (NT[b]>0?ST[b]/NT[b]:-1), (NC[b]*2>=C[b]?1:0);\n'+
         '  }\n'+
-        '}\'');
+        '}\'';
+      /* 聚合结果同样走 base64 单行回传（多行 stdout 部分管理器会截断）；
+         末尾 __EOW__ 哨兵保证空结果也有回传，base64 不可用（老 toybox）时回退原始输出 */
+      let out = await shOut('{ '+awkCmd+'; echo __EOW__; } | base64 | tr -d \'\\n\'');
+      if(out && /^[A-Za-z0-9+/=]+$/.test(out)) out = b64d(out);
+      else out = await shOut(awkCmd);
       let summary = null;
       for(const line of out.split('\n')){
         const p = line.trim().split(',');

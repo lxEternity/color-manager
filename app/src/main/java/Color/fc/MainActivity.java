@@ -25,13 +25,12 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-import Color.fc.view.ChipView;
 import Color.fc.view.SparkView;
 import Color.fc.view.PowerCurveView;
 import Color.fc.view.Warp;
 
 /**
- * 主页：SOC 型号卡 + 实时功耗（自动校准单/双电芯）+ 功能入口
+ * 主页：实时功耗（自动校准单/双电芯）+ 功能入口
  */
 public class MainActivity extends ThemedActivity {
 
@@ -43,12 +42,12 @@ public class MainActivity extends ThemedActivity {
     private int cellMode = 0;
     private int lastAutoCells = 1;
 
-    private TextView socMarketing, socPlatform, rootBadge;
+    private TextView rootBadge;
     private TextView powerValue, powerStatus, currentValue, voltageValue, peakValue, cellBadge;
-    private TextView cpuCount, batteryLevel, batteryTemp;
-    /** 位置1：迷你悬浮窗文字按钮（点击显隐，无开关） */
+    private TextView batteryLevel, batteryTemp;
+    /** 迷你悬浮窗文字按钮（点击显隐，无开关） */
     private TextView monitorToggle;
-    /** 位置2：功耗统计按钮（点击展开/收起近 3 小时曲线） */
+    /** 功耗统计按钮（点击展开/收起近 3 小时曲线） */
     private TextView histToggle;
     private LinearLayout powerHistBox;
     private boolean histExpanded = false;
@@ -58,7 +57,6 @@ public class MainActivity extends ThemedActivity {
     private TextView histHint;
     private long lastHistUpd = 0;
 
-    private ChipView chipView;
     static SocInfo cachedSoc;
 
     @Override
@@ -66,45 +64,38 @@ public class MainActivity extends ThemedActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        socMarketing = findViewById(R.id.socMarketing);
-        socPlatform = findViewById(R.id.socPlatform);
         rootBadge = findViewById(R.id.rootBadge);
-        chipView = findViewById(R.id.chipView);
         powerValue = findViewById(R.id.powerValue);
         powerStatus = findViewById(R.id.powerStatus);
         currentValue = findViewById(R.id.currentValue);
         voltageValue = findViewById(R.id.voltageValue);
         peakValue = findViewById(R.id.peakValue);
         cellBadge = findViewById(R.id.cellBadge);
-        cpuCount = findViewById(R.id.cpuCount);
         batteryLevel = findViewById(R.id.batteryLevel);
         batteryTemp = findViewById(R.id.batteryTemp);
 
-        // 功能入口：直接进入下一页面（转场特效已按需求移除）
-        wireBeam(R.id.menuSchedule, ScheduleActivity.class);
-        wireBeam(R.id.menuGovernor, GovernorActivity.class);
-        wireBeam(R.id.menuMode, ModeActivity.class);
-        wireBeam(R.id.menuTheme, ThemeActivity.class);
-        Warp.press(findViewById(R.id.socCard));
         // 记录卡片：按压动效
         Warp.press(findViewById(R.id.menuFrameRecords));
         Warp.press(findViewById(R.id.menuPowerRecords));
+
+        // 主题设置入口
+        findViewById(R.id.menuTheme).setOnClickListener(v ->
+                startActivity(new Intent(this, ThemeActivity.class)));
 
         detectSoc();
         detectRoot();
         startPowerLoop();
         AppLimitService.ensure(this);   // 已配置单应用负载限制则确保执行服务在跑
 
-        // 位置1：点击"迷你悬浮窗"文字显隐悬浮窗（无开关）
+        // 迷你悬浮窗文字显隐悬浮窗（无开关）
         monitorToggle = findViewById(R.id.monitorToggle);
         monitorToggle.setOnClickListener(v -> toggleMonitor(!MonitorService.running));
 
-        // 位置2：点击"功耗统计"展开/收起近 3 小时曲线
+        // 功耗统计：展开/收起近 3 小时曲线
         histToggle = findViewById(R.id.histToggle);
         histToggle.setOnClickListener(v -> toggleHist());
         powerHistBox = findViewById(R.id.powerHistBox);
 
-        // 功耗统计曲线（SOC 卡内）：点击查看 Scene 样式详细记录
         histSpark = findViewById(R.id.histSpark);
         powerCurve = findViewById(R.id.powerCurve);
         histHint = findViewById(R.id.histHint);
@@ -120,38 +111,21 @@ public class MainActivity extends ThemedActivity {
 
         // 兜底：每次到前台重读持久化的电芯模式，防止意外丢失
         updateCellModeFromPrefs();
-    }
 
-    /** 入口卡片：按压动效 + 直接进入下一页面（转场特效已移除） */
-    private void wireBeam(int id, Class<?> cls) {
-        View v = findViewById(id);
-        Warp.press(v);
-        v.setOnClickListener(x -> startActivity(new Intent(this, cls)));
+        // 底部导航栏
+        setupBottomNav(R.id.navHome);
     }
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
-    /** 检测 SOC 型号并展示对应配置 */
+    /** 检测 SOC 型号（供其它页面缓存使用，主页不再展示 SOC 卡片） */
     private void detectSoc() {
-        if (cachedSoc != null) {
-            applySoc(cachedSoc);
-            return;
-        }
+        if (cachedSoc != null) return;
         new Thread(() -> {
             cachedSoc = SocInfo.autoDetect();
-            runOnUiThread(() -> applySoc(cachedSoc));
         }).start();
-    }
-
-    private void applySoc(SocInfo s) {
-        soc = s;
-        chipView.setChip(s.shortName, s.code);
-        socMarketing.setText(s.marketing);
-        socPlatform.setText(String.format(Locale.US, "platform: %s · %s", s.platform, s.vendor));
-        int n = PowerMonitor.cpuCount();
-        cpuCount.setText(n > 0 ? String.valueOf(n) : "--");
     }
 
     private void detectRoot() {
@@ -219,7 +193,7 @@ public class MainActivity extends ThemedActivity {
         }
     }
 
-    /** 位置1：点击"迷你悬浮窗"文字启停前台服务（无开关） */
+    /** 点击"监视器"文字启停前台服务（无开关） */
     private void toggleMonitor(boolean on) {
         if (on) {
             if (!Settings.canDrawOverlays(this)) {
@@ -244,7 +218,7 @@ public class MainActivity extends ThemedActivity {
         syncMonitorUi();
     }
 
-    /** 位置2：点击"功耗统计"展开/收起近 3 小时曲线 */
+    /** 点击"功耗统计"展开/收起近 3 小时曲线 */
     private void toggleHist() {
         histExpanded = !histExpanded;
         powerHistBox.setVisibility(histExpanded ? View.VISIBLE : View.GONE);

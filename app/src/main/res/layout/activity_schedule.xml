@@ -169,4 +169,7 @@
             android:textSize="15sp"
             android:textStyle="bold" />
     </LinearLayout>
+
+    <!-- 底部导航栏（与 WEBUI 一致） -->
+    <include layout="@layout/view_bottom_nav" />
 </LinearLayout>

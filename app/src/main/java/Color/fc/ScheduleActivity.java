@@ -52,6 +52,7 @@ public class ScheduleActivity extends ThemedActivity {
         setContentView(R.layout.activity_schedule);
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
+        setupBottomNav(R.id.navSchedule);
         socTip = findViewById(R.id.socTip);
         tabAV = findViewById(R.id.tabA);
         tabBV = findViewById(R.id.tabB);

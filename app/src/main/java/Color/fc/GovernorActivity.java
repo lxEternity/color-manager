@@ -90,6 +90,7 @@ public class GovernorActivity extends ThemedActivity {
         setContentView(R.layout.activity_governor);
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
+        setupBottomNav(R.id.navGovernor);
         findViewById(R.id.saveBtn).setOnClickListener(v -> saveAll());
         findViewById(R.id.btnImport).setOnClickListener(v -> importLax());
         findViewById(R.id.btnExport).setOnClickListener(v -> exportLax());

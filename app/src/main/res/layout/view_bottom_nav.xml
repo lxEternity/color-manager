@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部导航栏：与 WEBUI 一致的样式（半透明白底 + 顶部分割线 + 图标+文字按钮） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bottomNav"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#F2FFFFFF"
+    android:elevation="8dp">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingTop="8dp"
+        android:paddingBottom="10dp">
+
+        <!-- 主页 -->
+        <LinearLayout
+            android:id="@+id/navHome"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
+
+            <ImageView
+                android:id="@+id/navHomeIcon"
+                android:layout_width="21dp"
+                android:layout_height="21dp"
+                android:src="@drawable/ic_nav_home"
+                android:contentDescription="主页" />
+
+            <TextView
+                android:id="@+id/navHomeText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="主页"
+                android:textColor="@color/textDim"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 调度参数 -->
+        <LinearLayout
+            android:id="@+id/navSchedule"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
+
+            <ImageView
+                android:id="@+id/navScheduleIcon"
+                android:layout_width="21dp"
+                android:layout_height="21dp"
+                android:src="@drawable/ic_nav_schedule"
+                android:contentDescription="调度参数" />
+
+            <TextView
+                android:id="@+id/navScheduleText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="调度参数"
+                android:textColor="@color/textDim"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 调速器 -->
+        <LinearLayout
+            android:id="@+id/navGovernor"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
+
+            <ImageView
+                android:id="@+id/navGovernorIcon"
+                android:layout_width="21dp"
+                android:layout_height="21dp"
+                android:src="@drawable/ic_nav_governor"
+                android:contentDescription="调速器" />
+
+            <TextView
+                android:id="@+id/navGovernorText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="调速器"
+                android:textColor="@color/textDim"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 应用策略 -->
+        <LinearLayout
+            android:id="@+id/navMode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
+
+            <ImageView
+                android:id="@+id/navModeIcon"
+                android:layout_width="21dp"
+                android:layout_height="21dp"
+                android:src="@drawable/ic_nav_mode"
+                android:contentDescription="应用策略" />
+
+            <TextView
+                android:id="@+id/navModeText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="应用策略"
+                android:textColor="@color/textDim"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

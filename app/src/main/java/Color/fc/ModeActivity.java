@@ -66,6 +66,7 @@ public class ModeActivity extends ThemedActivity {
         setContentView(R.layout.activity_mode);
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
+        setupBottomNav(R.id.navMode);
         ruleHint = findViewById(R.id.ruleHint);
         ruleBox = findViewById(R.id.ruleBox);
 

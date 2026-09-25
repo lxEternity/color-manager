@@ -16,6 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import Color.fc.view.LiquidDrawable;
 import Color.fc.view.Warp;
 
 /**
@@ -99,7 +100,10 @@ public class OverlayManagerSheet {
 
     private Dialog build() {
         boolean dark = ThemeStore.dark(ctx);
-        int sheetBg = ctx.getResources().getColor(R.color.bg);
+        // 沉浸模式：自定义背景图（优先）或全透明背景 —— 与主页 ThemeStore.applyBackground 同判定
+        boolean img = ThemeStore.imageBg(ctx) && ThemeStore.bgFile(ctx).exists();
+        boolean transp = ThemeStore.transparentBg(ctx) && !img;
+        final boolean immersive = img || transp;
         int textPrimary = ctx.getResources().getColor(R.color.textPrimary);
         int textSecondary = ctx.getResources().getColor(R.color.textSecondary);
 
@@ -110,9 +114,15 @@ public class OverlayManagerSheet {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(0, dp(8), 0, dp(16));
         // 源码 ModalBottomSheet：surfaceContainerLow 底 + 顶部 28dp 圆角
-        // （此 App 无该层级，用页面底色 bg 承托 bgCard 卡片行，层级关系与源码一致）
+        // 沉浸时底板半透明（透出主页背景图/桌面），透明度与控件玻璃透明度联动
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(sheetBg);
+        if (immersive) {
+            int base = dark ? 0xFF0D1220 : 0xFFF5F7FC;
+            int a = Math.max(178, Math.round(ThemeStore.glassAlpha(ctx) * 2.05f)); // ≥70% 保证可读
+            bg.setColor((base & 0x00FFFFFF) | (a << 24));
+        } else {
+            bg.setColor(ctx.getResources().getColor(R.color.bg));
+        }
         bg.setCornerRadii(new float[]{dp(28), dp(28), dp(28), dp(28), 0, 0, 0, 0});
         root.setBackground(bg);
 
@@ -169,7 +179,7 @@ public class OverlayManagerSheet {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         for (int t = 0; t < MonitorService.N_TYPES; t++) {
-            list.addView(buildRow(t, dark, textPrimary, textSecondary));
+            list.addView(buildRow(t, dark, immersive, textPrimary, textSecondary));
         }
 
         d.setContentView(root);
@@ -178,13 +188,19 @@ public class OverlayManagerSheet {
             w.setBackgroundDrawable(new ColorDrawable(android.graphics.Color.TRANSPARENT));
             w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             w.setGravity(Gravity.BOTTOM);
+            // 沉浸时减弱遮罩，让主题背景图/桌面透出弹窗
+            try {
+                w.setDimAmount(immersive ? 0.2f : 0.5f);
+            } catch (Exception ignored) {
+            }
         }
         close.setOnClickListener(v -> d.dismiss());
         return d;
     }
 
-    /** 单行监视器：图标块 + 标题/描述 + 开关（整行可点，照搬 Kin OverlayRow） */
-    private View buildRow(final int type, boolean dark, int textPrimary, int textSecondary) {
+    /** 单行监视器：图标块 + 标题/描述 + 开关（整行可点，照搬 Kin OverlayRow）
+     *  沉浸时行底应用控件玻璃透明度（与主页 walkGlass 一致）+ 液态玻璃叠加 */
+    private View buildRow(final int type, boolean dark, boolean immersive, int textPrimary, int textSecondary) {
         int tint = TINTS[type];
 
         LinearLayout row = new LinearLayout(ctx);
@@ -200,6 +216,14 @@ public class OverlayManagerSheet {
         rbg.setColor(ctx.getResources().getColor(R.color.bgCard));
         rbg.setCornerRadius(dp(18));
         rbg.setStroke(dp(1), ctx.getResources().getColor(R.color.bgCardStroke));
+        if (immersive) {
+            // 沉浸玻璃化：行卡片按控件玻璃透明度半透明，透出弹窗底板的背景图
+            rbg.setAlpha(Math.round(ThemeStore.glassAlpha(ctx) * 2.55f));
+            if (ThemeStore.liquidGlass(ctx)) {
+                row.setForeground(new LiquidDrawable(dp(18),
+                        ctx.getResources().getDisplayMetrics().density));
+            }
+        }
         row.setBackground(rbg);
         Warp.press(row);
 

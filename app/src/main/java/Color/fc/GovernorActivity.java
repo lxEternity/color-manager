@@ -14,6 +14,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -40,13 +41,15 @@ public class GovernorActivity extends ThemedActivity {
     private final HashMap<String, TextView> spinners = new HashMap<>();
     /** 每模式的 8 个核心芯片（key=模式索引） */
     private final HashMap<String, TextView[]> coreChips = new HashMap<>();
-    /** 每模式的限频选择值（key=模式.minFreq / 模式.maxFreq） */
-    private final HashMap<String, TextView> freqVals = new HashMap<>();
-    /** 本机可用 CPU 频率档位（MHz 降序），首次扫描一次后永久缓存 */
-    private long[] cpuFreqs = new long[0];
     /** 本机支持的调速器列表（首次扫描一次后缓存），空 = 扫描失败回退 GOV_PRESETS */
     private String[] govList = new String[0];
     private boolean loading = true;
+
+    /** Kin-app 限频模式节点（ColorOsTweaks：0=限制生效，1=解除限制；重启恢复） */
+    private static final String CPU_LIMIT_NODE = "/proc/game_opt/disable_cpufreq_limit";
+    private Switch cpuLimitSw;
+    private TextView cpuLimitDesc;
+    private boolean cpuLimitApplying = false;
 
     /** 预设调速器列表（本机扫描失败时的回退列表） */
     private static final String[] GOV_PRESETS = {
@@ -64,21 +67,20 @@ public class GovernorActivity extends ThemedActivity {
             "性能模式调速器参数（CPU 0/3/5/7）",
             "极速模式全核调速器参数（CPU0-7）"
     };
-    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用），
-     *  minFreqL/maxFreqL/minFreqB/maxFreqB = 小核/大核自定义限频（MHz，0=不限制，照搬 Kin 分簇方案） */
+    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用）。
+     *  原小核/大核限频下拉已移除，限频统一改为页面顶部的 Kin-app 限频模式开关 */
     private static final String[][] FIELDS = {
-            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate",
-                    "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"},
-            {"governor", "targetLoads", "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"},
-            {"governor", "targetLoads", "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"},
-            {"governor", "targetLoads", "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"}
+            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate"},
+            {"governor", "targetLoads"},
+            {"governor", "targetLoads"},
+            {"governor", "targetLoads"}
     };
-    /** 出厂默认（与模块 A/ 出厂脚本一致：conservative.sh 95/90/1/8000、scx1=90、scx2=85、scx3=walt，限频全不限制） */
+    /** 出厂默认（与模块 A/ 出厂脚本一致：conservative.sh 95/90/1/8000、scx1=90、scx2=85、scx3=walt） */
     private static final String[][] DEFAULTS = {
-            {"conservative", "95", "90", "1", "8000", "0", "0", "0", "0"},
-            {"scx", "90", "0", "0", "0", "0"},
-            {"scx", "85", "0", "0", "0", "0"},
-            {"walt", "70", "0", "0", "0", "0"}
+            {"conservative", "95", "90", "1", "8000"},
+            {"scx", "90"},
+            {"scx", "85"},
+            {"walt", "70"}
     };
     /** 模块可能用于恢复 A/ 脚本的镜像位置（类似 conf 模板机制），保存时三重写入 */
     private static final String[] MIRROR_DIRS = {
@@ -108,6 +110,7 @@ public class GovernorActivity extends ThemedActivity {
         tab = soc.config != null ? soc.config : "a";
 
         buildCards();
+        loadCpuLimitState();   // Kin 限频模式节点状态（可用性 + 开关回显）
 
         new Thread(() -> {
             // 方案1（A/）与方案2（B/）分别解析，各自镜像兜底
@@ -121,7 +124,6 @@ public class GovernorActivity extends ThemedActivity {
                         RootShell.readFile(GOV_DIR_B + "/" + FILES[i]), i == 0);
                 govsB[i] = mergeGov(gb, mirrorB[i], i);
             }
-            loadFreqScan();   // 本机频率档位：仅在无缓存时扫描一次
             loadGovScan();   // 本机支持的调速器：仅首次扫描，避免选到不支持的调速器
             runOnUiThread(() -> {
                 loading = false;
@@ -135,6 +137,8 @@ public class GovernorActivity extends ThemedActivity {
     private void buildCards() {
         LinearLayout container = findViewById(R.id.modesContainer);
         int[] colors = {0xFF00B5A3, 0xFF0096C8, 0xFFE08A00, 0xFFA02CF0};
+
+        addCpuLimitCard(container);
 
         for (int i = 0; i < 4; i++) {
             final int idx = i;
@@ -169,12 +173,99 @@ public class GovernorActivity extends ThemedActivity {
                 addParam(box, idx + ".targetLoads", "target_loads 目标负载（%）",
                         i == 1 ? "90" : i == 2 ? "85" : "70", true);
             }
-            addFreqSelector(box, idx + ".minFreqL", "小核最小频率限制");
-            addFreqSelector(box, idx + ".maxFreqL", "小核最大频率限制");
-            addFreqSelector(box, idx + ".minFreqB", "大核最小频率限制");
-            addFreqSelector(box, idx + ".maxFreqB", "大核最大频率限制");
             container.addView(card);
         }
+    }
+
+    /** Kin-app 限频模式卡片（照搬 ColorOsTweaks CPU 频率限制）：
+     *  节点 /proc/game_opt/disable_cpufreq_limit，开=限制生效(写 0)，关=解除限制(写 1)，
+     *  可逆、重启恢复系统默认；节点不存在（非 ColorOS/无 game_opt）时整行灰置 */
+    private void addCpuLimitCard(LinearLayout container) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        int pad = dp(14);
+        card.setPadding(pad, dp(13), pad, dp(13));
+        card.setBackgroundResource(R.drawable.bg_card);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        clp.bottomMargin = dp(9);
+        card.setLayoutParams(clp);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(this);
+        title.setText("CPU 频率限制（限频模式）");
+        title.setTextColor(getResources().getColor(R.color.textPrimary));
+        title.setTextSize(15);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        texts.addView(title);
+        cpuLimitDesc = new TextView(this);
+        cpuLimitDesc.setText("正在检测本机是否支持…");
+        cpuLimitDesc.setTextColor(getResources().getColor(R.color.textSecondary));
+        cpuLimitDesc.setTextSize(11);
+        android.widget.LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        dlp.topMargin = dp(2);
+        texts.addView(cpuLimitDesc, dlp);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        texts.setLayoutParams(tlp);
+        card.addView(texts);
+
+        cpuLimitSw = new Switch(this);
+        cpuLimitSw.setEnabled(false);   // 状态加载完成后按可用性启用
+        card.addView(cpuLimitSw);
+        container.addView(card);
+
+        cpuLimitSw.setOnCheckedChangeListener((b, on) -> {
+            if (cpuLimitApplying) return;   // 回显触发的回调不重复落盘
+            setCpuLimit(on);
+        });
+    }
+
+    /** 后台读取限频节点状态并回显（可用性 + 开关状态） */
+    private void loadCpuLimitState() {
+        new Thread(() -> {
+            RootShell.Result probe = RootShell.exec("[ -e " + CPU_LIMIT_NODE + " ]", 4);
+            boolean avail = probe.ok();
+            String val = avail ? RootShell.readFile(CPU_LIMIT_NODE) : null;
+            boolean on = val != null && val.trim().split(",")[0].trim().equals("0");
+            runOnUiThread(() -> {
+                if (isFinishing() || cpuLimitSw == null) return;
+                cpuLimitApplying = true;
+                cpuLimitSw.setEnabled(avail);
+                cpuLimitSw.setChecked(avail && on);
+                cpuLimitApplying = false;
+                cpuLimitDesc.setText(avail
+                        ? "根据帧率调节 CPU 频率限制；关闭即解除限频（重启恢复）"
+                        : "本机不支持：未找到 game_opt 限频节点");
+                cpuLimitDesc.setTextColor(getResources().getColor(avail
+                        ? R.color.textSecondary : R.color.textDim));
+            });
+        }).start();
+    }
+
+    /** 写限频节点（Kin ColorOsTweaks.setCpuLimit：chmod 666 → echo → chmod 444 复锁），
+     *  写后回读真实状态刷新开关，失败提示 */
+    private void setCpuLimit(boolean on) {
+        final int v = on ? 0 : 1;
+        new Thread(() -> {
+            RootShell.Result r = RootShell.exec(
+                    "chmod 666 " + CPU_LIMIT_NODE + "; echo " + v + " > " + CPU_LIMIT_NODE
+                            + "; chmod 444 " + CPU_LIMIT_NODE, 6);
+            String val = RootShell.readFile(CPU_LIMIT_NODE);
+            boolean now = val != null && val.trim().split(",")[0].trim().equals("0");
+            final boolean ok = r.ok() && now == on;
+            runOnUiThread(() -> {
+                if (isFinishing() || cpuLimitSw == null) return;
+                cpuLimitApplying = true;
+                cpuLimitSw.setChecked(now);
+                cpuLimitApplying = false;
+                Toast.makeText(this, ok ? (on ? "限频已生效" : "已解除限频（重启恢复）")
+                        : "限频设置失败", Toast.LENGTH_SHORT).show();
+            });
+        }).start();
     }
 
     /** 启用核心选择行：8 个可点击芯片。状态=实时 sysfs online，点击即时写 sysfs
@@ -352,151 +443,6 @@ public class GovernorActivity extends ThemedActivity {
         return false;
     }
 
-    /** 限频选择行：显示当前值（不限制 / xxx MHz），点击弹出本机档位选择 */
-    private void addFreqSelector(LinearLayout box, String key, String label) {
-        View row = getLayoutInflater().inflate(R.layout.governor_row, box, false);
-        ((TextView) row.findViewById(R.id.label)).setText(label);
-        TextView val = row.findViewById(R.id.govValue);
-        val.setText("不限制");
-        val.setOnClickListener(v -> showFreqPicker(key, val));
-        freqVals.put(key, val);
-        box.addView(row);
-    }
-
-    /** 弹出本机频率档位单选弹窗（列表来自首次扫描并缓存的 freqScan） */
-    private void showFreqPicker(String key, TextView val) {
-        if (cpuFreqs.length == 0) {
-            Toast.makeText(this, "频率列表不可用，改为手动输入（MHz，0=不限制）",
-                    Toast.LENGTH_SHORT).show();
-            showFreqManual(val);
-            return;
-        }
-        String cur = val.getText().toString().trim();
-        String[] items = new String[cpuFreqs.length + 2];
-        items[0] = "不限制";
-        int checked = "不限制".equals(cur) ? 0 : -1;
-        for (int i = 0; i < cpuFreqs.length; i++) {
-            items[i + 1] = cpuFreqs[i] + " MHz";
-            if (checked < 0 && String.valueOf(cpuFreqs[i]).equals(cur)) checked = i + 1;
-        }
-        items[cpuFreqs.length + 1] = "手动输入 MHz…";
-        AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle("选择频率")
-                .setSingleChoiceItems(items, checked, (d, w) -> {
-                    d.dismiss();
-                    if (w == 0) {
-                        val.setText("不限制");
-                    } else if (w == items.length - 1) {
-                        showFreqManual(val);
-                    } else {
-                        val.setText(String.valueOf(cpuFreqs[w - 1]));
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .create();
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
-        }
-        dlg.show();
-    }
-
-    /** 手动输入限频（MHz，0 或留空=不限制） */
-    private void showFreqManual(TextView val) {
-        final EditText et = new EditText(this);
-        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        et.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(10)});
-        String cur = val.getText().toString().trim();
-        et.setText("不限制".equals(cur) ? "0" : cur);
-        AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle("输入频率（MHz，0=不限制）")
-                .setView(et)
-                .setPositiveButton("确定", (d, w) -> {
-                    String s = et.getText().toString().trim();
-                    if (s.isEmpty()) s = "0";
-                    try {
-                        long v = Long.parseLong(s);
-                        val.setText(v <= 0 ? "不限制" : String.valueOf(v));
-                    } catch (Exception ignored) {
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .create();
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
-        }
-        dlg.show();
-    }
-
-    /** 扫描本机所有 CPU 的可用频率档位（MHz 降序去重）。仅在无缓存时执行一次，
-     *  结果永久保存到 SharedPreferences，之后不再重复扫描 */
-    private void loadFreqScan() {
-        try {
-            String csv = getSharedPreferences("colorfc", MODE_PRIVATE).getString("freqScan", "");
-            if (!csv.isEmpty()) {
-                String[] ps = csv.split(",");
-                long[] arr = new long[ps.length];
-                int n = 0;
-                for (String p : ps) {
-                    try {
-                        arr[n++] = Long.parseLong(p);
-                    } catch (Exception ignored) {
-                    }
-                }
-                cpuFreqs = java.util.Arrays.copyOf(arr, n);
-                return;
-            }
-            StringBuilder cmd = new StringBuilder();
-            for (int c = 0; c < 8; c++) {
-                cmd.append("cat /sys/devices/system/cpu/cpu").append(c)
-                        .append("/cpufreq/scaling_available_frequencies 2>/dev/null; ");
-            }
-            java.util.TreeSet<Long> set = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
-            RootShell.Result r = RootShell.exec(cmd.toString());
-            if (r.ok() && r.out != null) {
-                for (String tok : r.out.trim().split("\\s+")) {
-                    try {
-                        long k = Long.parseLong(tok);
-                        if (k > 1000) set.add(k / 1000);
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-            // 部分内核无 available 列表：退回各簇 cpuinfo_min/max 兜底
-            if (set.size() < 2) {
-                StringBuilder fb = new StringBuilder();
-                for (int c = 0; c < 8; c++) {
-                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
-                            .append("/cpufreq/cpuinfo_min_freq 2>/dev/null; ");
-                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
-                            .append("/cpufreq/cpuinfo_max_freq 2>/dev/null; ");
-                }
-                r = RootShell.exec(fb.toString());
-                if (r.ok() && r.out != null) {
-                    for (String tok : r.out.trim().split("\\s+")) {
-                        try {
-                            long k = Long.parseLong(tok);
-                            if (k > 1000) set.add(k / 1000);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-            }
-            if (!set.isEmpty()) {
-                StringBuilder sbCsv = new StringBuilder();
-                for (long v : set) {
-                    if (sbCsv.length() > 0) sbCsv.append(',');
-                    sbCsv.append(v);
-                }
-                getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                        .putString("freqScan", sbCsv.toString()).commit();
-                cpuFreqs = new long[set.size()];
-                int n = 0;
-                for (long v : set) cpuFreqs[n++] = v;
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
     /** 扫描本机所有 CPU 支持的调速器（scaling_available_governors 并集去重）。
      *  仅首次扫描，结果缓存到 SharedPreferences（内核级列表，重启不变） */
     private void loadGovScan() {
@@ -547,21 +493,11 @@ public class GovernorActivity extends ThemedActivity {
                     if (sp != null && v != null && !v.isEmpty()) sp.setText(v);
                     continue;
                 }
-                if (isFreqField(FIELDS[i][j])) {
-                    TextView tv = freqVals.get(key);
-                    if (tv != null) tv.setText(normF(v).isEmpty() ? "不限制" : v.trim());
-                    continue;
-                }
                 EditText et = inputs.get(key);
                 if (et == null) continue;
                 et.setText(v);
             }
         }
-    }
-
-    /** 是否限频字段（小核/大核 × 最小/最大） */
-    private static boolean isFreqField(String f) {
-        return "minFreqL".equals(f) || "maxFreqL".equals(f) || "minFreqB".equals(f) || "maxFreqB".equals(f);
     }
 
     private String readField(GovernorConfig.Gov g, String f) {
@@ -572,10 +508,6 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": return g.freqStep;
             case "samplingRate": return g.samplingRate;
             case "targetLoads": return g.targetLoads;
-            case "minFreqL": return g.minFreqL;
-            case "maxFreqL": return g.maxFreqL;
-            case "minFreqB": return g.minFreqB;
-            case "maxFreqB": return g.maxFreqB;
         }
         return "";
     }
@@ -588,14 +520,11 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": g.freqStep = v; break;
             case "samplingRate": g.samplingRate = v; break;
             case "targetLoads": g.targetLoads = v; break;
-            case "minFreqL": g.minFreqL = v; break;
-            case "maxFreqL": g.maxFreqL = v; break;
-            case "minFreqB": g.minFreqB = v; break;
-            case "maxFreqB": g.maxFreqB = v; break;
         }
     }
 
-    /** 把界面输入收集进 govs（保存与导出共用） */
+    /** 把界面输入收集进 govs（保存与导出共用）。
+     *  限频字段不再有 UI，统一归零 = 保存后彻底解除旧的小核/大核限频（限频交给限频模式开关） */
     private void collectInputs() {
         for (int i = 0; i < 4; i++) {
             // 芯片状态写回
@@ -606,6 +535,7 @@ public class GovernorActivity extends ThemedActivity {
                     govs[i].cores[c] = t == null || (Boolean) t;
                 }
             }
+            govs[i].minFreqL = govs[i].maxFreqL = govs[i].minFreqB = govs[i].maxFreqB = "0";
             for (int j = 0; j < FIELDS[i].length; j++) {
                 String f = FIELDS[i][j];
                 if ("governor".equals(f)) {
@@ -613,13 +543,6 @@ public class GovernorActivity extends ThemedActivity {
                     if (sp != null && sp.getText() != null && sp.getText().length() > 0) {
                         writeField(govs[i], f, sp.getText().toString());
                     }
-                    continue;
-                }
-                if (isFreqField(f)) {
-                    TextView tv = freqVals.get(i + "." + f);
-                    if (tv == null) continue;
-                    String s = tv.getText().toString().trim();
-                    writeField(govs[i], f, (s.isEmpty() || "不限制".equals(s)) ? "0" : s);
                     continue;
                 }
                 EditText et = inputs.get(i + "." + f);
@@ -777,7 +700,7 @@ public class GovernorActivity extends ThemedActivity {
         final int[] sel = {0};
         AlertDialog dlg = new AlertDialog.Builder(this)
                 .setTitle("恢复默认值")
-                .setMessage("选择要恢复出厂默认参数的方案，点击确定后立即写入并保存（调速器、参数、限频与核心全恢复默认）")
+                .setMessage("选择要恢复出厂默认参数的方案，点击确定后立即写入并保存（调速器、参数与核心全恢复默认，旧限频一并解除）")
                 .setSingleChoiceItems(opts, 0, (d, w) -> sel[0] = w)
                 .setPositiveButton("确定", (d, w) -> doResetDefaults(sel[0]))
                 .setNegativeButton("取消", null)
@@ -810,7 +733,7 @@ public class GovernorActivity extends ThemedActivity {
                 "已恢复默认值并保存（" + label + "）");
     }
 
-    /** 出厂默认配置数组：调速器/参数取 DEFAULTS，限频 0=不限制，核心全启用 */
+    /** 出厂默认配置数组：调速器/参数取 DEFAULTS，限频已移交限频模式开关（全 0=不限制），核心全启用 */
     private GovernorConfig.Gov[] defaultGovs() {
         GovernorConfig.Gov[] out = new GovernorConfig.Gov[4];
         for (int i = 0; i < 4; i++) {
@@ -821,17 +744,10 @@ public class GovernorActivity extends ThemedActivity {
                 g.downThreshold = DEFAULTS[0][2];
                 g.freqStep = DEFAULTS[0][3];
                 g.samplingRate = DEFAULTS[0][4];
-                g.minFreqL = DEFAULTS[0][5];
-                g.maxFreqL = DEFAULTS[0][6];
-                g.minFreqB = DEFAULTS[0][7];
-                g.maxFreqB = DEFAULTS[0][8];
             } else {
                 g.targetLoads = DEFAULTS[i][1];
-                g.minFreqL = DEFAULTS[i][2];
-                g.maxFreqL = DEFAULTS[i][3];
-                g.minFreqB = DEFAULTS[i][4];
-                g.maxFreqB = DEFAULTS[i][5];
             }
+            // 限频字段保持 Gov 构造默认（0 = 不限制）
             // cores 保持构造默认（8 核全启用）
             out[i] = g;
         }

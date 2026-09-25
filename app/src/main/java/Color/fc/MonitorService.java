@@ -420,55 +420,82 @@ public class MonitorService extends Service {
         }
     }
 
-    // ==================== CPU 占用（/proc/stat 差分，免 root） ====================
+    // ==================== CPU 占用（/proc/stat 差分，免 root 优先，被 SELinux 挡时 root 兜底） ====================
+
+    /** 整读 /proc/stat 文本：Java 直读失败（Android 10+ 部分系统 SELinux 拦普通应用）
+     *  时回退 root cat（照搬 Kin MetricReader.procStatText） */
+    private String procStatText() {
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
+            StringBuilder sb = new StringBuilder();
+            String l;
+            while ((l = r.readLine()) != null) {
+                sb.append(l).append('\n');
+                if (l.startsWith("cpu ") && sb.length() > 4096) break;
+            }
+            if (sb.length() > 0 && sb.charAt(0) == 'c') return sb.toString();
+        } catch (Exception ignored) {
+        }
+        try {
+            RootShell.Result r = RootShell.exec("cat /proc/stat 2>/dev/null", 6);
+            if (r.ok() && r.out != null && r.out.startsWith("cpu")) return r.out;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
 
     private void readCpu(Snap s) {
-        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
-            String line = r.readLine();       // 首行 cpu 总
-            if (line != null && line.startsWith("cpu ")) {
-                String[] p = line.split("\\s+");
-                long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
-                long total = 0;
-                for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
-                if (lastIdle >= 0 && total > lastTotal) {
-                    s.cpuLoadPct = (int) Math.max(0, Math.min(100,
-                            100.0 * (total - lastTotal - (idle - lastIdle)) / (total - lastTotal)));
-                }
-                lastIdle = idle;
-                lastTotal = total;
+        String text = procStatText();
+        if (text == null) return;
+        String[] lines = text.split("\n");
+        int ln = 0;
+        if (ln < lines.length && lines[ln].startsWith("cpu ")) {
+            String[] p = lines[ln].split("\\s+");
+            long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
+            long total = 0;
+            for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
+            if (lastIdle >= 0 && total > lastTotal) {
+                s.cpuLoadPct = (int) Math.max(0, Math.min(100,
+                        100.0 * (total - lastTotal - (idle - lastIdle)) / (total - lastTotal)));
             }
-            List<long[]> cur = new ArrayList<>();
-            while ((line = r.readLine()) != null) {
-                if (!line.startsWith("cpu") || line.startsWith("cpu ")) continue;
-                String[] p = line.split("\\s+");
+            lastIdle = idle;
+            lastTotal = total;
+            ln++;
+        }
+        List<long[]> cur = new ArrayList<>();
+        for (; ln < lines.length; ln++) {
+            String line = lines[ln];
+            if (!line.startsWith("cpu") || line.startsWith("cpu ")) continue;
+            String[] p = line.split("\\s+");
+            if (p.length < 5) continue;
+            try {
                 long idle = Long.parseLong(p[4]) + Long.parseLong(p[5]);
                 long total = 0;
                 for (int i = 1; i < p.length; i++) total += Long.parseLong(p[i]);
                 cur.add(new long[]{idle, total});
+            } catch (Exception ignored) {
             }
-            int n = cur.size();
-            coreCount = Math.max(coreCount, n);
-            if (n > 0) {
-                if (lastCoreIdle == null || lastCoreIdle.length != n) {
-                    lastCoreIdle = new long[n];
-                    lastCoreTotal = new long[n];
-                    for (int i = 0; i < n; i++) {
-                        lastCoreIdle[i] = cur.get(i)[0];
-                        lastCoreTotal[i] = cur.get(i)[1];
-                    }
-                } else {
-                    int[] out = new int[n];
-                    for (int i = 0; i < n; i++) {
-                        long di = cur.get(i)[0] - lastCoreIdle[i];
-                        long dt = cur.get(i)[1] - lastCoreTotal[i];
-                        out[i] = dt > 0 ? (int) Math.max(0, Math.min(100, 100.0 * (dt - di) / dt)) : 0;
-                        lastCoreIdle[i] = cur.get(i)[0];
-                        lastCoreTotal[i] = cur.get(i)[1];
-                    }
-                    s.coreLoadPct = out;
+        }
+        int n = cur.size();
+        coreCount = Math.max(coreCount, n);
+        if (n > 0) {
+            if (lastCoreIdle == null || lastCoreIdle.length != n) {
+                lastCoreIdle = new long[n];
+                lastCoreTotal = new long[n];
+                for (int i = 0; i < n; i++) {
+                    lastCoreIdle[i] = cur.get(i)[0];
+                    lastCoreTotal[i] = cur.get(i)[1];
                 }
+            } else {
+                int[] out = new int[n];
+                for (int i = 0; i < n; i++) {
+                    long di = cur.get(i)[0] - lastCoreIdle[i];
+                    long dt = cur.get(i)[1] - lastCoreTotal[i];
+                    out[i] = dt > 0 ? (int) Math.max(0, Math.min(100, 100.0 * (dt - di) / dt)) : 0;
+                    lastCoreIdle[i] = cur.get(i)[0];
+                    lastCoreTotal[i] = cur.get(i)[1];
+                }
+                s.coreLoadPct = out;
             }
-        } catch (Exception ignored) {
         }
     }
 
@@ -478,17 +505,22 @@ public class MonitorService extends Service {
             "g=$(cat /sys/class/kgsl/kgsl-3d0/gpuclk 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/devfreq/*qcom,gpu*/cur_freq 2>/dev/null);"
+                    + "[ -n \"$g\" ] || g=$(cat /sys/class/devfreq/*kgsl*/cur_freq 2>/dev/null);"
                     + "[ -n \"$g\" ] || g=$(cat /sys/class/devfreq/*gpu*/cur_freq 2>/dev/null);"
                     + "echo \"G:$g\";"
-                    + "gl=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/gpu_load 2>/dev/null);"
-                    + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null);"
+                    + "gl=$(cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null);"
+                    + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/devfreq/gpu_load 2>/dev/null);"
                     + "[ -n \"$gl\" ] || gl=$(cat /sys/class/kgsl/kgsl-3d0/gpuload 2>/dev/null);"
                     + "echo \"GL:$gl\";"
                     + "d=$(cat /sys/class/devfreq/*ddr*/cur_freq 2>/dev/null);"
+                    + "[ -n \"$d\" ] || d=$(cat /sys/class/devfreq/*dvfsrc*/cur_freq 2>/dev/null);"
+                    + "[ -n \"$d\" ] || d=$(cat /sys/class/devfreq/*bimc*/cur_freq 2>/dev/null);"
                     + "[ -n \"$d\" ] || d=$(cat /sys/class/devfreq/*qcom,mem*/cur_freq 2>/dev/null);"
                     + "echo \"D:$d\";"
                     + "for q in /sys/devices/system/cpu/cpufreq/policy*; do "
-                    + "echo \"Q:$(cat $q/scaling_cur_freq 2>/dev/null):$(cat $q/related_cpu 2>/dev/null)\"; done;"
+                    + "rc=$(cat $q/related_cpus 2>/dev/null);"
+                    + "[ -n \"$rc\" ] || rc=$(cat $q/affected_cpus 2>/dev/null);"
+                    + "echo \"Q:$(cat $q/scaling_cur_freq 2>/dev/null):$rc\"; done;"
                     + "for z in /sys/class/thermal/thermal_zone*; do "
                     + "[ -f \"$z/temp\" ] || continue; "
                     + "echo \"T:$(cat \"$z/type\" 2>/dev/null):$(cat \"$z/temp\" 2>/dev/null)\"; done";
@@ -533,7 +565,10 @@ public class MonitorService extends Service {
             } else if (line.startsWith("D:")) {
                 try {
                     double v = Double.parseDouble(line.substring(2).trim());
-                    if (v > 0) cachedDdrMhz = v < 3000 ? (int) v : (int) Math.round(v / 1e6);
+                    // 按量级判单位（照搬 Kin readDdrMhz）：>10M=Hz，>10K=kHz，否则已是 MHz
+                    if (v > 10_000_000) cachedDdrMhz = (int) Math.round(v / 1e6);
+                    else if (v > 10_000) cachedDdrMhz = (int) Math.round(v / 1000);
+                    else if (v > 0) cachedDdrMhz = (int) v;
                 } catch (Exception ignored) {
                 }
             } else if (line.startsWith("Q:")) {
@@ -803,6 +838,8 @@ public class MonitorService extends Service {
     // ==================== 进程采样（照搬 Kin ProcSampler：top 主路径 + /proc 差分回退） ====================
 
     private List<Proc> sampleProcs() {
+        // top 一次性失败（如偶发超时）后每 20 拍自愈重试，避免永久降级到慢速 /proc 差分
+        if (!topUsable && tick % 20 == 0) topUsable = true;
         if (topUsable) {
             try {
                 RootShell.Result r = RootShell.exec(
@@ -1748,6 +1785,7 @@ public class MonitorService extends Service {
                 LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(21));
                 if (i > 0) blp.topMargin = dp(3);
+                box.setVisibility(View.GONE);   // 首次采样前隐藏，避免整屏空白行
                 listBox.addView(box, blp);
             }
             listBox.setOrientation(LinearLayout.VERTICAL);

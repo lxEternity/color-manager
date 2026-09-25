@@ -28,19 +28,32 @@ public class RootShell {
         return exec(cmd, 6);
     }
 
-    /** 执行 su -c 命令（自定义超时秒数） */
+    /** 执行 su -c 命令（自定义超时秒数）。
+     *  输出流必须在等待期间并发读取：先 waitFor 再读会在输出超过管道缓冲（64KB）时
+     *  死锁——子进程写满管道阻塞，waitFor 永远等不到退出 → 超时返回空（进程列表等大输出全灭） */
     public static Result exec(String cmd, int timeoutSec) {
         Result r = new Result();
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            final Process proc = p;
+            final StringBuilder out = new StringBuilder();
+            final StringBuilder err = new StringBuilder();
+            Thread tOut = new Thread(() -> out.append(readAll(proc.getInputStream())));
+            Thread tErr = new Thread(() -> err.append(readAll(proc.getErrorStream())));
+            tOut.setDaemon(true);
+            tErr.setDaemon(true);
+            tOut.start();
+            tErr.start();
             if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 r.err = "timeout";
                 return r;
             }
-            r.out = readAll(p.getInputStream());
-            r.err = readAll(p.getErrorStream());
+            tOut.join(1000);
+            tErr.join(1000);
+            r.out = out.toString();
+            r.err = err.toString();
             r.code = p.exitValue();
         } catch (Exception e) {
             r.err = String.valueOf(e);

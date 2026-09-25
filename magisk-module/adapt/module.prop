@@ -1,0 +1,6 @@
+id=colorFC
+name=ColorFC自适应限频
+version=v1.0.8-260916
+versionCode=26091402
+author=Ktwo（适配合并：白驹过隙而已）
+description=自适配多SoC动态限频：常态按百分比锁定CPU/GPU，游戏自动放开。支持SM8850/SM8750/SM8845/SM8650及其他机型。ColorFC形态·由WebUI切换而来，可在WebUI切回Color调度。

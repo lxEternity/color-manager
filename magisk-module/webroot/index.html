@@ -562,6 +562,7 @@ async function applyMode(k){
 const SLIDER_DEFS = [
   {k:'opt2',        t:'性能提升',  min:0,  max:100, step:1,  suf:'%'},
   {k:'cpuMax',      t:'CPU 上限',  min:5,  max:100, step:1,  suf:'%'},
+  {k:'cpuMaxB',     t:'大核上限',  min:5,  max:100, step:1,  suf:'%'},
   {k:'cpuMin',      t:'CPU 下限',  min:0,  max:95,  step:1,  suf:'%'},
   {k:'llcc',        t:'LLCC 频率', min:350000, max:1800000, step:50000, div:1000, suf:' MHz'},
   {k:'uclampDisplay',t:'显示增强', min:0, max:100, step:1, suf:'%'},
@@ -646,8 +647,13 @@ function parseConf(text){
     const blk = bm ? bm[1] : '';
     const d = {};
     d.opt2 = +(blk.match(/\$mokzdz\/[ABC]\/opt2 (\d+)/)||[])[1] || 0;
-    const jm = blk.match(/json_cpu_max_min "(\d+)" "(\d+)"/);
-    d.cpuMax = jm?+jm[1]:100; d.cpuMin = jm?+jm[2]:0;
+    // 2 参=全簇同上限，4 参=小核上限/大核上限/下限/GPU
+    const jm = blk.match(/json_cpu_max_min "(\d+)" "(\d+)"(?: "(\d+)")?(?: "(\d+)")?/);
+    if(jm && jm[3] != null){
+      d.cpuMax = +jm[1]; d.cpuMaxB = +jm[2]; d.cpuMin = +jm[3];
+    } else if(jm){
+      d.cpuMax = +jm[1]; d.cpuMaxB = +jm[1]; d.cpuMin = +jm[2];
+    } else { d.cpuMax = 100; d.cpuMaxB = 100; d.cpuMin = 0; }
     d.llcc = +(blk.match(/llcc\.sh set_max_freq (\d+)/)||[])[1] || 0;
     const um = {};
     blk.replace(/echo "(\d+)"\s*>\s*\/dev\/cpuctl\/(display|ssfg|touch|multimedia|rt|top-app)\/cpu\.uclamp\.min/g,
@@ -733,7 +739,7 @@ function buildConf(text, data){
     let blk = bm[1];
     const d = data[mode];
     blk = blk.replace(/(\$mokzdz\/[ABC]\/opt2 )\d+/, '$1'+d.opt2);
-    blk = blk.replace(/json_cpu_max_min "\d+" "\d+"/, `json_cpu_max_min "${d.cpuMax}" "${d.cpuMin}"`);
+    blk = blk.replace(/json_cpu_max_min "[^"]*" "[^"]*"(?: "[^"]*")?(?: "[^"]*")?/, `json_cpu_max_min "${d.cpuMax}" "${d.cpuMaxB}" "${d.cpuMin}" "0"`);
     blk = blk.replace(/(llcc\.sh set_max_freq )\d+/, '$1'+d.llcc);
     blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/display\/cpu\.uclamp\.min)/, `echo "${d.uclampDisplay}"$2`);
     blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/ssfg\/cpu\.uclamp\.min)/, `echo "${d.uclampSsfg}"$2`);
@@ -1458,7 +1464,7 @@ if [[ $action == "powersave" ]]; then
 	echo "powersave" > $pan1
     $mokzdz/A/opt2 0
     $mokzdz/A/conservative.sh
-    $mokzdz/A/json_cpu_max_min "36" "4"
+    $mokzdz/A/json_cpu_max_min "36" "22" "4" "0"
     $mokzdz/A/llcc.sh set_max_freq 300000
     echo "5" > /dev/cpuctl/display/cpu.uclamp.min
     echo "4" > /dev/cpuctl/ssfg/cpu.uclamp.min
@@ -1509,7 +1515,7 @@ if [[ $action == "fast" ]]; then
 fi
 `;
 const DEMO_GOV = {
-  powersave:'echo "conservative" > scaling_governor\necho "93" > conservative/up_threshold\necho "86" > conservative/down_threshold\necho "2" > conservative/freq_step\necho "12000" > conservative/sampling_rate\n',
+  powersave:'echo "conservative" > scaling_governor\necho "96" > conservative/up_threshold\necho "60" > conservative/down_threshold\necho "1" > conservative/freq_step\necho "20000" > conservative/sampling_rate\n',
   balance:'echo "scx" > scaling_governor\necho "84" > scx/target_loads\n',
   performance:'echo "scx" > scaling_governor\necho "74" > scx/target_loads\n',
   fast:'echo "walt" > scaling_governor\necho "60" > scx/target_loads\n',

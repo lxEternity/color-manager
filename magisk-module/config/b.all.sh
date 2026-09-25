@@ -4,7 +4,7 @@ if [[ $action == "powersave" ]]; then
 	echo "powersave" > $pan1
     $mokzdz/A/opt2 0
     $mokzdz/A/conservative.sh
-    $mokzdz/A/json_cpu_max_min "42" "5"
+    $mokzdz/A/json_cpu_max_min "42" "24" "5" "0"
     $mokzdz/A/llcc.sh set_max_freq 350000
     
     echo "6" > /dev/cpuctl/display/cpu.uclamp.min

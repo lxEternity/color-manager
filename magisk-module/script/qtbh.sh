@@ -3,9 +3,21 @@ BASEDIR="$(dirname $(readlink -f "$0"))"
 
 $MODULE_PATH/fps
 
+# 节流：inotify 事件常成串触发（top-app cpuset 任务迁移），
+# 2 秒内只做一次完整前台解析，避免 dumpsys 风暴持续占用大核/超大核
+now=$(date +%s)
+last=$(cat $mosdz/qtbh_ts 2>/dev/null)
+[ -z "$last" ] && last=0
+if [ $((now - last)) -lt 2 ]; then
+    exit 0
+fi
+echo $now > $mosdz/qtbh_ts
+
 jbaoming=$(cat $mosdz/baom)
-#获取前台并且输出
-xbaoming=$(dumpsys window displays | grep "mFocusedApp" | grep -v "AppWindowToken" | awk '{print $(NF-1)}' | awk -F "/" '{print $1}')
+#获取前台并且输出（单次 dumpsys，比较与切换使用同一解析格式：
+# 旧版比较用 $(NF-1) 而存储用 ActivityRecord 解析，两种格式结果不一致时
+# 每次事件都误判"前台变化"，反复整套重应用模式配置，导致大核持续满载）
+xbaoming=$(dumpsys window displays | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
 
 if [[ $jbaoming != $xbaoming ]]; then
     shij="[$(date '+%T')]"
@@ -29,8 +41,6 @@ if [[ $jbaoming != $xbaoming ]]; then
 
         exit 1
     fi
-
-    xbaoming=$(dumpsys window displays | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
 
     # 前台解析失败/为空时直接退出：
     # 空值会让 grep -q 恒真并按 conf 首个含=行取模式，导致模式被莫名切回

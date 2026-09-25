@@ -44,9 +44,9 @@ public class AllConfig {
     /** A 方案出厂默认（与 conf/config/a.all.sh 一致）；B 方案解析 b.all.sh 时的兜底种子 */
     public static AllConfig defaults() {
         AllConfig c = new AllConfig();
-        // 与出厂 conf/config/a.all.sh（2参 json：全簇同上限，GPU 不限）保持一致
+        // 与出厂 conf/config/a.all.sh 一致（省电 4 参：小核 36 / 超大核 22 / 下限 4 / GPU 不限）
         Mode ps = new Mode();
-        ps.opt2 = "0"; ps.cpuMaxL = "36"; ps.cpuMaxB = "36"; ps.cpuMin = "4"; ps.gpuMax = "0"; ps.llcc = "300000";
+        ps.opt2 = "0"; ps.cpuMaxL = "36"; ps.cpuMaxB = "22"; ps.cpuMin = "4"; ps.gpuMax = "0"; ps.llcc = "300000";
         ps.uclampDisplay = "5"; ps.uclampSsfg = "4"; ps.uclampTouch = "7";
         ps.uclampMm = "5"; ps.uclampRt = "2"; ps.uclampTopApp = "9";
         Mode bl = new Mode();
@@ -70,11 +70,11 @@ public class AllConfig {
     }
 
     /** 方案3（C 方案，无风驰内核机型如骁龙8gen2/8+）出厂默认：
-     *  json_cpu_max_min 保持 2 参（上限%/下限%，小/大核同值），GPU 不限制 */
+     *  json_cpu_max_min 4 参（小核/大核上限、下限、GPU 0=不限） */
     public static AllConfig defaultsC() {
         AllConfig c = new AllConfig();
         Mode ps = new Mode();
-        ps.opt2 = "0"; ps.cpuMaxL = "36"; ps.cpuMaxB = "36"; ps.cpuMin = "4"; ps.gpuMax = "0"; ps.llcc = "300000";
+        ps.opt2 = "0"; ps.cpuMaxL = "36"; ps.cpuMaxB = "22"; ps.cpuMin = "4"; ps.gpuMax = "0"; ps.llcc = "300000";
         ps.uclampDisplay = "4"; ps.uclampSsfg = "3"; ps.uclampTouch = "6";
         ps.uclampMm = "4"; ps.uclampRt = "2"; ps.uclampTopApp = "8";
         Mode bl = new Mode();
@@ -244,8 +244,8 @@ public class AllConfig {
         return sb.toString();
     }
 
-    /** 生成 C 方案（方案3）脚本内容：目录用 C/，json_cpu_max_min 保持 2 参（上限%/下限%），
-     *  与模块出厂 c.all.sh 及 WebUI 读写格式一致（出厂 C/json_cpu_max_min 仅支持 2 参） */
+    /** 生成 C 方案（方案3）脚本内容：目录用 C/，json_cpu_max_min 4 参（小核/大核上限、下限、GPU），
+     *  与升级后的 C/json_cpu_max_min 及 WebUI 读写格式一致 */
     public static String generateC(AllConfig cfg) {
         Mode ps = cfg.modes.get("powersave");
         Mode bl = cfg.modes.get("balance");
@@ -259,7 +259,8 @@ public class AllConfig {
         sb.append("\techo \"powersave\" > $pan1\n");
         sb.append("    $mokzdz/C/opt2 ").append(ps.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/C/conservative.sh\n");
-        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(ps.cpuMaxL).append("\" \"").append(ps.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(ps.cpuMaxL).append("\" \"").append(ps.cpuMaxB)
+                .append("\" \"").append(ps.cpuMin).append("\" \"").append(ps.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/C/freq0.sh 2>/dev/null\n");
         sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(ps.llcc).append('\n');
         sb.append("    \n");
@@ -272,7 +273,8 @@ public class AllConfig {
         sb.append("\techo \"balance\" > $pan1\n");
         sb.append("    $mokzdz/C/opt2 ").append(bl.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/C/scx1.sh\n");
-        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(bl.cpuMaxL).append("\" \"").append(bl.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(bl.cpuMaxL).append("\" \"").append(bl.cpuMaxB)
+                .append("\" \"").append(bl.cpuMin).append("\" \"").append(bl.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/C/freq1.sh 2>/dev/null\n");
         sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(bl.llcc).append('\n');
         sb.append("   \n");
@@ -285,7 +287,8 @@ public class AllConfig {
         sb.append("\techo \"performance\" > $pan1\n");
         sb.append("    $mokzdz/C/opt2 ").append(pf.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/C/scx2.sh\n");
-        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(pf.cpuMaxL).append("\" \"").append(pf.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(pf.cpuMaxL).append("\" \"").append(pf.cpuMaxB)
+                .append("\" \"").append(pf.cpuMin).append("\" \"").append(pf.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/C/freq2.sh 2>/dev/null\n");
         sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(pf.llcc).append('\n');
         appendUclamp(sb, pf);
@@ -299,7 +302,8 @@ public class AllConfig {
         sb.append("    $mokzdz/C/opt2 ").append(fa.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/C/scx3.sh\n");
         sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(fa.llcc).append('\n');
-        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(fa.cpuMaxL).append("\" \"").append(fa.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(fa.cpuMaxL).append("\" \"").append(fa.cpuMaxB)
+                .append("\" \"").append(fa.cpuMin).append("\" \"").append(fa.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/C/freq3.sh 2>/dev/null\n");
         sb.append('\n');
         appendUclamp(sb, fa);

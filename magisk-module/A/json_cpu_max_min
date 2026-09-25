@@ -29,6 +29,10 @@ for p in $BASE/policy*; do
   vmax=$((imf * pct / 100))
   vmin=$((imf * mn / 100))
   [ -n "$imn" ] && [ "$vmin" -lt "$imn" ] 2>/dev/null && vmin=$imn
+  # 上限不得低于下限：百分比换算的 vmax 若低于硬件下限（如超大核 22%×3.2G=703M
+  # < 825M 下限），内核会拒绝写入且 max 留在解锁后的满频——超大核反而满载。
+  # 此时把上限钳到下限，即把该簇锁死在最低频（省电模式期望行为）
+  [ "$vmax" -lt "$vmin" ] 2>/dev/null && vmax=$vmin
   chmod 777 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
   echo "$imf" > "$p/scaling_max_freq" 2>/dev/null
   [ -n "$imn" ] && echo "$imn" > "$p/scaling_min_freq" 2>/dev/null

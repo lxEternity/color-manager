@@ -7,6 +7,17 @@ mosdz=$2
 cpuxh=$3
 pan1="$mokml/cur_powermode.txt"
 
+# qhz 死锁自愈：上次切换被中断（进程被杀/报错）会把锁留在 0，
+# 之后所有切换都会静默跳过（表现为"点了没反应/切换不生效"）。
+# 锁龄超过 60 秒视为死锁，强制接管（正常切换在秒级完成）
+if [ "$(cat $mosdz/qhz 2>/dev/null)" != "1" ]; then
+	now=$(date +%s)
+	lock=$(stat -c %Y $mosdz/qhz 2>/dev/null || echo $now)
+	if [ $((now - lock)) -gt 60 ]; then
+		echo "1" > $mosdz/qhz
+	fi
+fi
+
 if test $(cat $mosdz/qhz) -eq 1 ; then
 	#无堵塞
 

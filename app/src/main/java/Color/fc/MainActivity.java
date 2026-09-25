@@ -280,7 +280,9 @@ public class MainActivity extends ThemedActivity {
         }).start();
     }
 
-    /** 应用模式：main.sh 立即切换 + moren= 持久化（与 WebUI applyMode 完全一致） */
+    /** 应用模式：单条原子命令（先写 moren= 再 main.sh，与 WebUI 完全一致）。
+     *  先写 moren：间隙内前台监视(qtbh.sh)即便被 cpuset 任务迁移触发，读到的也是新 moren，
+     *  不会按旧默认值把刚切的模式强制改回去（WebUI/APP 跨端互相覆盖的根因） */
     private void applyMode(String mode) {
         if (applying) return;
         if (rootChecked && !rooted) {
@@ -295,15 +297,13 @@ public class MainActivity extends ThemedActivity {
             // 方案配置（peiz）：与 WebUI 一致，缺省 all
             String peiz = RootShell.readFile(MOD + "/files/peiz");
             if (peiz == null || peiz.trim().isEmpty()) peiz = "all";
-            RootShell.Result r = RootShell.exec("sh " + MOD + "/script/main.sh " + mode
-                    + " " + MOD + "/files " + peiz.trim(), 20);
-            // 持久化默认模式 moren=：写回 动态模式切换.conf，
-            // 否则前台监视(qtbh.sh)在下一次前台变化时按 moren 切回省电；
-            // 只用 ASCII glob 定位 conf，避免中文文件名兼容问题
-            RootShell.exec("cd " + MOKML + " 2>/dev/null && for f in *.conf; do "
+            // 原子命令：写 moren= + main.sh 切换（只 glob ASCII 定位 conf，规避中文文件名兼容问题）
+            RootShell.Result r = RootShell.exec("cd " + MOKML + " 2>/dev/null && for f in *.conf; do "
                     + "[ -f \"$f\" ] || continue; "
                     + "grep -q '^moren=' \"$f\" && sed -i 's/^moren=.*/moren=" + mode + "/' \"$f\" "
-                    + "|| echo \"moren=" + mode + "\" >> \"$f\"; done; true");
+                    + "|| echo \"moren=" + mode + "\" >> \"$f\"; done; "
+                    + "sh " + MOD + "/script/main.sh " + mode + " " + MOD + "/files " + peiz.trim()
+                    + "; true", 25);
             final boolean ok = r.ok();
             runOnUiThread(() -> {
                 applying = false;

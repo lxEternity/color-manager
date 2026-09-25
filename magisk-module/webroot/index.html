@@ -545,12 +545,14 @@ async function applyMode(k){
   if(demoMode){ toast('演示模式'); return; }
   toast('正在应用 '+MODE_NAMES[k]+'…');
   const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
-  await exec(`sh ${MOD}/script/main.sh ${k} ${MOD}/files ${peiz}`);
-  /* 持久化默认模式 moren=：否则前台监视(qtbh.sh)在下一次前台变化时会按 moren 切回省电，
-     造成"手动切了模式，重进 WebUI 又变回省电"。命令只用 ASCII 路径（glob 定位 conf），
-     避免部分 exec 桥对非 ASCII 文件名的兼容问题 */
-  await exec(`cd /sdcard/Android/qingtd 2>/dev/null && for f in *.conf; do [ -f "$f" ] || continue; `+
-    `grep -q '^moren=' "$f" && sed -i 's/^moren=.*/moren=${k}/' "$f" || echo "moren=${k}" >> "$f"; done; true`);
+  /* 原子化 + 调序：先写 moren= 再执行 main.sh，且合并为单条命令（无间隙）。
+     若先切换后写 moren，间隙内前台监视(qtbh.sh)被 top-app cpuset 任务迁移触发时，
+     会按旧 moren 把刚切的模式强制改回去（WebUI/APP 跨端切换互相覆盖的根因）。
+     命令只用 ASCII 路径（glob 定位 conf），避免部分 exec 桥对非 ASCII 文件名的兼容问题 */
+  const r = await exec(`cd /sdcard/Android/qingtd 2>/dev/null && for f in *.conf; do [ -f "$f" ] || continue; `+
+    `grep -q '^moren=' "$f" && sed -i 's/^moren=.*/moren=${k}/' "$f" || echo "moren=${k}" >> "$f"; done; `+
+    `sh ${MOD}/script/main.sh ${k} ${MOD}/files ${peiz}; true`);
+  if(r && r.errno !== 0){ toast('应用失败，请重试'); return; }
   curMode = k; $('curMode').textContent = MODE_NAMES[k];
   renderHomeChips(k);
   toast(MODE_NAMES[k]+' 已应用（并设为默认模式）');
@@ -1053,8 +1055,16 @@ async function pwSample(){
       `echo "I=$(cat /sys/class/power_supply/battery/current_now 2>/dev/null)";`+
       `echo "V=$(cat /sys/class/power_supply/battery/voltage_now 2>/dev/null)";`+
       `echo "T=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)";`+
-      `echo "S=$(cat /sys/class/power_supply/battery/status 2>/dev/null)"`);
+      `echo "S=$(cat /sys/class/power_supply/battery/status 2>/dev/null)";`+
+      `echo "M=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)"`);
     const g = k => (out.match(new RegExp('^'+k+'=(.*)$','m'))||[])[1]||'';
+    /* 跨端同步：APP/前台监视切换模式后，WebUI 主页跟随刷新（仅变化时重建，避免打断点击） */
+    const mm = g('M').trim();
+    if(form==='dispatch' && MODE_KEYS.includes(mm) && mm!==curMode){
+      curMode = mm;
+      $('curMode').textContent = MODE_NAMES[mm];
+      renderHomeChips(mm);
+    }
     const cur=parseFloat(g('I')), volt=parseFloat(g('V')), tv=parseFloat(g('T'));
     st = g('S').trim();
     chg = /^Charg/i.test(st) || /^(Full|Not charg)/i.test(st);

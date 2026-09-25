@@ -62,7 +62,7 @@ header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
 #pwBadge{font-size:13px}
 #pwBadge.chg{color:var(--ok)} #pwBadge.dsg{color:var(--ac)}
 .chart-frame{position:relative;height:210px;border-radius:12px;overflow:hidden}
-.chart-frame canvas{width:100%!important;height:100%!important}
+.chart-frame canvas{width:100%!important;height:100%!important;touch-action:pan-y}
 
 /* 形态切换（紧凑行） */
 .form-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -905,21 +905,21 @@ function pwRender(){
           { label:'功率', data:pwPower, yAxisID:'yPower',
             borderColor:pwCssVar('--chart-power-line','#67d98a'),
             borderWidth:2, fill:false, tension:.35, borderCapStyle:'round', borderJoinStyle:'round',
-            pointRadius:0, pointHoverRadius:4, pointHitRadius:10,
+            pointRadius:0, pointHoverRadius:4, pointHitRadius:18,
             datalabels:{ display:e=>e.dataIndex===e.dataset.data.length-1, align:'left', anchor:'end', offset:8,
               formatter:v=>v==null?'--':v.toFixed(1)+' W' } },
           { label:'温度', data:pwTemp, yAxisID:'yTemp',
             borderColor:pwCssVar('--chart-temp-line','#ff8086'),
             borderWidth:2, fill:false, tension:.3, borderCapStyle:'round', borderJoinStyle:'round',
-            pointRadius:0, pointHoverRadius:4, pointHitRadius:10,
+            pointRadius:0, pointHoverRadius:4, pointHitRadius:18,
             datalabels:{ display:e=>e.dataIndex===e.dataset.data.length-1, align:'left', anchor:'end', offset:6,
               formatter:v=>v==null?'--':v.toFixed(1)+' ℃' } }
         ]},
         options:{
           responsive:true, maintainAspectRatio:false,
           devicePixelRatio:Math.min(Math.max(window.devicePixelRatio||1,1),4),
-          animation:{duration:220, easing:'easeOutCubic'},
-          interaction:{mode:'index', intersect:false},
+          animation:{duration:260, easing:'easeOutCubic'},
+          interaction:{mode:'index', intersect:false, axis:'x'},
           layout:{padding:{top:16, right:16, bottom:2, left:2}},
           scales:{
             x:{grid:{color:pwCssVar('--chart-grid','rgba(45,140,255,.055)'), drawTicks:false},
@@ -936,6 +936,7 @@ function pwRender(){
             tooltip:{backgroundColor:pwCssVar('--chart-tooltip-bg','rgba(20,31,56,.94)'),
                titleColor:pwCssVar('--chart-tooltip-text','#fff'), bodyColor:pwCssVar('--chart-tooltip-text','#fff'),
                displayColors:true, padding:10, cornerRadius:12,
+               position:'nearest', caretSize:6, caretPadding:10,
                titleFont:{size:11, weight:'700'}, bodyFont:{size:10, weight:'600'}},
             datalabels:{color:pwCssVar('--chart-datalabel-text','#fff'),
                backgroundColor:ctx=>ctx.dataset.label==='功率'
@@ -961,7 +962,7 @@ function pwRender(){
       pwChart.options.scales.yTemp.max = Math.max(40, Math.ceil(tmx+2));
       pwNeedRescale = false;
     }
-    pwChart.update('none');
+    pwChart.update();
   }catch(e){ /* 图表初始化异常不阻塞页面 */ }
 }
 function pwStart(){
@@ -974,7 +975,7 @@ function pwStart(){
 function pwStop(){
   if(pwTimer){ clearInterval(pwTimer); pwTimer=null; }
 }
-window.addEventListener('resize', ()=>{ if(pwChart) pwChart.resize(); });
+window.addEventListener('resize', ()=>{ if(pwChart) pwChart.resize(); if(logChart) logChart.resize(); });
 
 /* ============ 功耗记录（历史曲线 + 电芯检测） ============ */
 let logChart = null, logRangeH = 24, logBusy = false;
@@ -1017,7 +1018,10 @@ async function loadLog(){
         if(p.length!==5 || !/^\d+$/.test(p[0])) continue;
         const t = +p[0];
         if(t < cut) continue;
-        rows.push({t:t*1000, w:parseFloat(p[1]), temp:parseFloat(p[2]), chg:p[4]==='1'});
+        let tv = parseFloat(p[2]);
+        // 兼容旧版记录：温度为 0.1℃ 内核单位（312 = 31.2℃），>100 视为未归一数据
+        if(isFinite(tv) && tv > 100) tv = tv/10;
+        rows.push({t:t*1000, w:parseFloat(p[1]), temp:tv, chg:p[4]==='1'});
       }
       rows.sort((a,b)=>a.t-b.t);
     }
@@ -1062,17 +1066,17 @@ function renderLog(rows){
       type:'line',
       data:{labels, datasets:[
         { label:'功率', data:power, yAxisID:'yPower', borderWidth:1.5, fill:false, tension:.25,
-          pointRadius:0, pointHitRadius:8, borderCapStyle:'round', borderJoinStyle:'round',
+          pointRadius:0, pointHoverRadius:4, pointHitRadius:18, borderCapStyle:'round', borderJoinStyle:'round',
           segment:{borderColor:ctx=>chgs[ctx.p1DataIndex]? '#ffb02e' : pwCssVar('--chart-power-line','#67d98a')} },
         { label:'温度', data:temp, yAxisID:'yTemp', borderWidth:1.5, fill:false, tension:.25,
           borderColor:pwCssVar('--chart-temp-line','#ff8086'),
-          pointRadius:0, pointHitRadius:8, borderCapStyle:'round', borderJoinStyle:'round' }
+          pointRadius:0, pointHoverRadius:4, pointHitRadius:18, borderCapStyle:'round', borderJoinStyle:'round' }
       ]},
       options:{
         responsive:true, maintainAspectRatio:false,
         devicePixelRatio:Math.min(Math.max(window.devicePixelRatio||1,1),4),
         animation:false, spanGaps:true,
-        interaction:{mode:'index', intersect:false},
+        interaction:{mode:'index', intersect:false, axis:'x'},
         layout:{padding:{top:10, right:14, bottom:2, left:2}},
         scales:{
           x:{grid:{color:pwCssVar('--chart-grid'), drawTicks:false},
@@ -1088,6 +1092,7 @@ function renderLog(rows){
           legend:{display:false},
           tooltip:{backgroundColor:pwCssVar('--chart-tooltip-bg'), titleColor:'#fff', bodyColor:'#fff',
             displayColors:true, padding:10, cornerRadius:12,
+            position:'nearest', caretSize:6, caretPadding:10,
             titleFont:{size:11,weight:'700'}, bodyFont:{size:10,weight:'600'},
             callbacks:{ label:ctx=>ctx.dataset.label==='功率'
               ? ` 功率 ${ctx.parsed.y} W（${chgs[ctx.dataIndex]?'充电':'放电'}）`

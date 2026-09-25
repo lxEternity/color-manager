@@ -42,6 +42,8 @@ while true; do
         temp=$(cat $B/temp 2>/dev/null)
         cap=$(cat $B/capacity 2>/dev/null)
         st=$(cat $B/status 2>/dev/null)
+        # battery/temp 为 0.1℃ 内核单位，写入前统一归一为 ℃（保留 1 位小数）
+        [ -n "$temp" ] && temp=$(awk "BEGIN{printf \"%.1f\", $temp/10}")
         # µA×µV/1e12 → W；状态映射：1=充电/满/接电，0=放电
         w=$(awk "BEGIN{c=$cur+0; v=$volt+0; printf \"%.2f\", (c<0?-c:c)*v/1000000000000}")
         case "$st" in

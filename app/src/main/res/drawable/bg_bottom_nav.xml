@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部导航栏背景：跟随日/夜间主题色；沉浸模式下由 ThemeStore.walkGlass() 统一玻璃化 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/titleBar" />
+</shape>

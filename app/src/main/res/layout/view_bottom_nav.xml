@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底部导航栏：与 WEBUI 一致的样式（半透明白底 + 顶部分割线 + 图标+文字按钮） -->
+<!-- 底部导航栏：与 WEBUI 一致的样式（主题色底 + 顶部分割线 + 图标+文字按钮） -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/bottomNav"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#F2FFFFFF"
+    android:background="@drawable/bg_bottom_nav"
     android:elevation="8dp">
 
     <View

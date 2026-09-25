@@ -622,6 +622,19 @@ async function detectSoc(){
 }
 /* 方案对应的调速器名：activeScheme 由 detectActiveConf 按调速器可用性判定（与 main.sh 一致） */
 function schemeGovName(){ return activeScheme==='b' ? 'conservative' : activeScheme==='c' ? 'walt' : 'scx'; }
+/* 当前运行调速器：读 sysfs 实时值。不能按方案映射显示——方案 A 下省电实际是
+   conservative、极速是 walt，按 scheme 映射会恒显 scx */
+async function readLiveGov(){
+  if(demoMode) return '';
+  const g = await shOut('cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null');
+  const v = (g||'').trim();
+  return /^[\w.-]+$/.test(v) ? v : '';
+}
+async function refreshGovNow(){
+  const live = await readLiveGov();
+  $('govNow').textContent = live
+    || (demoMode && govData.governor ? govData.governor : schemeGovName());
+}
 
 function parseConf(text){
   const data = {};
@@ -842,7 +855,6 @@ async function loadGov(){
   $('socTip').textContent = socInfo.known
     ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${sn}`
     : `当前SOC：${socInfo.code} → 按调速器检测加载方案 ${sn}`;
-  $('govNow').textContent = schemeGovName();
   const chips=$('govChips'); chips.innerHTML='';
   MODE_KEYS.forEach((k,i)=>{
     const c=document.createElement('button');
@@ -853,6 +865,7 @@ async function loadGov(){
     chips.appendChild(c);
   });
   $('govDesc').textContent = MODE_DESC[MODE_KEYS.indexOf(govMode)];
+  await refreshGovNow();
   renderDd(); renderGovSliders();
 }
 
@@ -924,7 +937,7 @@ async function saveGov(){
   }else{
     toast('已保存（切换到该模式时生效）');
   }
-  $('govNow').textContent = schemeGovName();
+  await refreshGovNow();
 }
 
 /* ============ 实时功耗曲线（Chart.js，配置与配色  ============ */

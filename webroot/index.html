@@ -338,19 +338,19 @@ function renderFormCard(){
   b.className = 'form-badge ' + form;
   b.textContent = form==='adapt' ? '自适应形态' : '调度形态';
   if(form==='adapt'){
-    $('formName').textContent = 'ColorFC 自适应限频';
+    $('formName').textContent = '自适应限频';
     $('formSub').textContent = 'powerd_freqcap · Ktwo';
     $('formIcon').innerHTML = FORM_ICON_ADAPT;
     $('formIcon').style.background = '#F3E8FF';
-    $('formDesc').textContent = '当前为自适应限频形态：常态按百分比锁定 CPU/GPU，游戏自动放开。切换将完全卸载自适应模块文件，并重新释放 Color 调度到 ColorFC 目录。';
+    $('formDesc').textContent = '当前模式为自适应限频模式，点击切换到Color调度。';
     $('swapBtn').className = 'swap-btn to-dispatch';
     $('swapBtn').textContent = '切换回 Color 调度';
   }else{
-    $('formName').textContent = 'ColorFC · Color 调度';
+    $('formName').textContent = 'Color调度';
     $('formSub').textContent = '四模式 · 前台动态切换';
     $('formIcon').innerHTML = FORM_ICON_DISPATCH;
     $('formIcon').style.background = '#E5F7FD';
-    $('formDesc').textContent = '当前为 Color 调度形态：四模式按前台应用自动切换。切换将完全卸载 Color 调度（含 /data 运行时接口），并全新释放自适应限频模块到 ColorFC 目录，模块 ID 同步为 colorFC。';
+    $('formDesc').textContent = '当前模式为Color调度模式，点击切换到自适应限频。';
     $('swapBtn').className = 'swap-btn to-adapt';
     $('swapBtn').textContent = '切换到自适应限频';
   }
@@ -417,7 +417,7 @@ async function refreshHome(){
     `echo "BT=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)";`+
     `echo "CPU=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | grep -c .)";`+
     `echo "GOV=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)";`+
-    `echo "MAX=$(cat /sys/devices/system/cpu/cpufreq/policy7/scaling_max_freq 2>/dev/null)";`+
+    `echo "MAX=$(M=0; for f in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do v=$(cat $f 2>/dev/null); [ -n "$v" ] && [ "$v" -gt "$M" ] && M=$v; done; echo $M)";`+
     `echo "MEM=$(awk '/MemAvailable/{print int($2/1024)"M"}' /proc/meminfo 2>/dev/null)";`+
     (form==='dispatch'
       ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)"`
@@ -433,7 +433,7 @@ async function refreshHome(){
   const bt = g('BT'); $('vTemp').textContent = bt==='--'?'--':(bt/10).toFixed(1)+'℃';
   $('vCpu').textContent = g('CPU')+' 核';
   $('vGov').textContent = g('GOV');
-  const mf = g('MAX'); $('vMax').textContent = (mf==='--'||!/^[0-9]+$/.test(mf))?'--':(mf/1000).toFixed(0)+' MHz';
+  const mf = g('MAX'); $('vMax').textContent = (mf==='--'||!/^[0-9]+$/.test(mf)||+mf===0)?'--':(mf/1000).toFixed(0)+' MHz';
   $('vMem').textContent = g('MEM');
   if(form==='dispatch'){
     curMode = g('CUR');
@@ -658,7 +658,7 @@ async function loadGov(){
   if(demoMode){
     govData = parseGovScript(DEMO_GOV[govMode]);
   }else{
-    govCur = await shOut(`cat /sys/devices/system/cpu/cpufreq/policy7/scaling_governor 2>/dev/null`);
+    govCur = await shOut(`cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null`);
     const t = await shOut(`cat ${MOD}/${activeScheme}/${file} 2>/dev/null`);
     govData = parseGovScript(t);
     if(!govData.governor) govData.governor = govCur || 'scx';

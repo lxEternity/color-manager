@@ -222,7 +222,7 @@ nav button.on{color:var(--ac);font-weight:700}
       <span style="color:var(--t3);font-size:11px">当前: <b id="curMode" style="color:var(--ac)">--</b></span>
     </div>
     <div class="chips" id="homeChips" style="margin-bottom:0"></div>
-    <div class="hint">由模块前台监视（动态模式切换.conf）自动切换，此处可手动立即应用。</div>
+    <div class="hint">前台监视（动态模式切换.conf）按应用自动切换；手动选择会立即应用并同步为默认模式（moren），重进不再被切回。</div>
   </div>
 
   <!-- 自适应：状态 -->
@@ -545,10 +545,15 @@ async function applyMode(k){
   if(demoMode){ toast('演示模式'); return; }
   toast('正在应用 '+MODE_NAMES[k]+'…');
   const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
-  const r = await exec(`sh ${MOD}/script/main.sh ${k} ${MOD}/files ${peiz}`);
+  await exec(`sh ${MOD}/script/main.sh ${k} ${MOD}/files ${peiz}`);
+  /* 持久化默认模式 moren=：否则前台监视(qtbh.sh)在下一次前台变化时会按 moren 切回省电，
+     造成"手动切了模式，重进 WebUI 又变回省电"。命令只用 ASCII 路径（glob 定位 conf），
+     避免部分 exec 桥对非 ASCII 文件名的兼容问题 */
+  await exec(`cd /sdcard/Android/qingtd 2>/dev/null && for f in *.conf; do [ -f "$f" ] || continue; `+
+    `grep -q '^moren=' "$f" && sed -i 's/^moren=.*/moren=${k}/' "$f" || echo "moren=${k}" >> "$f"; done; true`);
   curMode = k; $('curMode').textContent = MODE_NAMES[k];
   renderHomeChips(k);
-  toast(MODE_NAMES[k]+' 已应用');
+  toast(MODE_NAMES[k]+' 已应用（并设为默认模式）');
 }
 
 /* ============ 调度参数 ============ */
@@ -1381,23 +1386,26 @@ async function loadCells(manual){
     `for p in ${paths.join(' ')}; do v=$(cat $p 2>/dev/null); `+
     `[ -n "$v" ] && { echo "$v"; exit 0; }; done; echo NA`);
   const design = (await read(['/sys/class/oplus_chg/battery/design_capacity','/sys/class/power_supply/battery/charge_full_design'])).trim();
-  const fcc = (await read(['/sys/class/power_supply/battery/charge_full','/sys/class/oplus_chg/battery/fg_full_capacity'])).trim();
+  /* 实测满容量(FCC)：优先 OPLUS FG 学习容量（fg_full_capacity，真实衰减值）；
+     标准 charge_full 在部分 OPLUS 机型上报的是设计容量 → 寿命恒 100% 不准，仅作兜底 */
+  const fcc = (await read(['/sys/class/oplus_chg/battery/fg_full_capacity','/sys/class/power_supply/battery/charge_full','/sys/class/power_supply/bms/charge_full'])).trim();
   const cycle = (await read(['/sys/class/oplus_chg/battery/normal_cycle_cnt','/sys/class/power_supply/battery/cycle_count'])).trim();
   const volt = (await read(['/sys/class/power_supply/battery/voltage_now'])).trim();
   const tech = (await read(['/sys/class/power_supply/battery/technology'])).trim();
   let d=-1, f=-1;
   if(/^\d+(\.\d+)?$/.test(design)) d = +design;
   if(/^\d+(\.\d+)?$/.test(fcc)) f = +fcc;
-  // charge_full 通常为 µAh，design_capacity OPLUS 直接为 mAh
+  // charge_full/charge_full_design 通常为 µAh；OPLUS design_capacity/fg_full_capacity 直接为 mAh
   if(d>10000) d = d/1000;
   if(f>10000) f = f/1000;
   set('cellDesign', d>0? Math.round(d)+' mAh' : '--');
   set('cellFcc', f>0? Math.round(f)+' mAh' : '--');
-  if(d>0 && f>0) set('cellHealth', (f/d*100).toFixed(1)+'%');
-  else if(d>0) set('cellHealth','≈97%');
-  else set('cellHealth','--');
+  set('cellHealth', (d>0 && f>0)? (f/d*100).toFixed(1)+'%' : '--');
   set('cellCycle', /^\d+$/.test(cycle)? cycle+' 次' : '--');
-  set('cellVolt', /^\d+(\.\d+)?$/.test(volt)? (volt/1e6).toFixed(2)+' V' : '--');
+  /* 电压单位自适应（µV/mV/V）：报 mV 的机型不再显示 0.00 V */
+  set('cellVolt', /^\d+(\.\d+)?$/.test(volt)
+    ? ((+volt>1000000? +volt/1e6 : +volt>2500? +volt/1000 : +volt)).toFixed(2)+' V'
+    : '--');
   set('cellTech', tech && tech!=='NA'? tech : '--');
   $('cellHint').textContent = 'FCC=电池实际满充电荷量，随循环衰减；寿命 = FCC ÷ 设计容量';
   if(manual) toast('已重新检测');
@@ -1410,6 +1418,12 @@ function go(p){
     $('nb-'+k).classList.toggle('on',k===p);
   });
   if(p==='home'){ refreshHome(); pwStart(); } else { pwStop(); }
+  /* 进入参数/调速器页时选中"当前运行模式"（而非固定省电）：
+     重进 WebUI 后页面不再总是停在省电模式（切页重进未保存的改动本就会被重新读取覆盖） */
+  if(!demoMode && MODE_KEYS.includes(curMode)){
+    if(p==='modes') editMode = curMode;
+    if(p==='gov')   govMode  = curMode;
+  }
   if(p==='modes') loadModes();
   if(p==='gov') loadGov();
   if(p==='log'){ requestAnimationFrame(()=>loadLog()); loadCells(false); }
@@ -1484,7 +1498,7 @@ const DEMO_GOV = {
   if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); pwStart(); return; }
   await detectForm();
   renderFormCard();
-  refreshHome();
+  await refreshHome();            // 先取到当前运行模式，参数页选中态才准确
   pwStart();
 })();
 </script>

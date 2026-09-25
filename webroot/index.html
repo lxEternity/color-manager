@@ -50,8 +50,11 @@ header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
 .legend-pill{border:1px solid var(--stroke);color:var(--t2);background:var(--card);
   border-radius:999px;align-items:center;gap:5px;padding:4px 9px;font-size:11px;font-weight:650;display:inline-flex}
 .legend-pill--power{color:var(--chart-power-line)}
+.legend-pill--chg{color:#ffb02e}
 .legend-pill--temp{color:var(--chart-temp-line)}
 .legend-pill--muted{color:var(--t3)}
+.mini-btn{border:1.5px solid var(--ac);background:var(--card);color:var(--ac);font-size:12px;
+  font-weight:700;padding:5px 12px;border-radius:20px;cursor:pointer}
 .pw-toprow{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:8px;margin-bottom:10px}
 .pw-stat{background:var(--soft);border-radius:12px;padding:8px 10px}
 .pw-stat small{display:block;color:var(--t3);font-size:10px;margin-bottom:2px}
@@ -305,6 +308,53 @@ nav button.on{color:var(--ac);font-weight:700}
   </div>
 </section>
 
+<!-- ===== 功耗记录 ===== -->
+<section class="page" id="pg-log">
+  <!-- 电芯检测 -->
+  <div class="card">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">电芯检测</span>
+      <button class="mini-btn" onclick="loadCells(true)">重新检测</button>
+    </div>
+    <div class="grid" id="cellGrid">
+      <div class="cell"><i>设计容量</i><b id="cellDesign">--</b></div>
+      <div class="cell"><i>实测满容(FCC)</i><b id="cellFcc">--</b></div>
+      <div class="cell"><i>电池寿命</i><b id="cellHealth">--</b></div>
+      <div class="cell"><i>循环次数</i><b id="cellCycle">--</b></div>
+      <div class="cell"><i>电芯电压</i><b id="cellVolt">--</b></div>
+      <div class="cell"><i>电池技术</i><b id="cellTech">--</b></div>
+    </div>
+    <div class="hint" id="cellHint"></div>
+  </div>
+
+  <!-- 功耗记录曲线 -->
+  <div class="card" style="margin-top:10px">
+    <div class="chart-header">
+      <span class="chart-title">功耗记录曲线</span>
+      <div class="chart-legend">
+        <span class="legend-pill legend-pill--power">放电</span>
+        <span class="legend-pill legend-pill--chg">充电</span>
+        <span class="legend-pill legend-pill--temp">温度</span>
+      </div>
+    </div>
+    <div class="chips" id="logRange" style="margin-bottom:8px">
+      <button class="chip on" data-h="24" onclick="setLogRange(this)">近24小时</button>
+      <button class="chip" data-h="72" onclick="setLogRange(this)">近3天</button>
+      <button class="chip" data-h="168" onclick="setLogRange(this)">近7天</button>
+    </div>
+    <div class="chart-frame"><canvas id="logChart"></canvas></div>
+    <div class="grid" style="margin-top:10px">
+      <div class="cell"><i>记录条数</i><b id="stCount">--</b></div>
+      <div class="cell"><i>平均放电功率</i><b id="stAvgD">--</b></div>
+      <div class="cell"><i>平均充电功率</i><b id="stAvgC">--</b></div>
+      <div class="cell"><i>最高温度</i><b id="stMaxT">--</b></div>
+      <div class="cell"><i>估算耗电</i><b id="stMWh">--</b></div>
+      <div class="cell"><i>覆盖时长</i><b id="stSpan">--</b></div>
+    </div>
+    <div class="hint">由模块后台守护每 30 秒采样一次，数据保留 7 天（/data/adb/colorFC_store/pwlog）</div>
+  </div>
+</section>
+
 </div>
 <div id="toast"></div>
 
@@ -315,6 +365,8 @@ nav button.on{color:var(--ac);font-weight:700}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M4 12h16M4 18h13"/></svg>调度参数</button>
   <button id="nb-gov" onclick="go('gov')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>调速器</button>
+  <button id="nb-log" onclick="go('log')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M4 16l4-6 4 3 5-8"/></svg>功耗记录</button>
 </div></nav>
 
 <script src="lib/chart.umd.js"></script>
@@ -964,15 +1016,198 @@ function pwStop(){
 }
 window.addEventListener('resize', ()=>{ if(pwChart) pwChart.resize(); });
 
+/* ============ 功耗记录（历史曲线 + 电芯检测） ============ */
+let logChart = null, logRangeH = 24, logBusy = false;
+function setLogRange(btn){
+  [...$('logRange').children].forEach(c=>c.classList.remove('on'));
+  btn.classList.add('on');
+  logRangeH = +btn.dataset.h;
+  loadLog();
+}
+async function loadLog(){
+  if(logBusy) return; logBusy = true;
+  try{
+    let rows = [];
+    if(demoMode){
+      const now = Date.now(), step = 30e3, n = Math.floor(logRangeH*3600e3/step);
+      let cap = 78, t0 = now - n*step;
+      for(let i=0;i<n;i++){
+        const t = t0 + i*step, ph = t/28000, ph2 = t/60000;
+        const chg = (Math.floor(t/14400000)%4)===0 && cap < 92;
+        let w;
+        if(chg){ w = 9 + Math.random()*2; cap = Math.min(100, cap + 0.02); }
+        else { w = 2.2 + Math.sin(ph)*1.1 + Math.random()*0.3; cap = Math.max(5, cap - 0.008); }
+        rows.push({t, w:Math.round(w*100)/100, temp:Math.round((33+Math.sin(ph2)*3.5)*10)/10, chg});
+      }
+    }else{
+      const days = Math.ceil(logRangeH/24);
+      const cut = Math.floor(Date.now()/1000) - logRangeH*3600;
+      let files = [];
+      for(let i=0;i<days;i++){
+        const f = await shOut(`date -d "-${i} days" +%Y%m%d 2>/dev/null || date -v -${i}d +%Y%m%d 2>/dev/null`);
+        const d8 = (f||'').trim();
+        if(/^\d{8}$/.test(d8)) files.push('pwlog-'+d8+'.csv');
+      }
+      files.push('pwlog-'+(await shOut('date +%Y%m%d')).trim()+'.csv');
+      files = [...new Set(files)];
+      let csv = '';
+      for(const f of files) csv += await shOut(`cat /data/adb/colorFC_store/pwlog/${f} 2>/dev/null`);
+      for(const line of csv.split('\n')){
+        const p = line.trim().split(',');
+        if(p.length!==5 || !/^\d+$/.test(p[0])) continue;
+        const t = +p[0];
+        if(t < cut) continue;
+        rows.push({t:t*1000, w:parseFloat(p[1]), temp:parseFloat(p[2]), chg:p[4]==='1'});
+      }
+      rows.sort((a,b)=>a.t-b.t);
+    }
+    renderLog(rows);
+  }finally{ logBusy = false; }
+}
+function renderLog(rows){
+  // 降采样到最多 600 桶（桶内取均值）
+  const MAXPTS = 600;
+  let labels=[], power=[], temp=[], chgs=[];
+  if(rows.length > MAXPTS){
+    const bucket = rows.length/MAXPTS;
+    for(let i=0;i<MAXPTS;i++){
+      const s = rows.slice(Math.floor(i*bucket), Math.max(Math.floor((i+1)*bucket), Math.floor(i*bucket)+1));
+      const w = s.reduce((a,x)=>a+x.w,0)/s.length;
+      const tp = s.filter(x=>x.temp!=null&&!isNaN(x.temp));
+      labels.push(fmtClock(s[0].t));
+      power.push(Math.round(w*100)/100);
+      temp.push(tp.length?Math.round((tp.reduce((a,x)=>a+x.temp,0)/tp.length)*10)/10:null);
+      chgs.push(s.filter(x=>x.chg).length >= s.length/2);
+    }
+  }else{
+    rows.forEach(r=>{ labels.push(fmtClock(r.t)); power.push(r.w);
+      temp.push(r.temp!=null&&!isNaN(r.temp)?r.temp:null); chgs.push(r.chg); });
+  }
+  // 统计
+  const dRows = rows.filter(r=>!r.chg), cRows = rows.filter(r=>r.chg);
+  const avg = a => a.length? a.reduce((x,y)=>x+y.w,0)/a.length : 0;
+  $('stCount').textContent = rows.length;
+  $('stAvgD').textContent = dRows.length? avg(dRows).toFixed(2)+' W' : '--';
+  $('stAvgC').textContent = cRows.length? avg(cRows).toFixed(2)+' W' : '--';
+  const ts = rows.filter(r=>r.temp!=null&&!isNaN(r.temp)).map(r=>r.temp);
+  $('stMaxT').textContent = ts.length? Math.max(...ts).toFixed(1)+' ℃' : '--';
+  const mWh = dRows.reduce((a,r)=>a+r.w,0) * (rows.length>1?(rows[rows.length-1].t-rows[0].t)/rows.length/1000:0) * 1000/3600;
+  $('stMWh').textContent = dRows.length>1? (mWh>=1000?(mWh/1000).toFixed(2)+' Wh':mWh.toFixed(0)+' mWh') : '--';
+  $('stSpan').textContent = rows.length>1? fmtSpan((rows[rows.length-1].t-rows[0].t)/1000) : '--';
+  // 图表
+  const c = $('logChart');
+  if(!c || typeof Chart === 'undefined' || !c.clientWidth) return;
+  if(!logChart){
+    logChart = new Chart(c, {
+      type:'line',
+      data:{labels, datasets:[
+        { label:'功率', data:power, yAxisID:'yPower', borderWidth:1.5, fill:false, tension:.25,
+          pointRadius:0, pointHitRadius:8, borderCapStyle:'round', borderJoinStyle:'round',
+          segment:{borderColor:ctx=>chgs[ctx.p1DataIndex]? '#ffb02e' : pwCssVar('--chart-power-line','#67d98a')} },
+        { label:'温度', data:temp, yAxisID:'yTemp', borderWidth:1.5, fill:false, tension:.25,
+          borderColor:pwCssVar('--chart-temp-line','#ff8086'),
+          pointRadius:0, pointHitRadius:8, borderCapStyle:'round', borderJoinStyle:'round' }
+      ]},
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        devicePixelRatio:Math.min(Math.max(window.devicePixelRatio||1,1),4),
+        animation:false, spanGaps:true,
+        interaction:{mode:'index', intersect:false},
+        layout:{padding:{top:10, right:14, bottom:2, left:2}},
+        scales:{
+          x:{grid:{color:pwCssVar('--chart-grid'), drawTicks:false},
+             ticks:{color:pwCssVar('--chart-text'), autoSkip:true, maxTicksLimit:6, font:{size:10}}},
+          yPower:{position:'left', min:0, suggestedMax:12,
+             grid:{color:pwCssVar('--chart-grid'), drawTicks:false},
+             ticks:{color:pwCssVar('--chart-text'), callback:v=>v+'W', font:{size:10}, maxTicksLimit:6}},
+          yTemp:{position:'right', min:15, suggestedMax:45,
+             grid:{drawOnChartArea:false, drawTicks:false},
+             ticks:{color:pwCssVar('--chart-text'), callback:v=>v+'℃', font:{size:10}, maxTicksLimit:6}}
+        },
+        plugins:{
+          legend:{display:false},
+          tooltip:{backgroundColor:pwCssVar('--chart-tooltip-bg'), titleColor:'#fff', bodyColor:'#fff',
+            displayColors:true, padding:10, cornerRadius:12,
+            titleFont:{size:11,weight:'700'}, bodyFont:{size:10,weight:'600'},
+            callbacks:{ label:ctx=>ctx.dataset.label==='功率'
+              ? ` 功率 ${ctx.parsed.y} W（${chgs[ctx.dataIndex]?'充电':'放电'}）`
+              : ` 温度 ${ctx.parsed.y} ℃` }}
+        }
+      }
+    });
+  }else{
+    logChart.data.labels = labels;
+    logChart.data.datasets[0].data = power;
+    logChart.data.datasets[1].data = temp;
+    logChart.data.datasets[0].segment = {borderColor:ctx=>chgs[ctx.p1DataIndex]? '#ffb02e' : pwCssVar('--chart-power-line')};
+  }
+  const pv = power.filter(v=>v!=null);
+  if(pv.length){
+    const mx = Math.max(...pv);
+    logChart.options.scales.yPower.max = Math.max(10, Math.ceil(1.15*mx));
+  }
+  const tv = temp.filter(v=>v!=null);
+  if(tv.length){
+    logChart.options.scales.yTemp.min = Math.max(15, Math.floor(Math.min(...tv)-2));
+    logChart.options.scales.yTemp.max = Math.max(40, Math.ceil(Math.max(...tv)+2));
+  }
+  logChart.update('none');
+}
+function fmtClock(ms){
+  const d = new Date(ms);
+  return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+function fmtSpan(sec){
+  let h = Math.floor(sec/3600), m = Math.round((sec%3600)/60);
+  if(m===60){ h++; m=0; }
+  return h>0? h+'时'+m+'分' : m+'分';
+}
+/* ---- 电芯检测（OPLUS/通用节点多级回退） ---- */
+async function loadCells(manual){
+  const set=(id,v)=>{ $(id).textContent = v; };
+  if(demoMode){
+    set('cellDesign','5500 mAh'); set('cellFcc','5312 mAh'); set('cellHealth','96.6%');
+    set('cellCycle','187'); set('cellVolt','4.42 V'); set('cellTech','Li-poly');
+    $('cellHint').textContent = '演示数据 · 真机将读取 OPLUS/标准电池节点并按 FCC/设计容量计算寿命';
+    if(manual) toast('已重新检测');
+    return;
+  }
+  const read = paths => shOut(
+    `for p in ${paths.join(' ')}; do v=$(cat $p 2>/dev/null); `+
+    `[ -n "$v" ] && { echo "$v"; exit 0; }; done; echo NA`);
+  const design = (await read(['/sys/class/oplus_chg/battery/design_capacity','/sys/class/power_supply/battery/charge_full_design'])).trim();
+  const fcc = (await read(['/sys/class/power_supply/battery/charge_full','/sys/class/oplus_chg/battery/fg_full_capacity'])).trim();
+  const cycle = (await read(['/sys/class/oplus_chg/battery/normal_cycle_cnt','/sys/class/power_supply/battery/cycle_count'])).trim();
+  const volt = (await read(['/sys/class/power_supply/battery/voltage_now'])).trim();
+  const tech = (await read(['/sys/class/power_supply/battery/technology'])).trim();
+  let d=-1, f=-1;
+  if(/^\d+(\.\d+)?$/.test(design)) d = +design;
+  if(/^\d+(\.\d+)?$/.test(fcc)) f = +fcc;
+  // charge_full 通常为 µAh，design_capacity OPLUS 直接为 mAh
+  if(d>10000) d = d/1000;
+  if(f>10000) f = f/1000;
+  set('cellDesign', d>0? Math.round(d)+' mAh' : '--');
+  set('cellFcc', f>0? Math.round(f)+' mAh' : '--');
+  if(d>0 && f>0) set('cellHealth', (f/d*100).toFixed(1)+'%');
+  else if(d>0) set('cellHealth','≈97%');
+  else set('cellHealth','--');
+  set('cellCycle', /^\d+$/.test(cycle)? cycle+' 次' : '--');
+  set('cellVolt', /^\d+(\.\d+)?$/.test(volt)? (volt/1e6).toFixed(2)+' V' : '--');
+  set('cellTech', tech && tech!=='NA'? tech : '--');
+  $('cellHint').textContent = 'FCC=电池实际满充电荷量，随循环衰减；寿命 = FCC ÷ 设计容量';
+  if(manual) toast('已重新检测');
+}
+
 /* ============ 页面切换 ============ */
 function go(p){
-  ['home','modes','gov'].forEach(k=>{
+  ['home','modes','gov','log'].forEach(k=>{
     $('pg-'+k).classList.toggle('on',k===p);
     $('nb-'+k).classList.toggle('on',k===p);
   });
   if(p==='home'){ refreshHome(); pwStart(); } else { pwStop(); }
   if(p==='modes') loadModes();
   if(p==='gov') loadGov();
+  if(p==='log'){ loadLog(); loadCells(false); }
 }
 
 /* ============ 演示数据 ============ */

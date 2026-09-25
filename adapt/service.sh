@@ -29,6 +29,9 @@ while true; do
     nohup $SH "$MODDIR/proc_monitor.sh" "$MODDIR" "$MODDIR/run" "$MODDIR/powerd.log" > /dev/null 2>&1 &
   fi
 
+  # ColorFC 功耗记录守护（幂等，两形态常驻）
+  [ -f "$MODDIR/pwlogd.sh" ] && nohup $SH "$MODDIR/pwlogd.sh" > /dev/null 2>&1 &
+
   sleep 30
 done
 

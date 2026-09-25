@@ -209,3 +209,7 @@ chmod 0777 /sys/devices/system
 
 # WebUI 已迁移为 KernelSU 标准接口：管理器直接加载 webroot/index.html（ksu.exec 桥）
 # 旧版 Python 本地服务器方案（webui/server.py）已移除
+
+# 功耗记录守护（两形态常驻，数据写入 /data/adb/colorFC_store/pwlog）
+chmod 0755 "$MODULE_PATH/pwlogd.sh" 2>/dev/null
+nohup sh "$MODULE_PATH/pwlogd.sh" >/dev/null 2>&1 &

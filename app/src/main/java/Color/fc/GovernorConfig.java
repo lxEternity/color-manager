@@ -15,8 +15,14 @@ public class GovernorConfig {
         public String downThreshold = null; // 降频阈值 %
         public String freqStep = null;      // 调频步进 %
         public String samplingRate = null;  // 采样周期 µs
-        public String targetLoads = null;   // scx 目标负载 %
+        public String targetLoads = null;   // scx/walt 目标负载 %
         public boolean ignoreNiceLoad = false; // conservative 忽略 nice 负载（模块 B/conservative.sh 原有）
+        /** C 方案（方案3）大核组参数（cpu4-7；null = 无分组，生成时回退小核值） */
+        public String upThresholdBig = null;
+        public String downThresholdBig = null;
+        public String freqStepBig = null;
+        public String samplingRateBig = null;
+        public String targetLoadsBig = null;
         /** 小核最小频率限制 MHz（null/空/"0" = 不限制，照搬 Kin 小核/大核分簇方案） */
         public String minFreqL = null;
         /** 小核最大频率限制 MHz */
@@ -39,7 +45,14 @@ public class GovernorConfig {
     private static final Pattern P_STEP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*conservative/freq_step");
     private static final Pattern P_RATE = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*conservative/sampling_rate");
     private static final Pattern P_NICE = Pattern.compile("echo \\\"?([01])\\\"? > \\S*conservative/ignore_nice_load");
-    private static final Pattern P_LOADS = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*scx/target_loads");
+    /** scx 与 walt 均有 target_loads（C 方案 walt 调速器机型） */
+    private static final Pattern P_LOADS = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*(?:scx|walt)/target_loads");
+    /** C 方案分组行（cpu0-3=小核 / cpu4-7=大核），用于解析小核/大核分別值 */
+    private static final Pattern P_UP_GRP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*cpu([0-7])/cpufreq/conservative/up_threshold");
+    private static final Pattern P_DOWN_GRP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*cpu([0-7])/cpufreq/conservative/down_threshold");
+    private static final Pattern P_STEP_GRP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*cpu([0-7])/cpufreq/conservative/freq_step");
+    private static final Pattern P_RATE_GRP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*cpu([0-7])/cpufreq/conservative/sampling_rate");
+    private static final Pattern P_LOADS_GRP = Pattern.compile("echo \\\"?([\\w.-]+)\\\"? > \\S*cpu([0-7])/cpufreq/(?:scx|walt)/target_loads");
     /** 引号可选：兼容生成的无引号与外部脚本的有引号两种写法 */
     private static final Pattern P_ONLINE = Pattern.compile("echo \\\"?([01])\\\"? > \\S*cpu(\\d+)/online");
     /** CPU 限频行（scaling_min_freq / scaling_max_freq，值为 kHz，旧版单对格式兼容用） */
@@ -86,12 +99,24 @@ public class GovernorConfig {
                     g.ignoreNiceLoad = true;
                     found++;
                 }
+                // C 方案小核/大核分组（cpu0-3 / cpu4-7 分别取值）
+                String[] upG = grpVal(content, P_UP_GRP);
+                if (upG[0] != null) { g.upThreshold = upG[0]; g.upThresholdBig = upG[1]; found++; }
+                String[] downG = grpVal(content, P_DOWN_GRP);
+                if (downG[0] != null) { g.downThreshold = downG[0]; g.downThresholdBig = downG[1]; found++; }
+                String[] stepG = grpVal(content, P_STEP_GRP);
+                if (stepG[0] != null) { g.freqStep = stepG[0]; g.freqStepBig = stepG[1]; found++; }
+                String[] rateG = grpVal(content, P_RATE_GRP);
+                if (rateG[0] != null) { g.samplingRate = rateG[0]; g.samplingRateBig = rateG[1]; found++; }
             } else {
                 Matcher m = P_LOADS.matcher(content);
                 if (m.find()) {
                     g.targetLoads = m.group(1);
                     found++;
                 }
+                // C 方案 walt/scx target_loads 小核/大核分组
+                String[] loadsG = grpVal(content, P_LOADS_GRP);
+                if (loadsG[0] != null) { g.targetLoads = loadsG[0]; g.targetLoadsBig = loadsG[1]; found++; }
             }
             // 核心启用状态（脚本含 online 行才覆盖默认全开）
             Matcher mo = P_ONLINE.matcher(content);
@@ -145,6 +170,19 @@ public class GovernorConfig {
 
     /** 核心开关不再写入脚本：改为即时写 sysfs（见 CpuCoreManager，照搬 Kin-app），
      *  切换调速方案不影响手动开关的核心状态 */
+
+    /** 分组解析：扫描全部行，cpu0-3 取首个值（小核）、cpu4-7 取首个值（大核）。
+     *  返回 [小核, 大核]；无 cpu 编号行（循环/policy 写法）时返回 [null, null] */
+    private static String[] grpVal(String content, Pattern grp) {
+        String small = null, big = null;
+        Matcher m = grp.matcher(content);
+        while (m.find()) {
+            int cpu = Integer.parseInt(m.group(2));
+            if (cpu <= 3) { if (small == null) small = m.group(1); }
+            else { if (big == null) big = m.group(1); }
+        }
+        return new String[]{small, big};
+    }
 
     /** MHz 字符串 → kHz（无效/0 返回 0 = 不限制） */
     private static long mhzToKhz(String s) {
@@ -204,21 +242,32 @@ public class GovernorConfig {
     /** 生成 conservative.sh（应用全部 CPU0-7）。参数行无条件写入：
      *  即使调速器不是 conservative 也保留参数行，保证界面回显不丢失（echo 失败仅跳过该行） */
     public static String generateConservative(Gov g) {
-        return generateConservative(g, false);
+        return generateConservative(g, false, false);
     }
 
     /** 生成 conservative.sh。bVariant=方案2（B/conservative.sh）：
      *  保持模块出厂 B 脚本行为——写 ignore_nice_load=1 并关闭 game_opt 早检测 */
     public static String generateConservative(Gov g, boolean bVariant) {
+        return generateConservative(g, bVariant, false);
+    }
+
+    /** 生成 conservative.sh。cVariant=方案3（C/conservative.sh，无风驰内核机型）：
+     *  小核 cpu0-3 与大核 cpu4-7 分组参数（大核 Big 字段 null 时回退小核值） */
+    public static String generateConservative(Gov g, boolean bVariant, boolean cVariant) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 8; i++) {
+            boolean big = cVariant && i >= 4;
             String base = "/sys/devices/system/cpu/cpu" + i + "/cpufreq/";
             sb.append("chmod 777 ").append(base).append("scaling_governor\n");
             sb.append("echo \"").append(g.governor).append("\" > ").append(base).append("scaling_governor\n");
-            sb.append("echo \"").append(g.upThreshold).append("\" > ").append(base).append("conservative/up_threshold\n");
-            sb.append("echo \"").append(g.downThreshold).append("\" > ").append(base).append("conservative/down_threshold\n");
-            sb.append("echo \"").append(g.freqStep).append("\" > ").append(base).append("conservative/freq_step\n");
-            sb.append("echo \"").append(g.samplingRate).append("\" > ").append(base).append("conservative/sampling_rate\n");
+            sb.append("echo \"").append(big ? nz(g.upThresholdBig, g.upThreshold) : g.upThreshold)
+                    .append("\" > ").append(base).append("conservative/up_threshold\n");
+            sb.append("echo \"").append(big ? nz(g.downThresholdBig, g.downThreshold) : g.downThreshold)
+                    .append("\" > ").append(base).append("conservative/down_threshold\n");
+            sb.append("echo \"").append(big ? nz(g.freqStepBig, g.freqStep) : g.freqStep)
+                    .append("\" > ").append(base).append("conservative/freq_step\n");
+            sb.append("echo \"").append(big ? nz(g.samplingRateBig, g.samplingRate) : g.samplingRate)
+                    .append("\" > ").append(base).append("conservative/sampling_rate\n");
             if (g.ignoreNiceLoad || bVariant) {
                 sb.append("echo \"1\" > ").append(base).append("conservative/ignore_nice_load\n");
             }
@@ -235,6 +284,16 @@ public class GovernorConfig {
         return sb.toString();
     }
 
+    /** Big 值为 null/空时回退小核值 */
+    private static String nz(String big, String small) {
+        return big != null && !big.isEmpty() ? big : small;
+    }
+
+    /** target_loads 参数节点：walt 调速器机型（C 方案）用 walt 节点，其余用 scx */
+    private static String loadsNode(String governor) {
+        return "walt".equals(governor) ? "walt" : "scx";
+    }
+
     /** 核心开关块：cpu1-7 的 online 行（cpu0 恒在线无 online 节点）。
      *  无条件写入（含全启用），保证从关闭部分核心的模式切换到其他模式时核心恢复 */
     static String onlineBlock(Gov g) {
@@ -248,7 +307,14 @@ public class GovernorConfig {
 
     /** 生成 scx1.sh / scx2.sh（CPU 0/3/5/7）。负载行无条件写入（非 scx 时节点不存在则跳过该行，不影响回显） */
     public static String generateScx(Gov g) {
+        return generateScx(g, false);
+    }
+
+    /** cVariant=方案3（C/scx1.sh、C/scx2.sh，无风驰内核机型）：
+     *  小核 cpu0/3 与大核 cpu5/7 分组 target_loads；节点按调速器名（walt → walt/target_loads） */
+    public static String generateScx(Gov g, boolean cVariant) {
         StringBuilder sb = new StringBuilder();
+        String node = loadsNode(g.governor);
         int[] cpus = {0, 3, 5, 7};
         for (int cpu : cpus) {
             String base = "/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/";
@@ -261,15 +327,23 @@ public class GovernorConfig {
         }
         for (int cpu : cpus) {
             String base = "/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/";
-            sb.append("echo \"").append(g.targetLoads).append("\" > ").append(base).append("scx/target_loads\n");
+            String loads = (cVariant && (cpu == 5 || cpu == 7))
+                    ? nz(g.targetLoadsBig, g.targetLoads) : g.targetLoads;
+            sb.append("echo \"").append(loads).append("\" > ").append(base).append(node).append("/target_loads\n");
         }
         String fb = freqLimitBlock(g);
         if (!fb.isEmpty()) sb.append(fb);
         // 本模式核心配置（按模式独立，切换模式时应用；默认全启用）
         sb.append(onlineBlock(g));
-        // 与模块出厂 scx1/2.sh 尾部一致：启用 hmbird scx 调度与 game_opt 早检测
-        sb.append("echo \"1\" > /proc/hmbird_sched/scx_enable 2>/dev/null\n");
-        sb.append("echo \"1\" > /proc/game_opt/early_detect/ed_enable 2>/dev/null\n");
+        if (cVariant) {
+            // 与模块出厂 C/scx1、2.sh 尾部一致：启用 hmbird walt 调度与 game_opt 早检测
+            sb.append("echo \"1\" > /proc/hmbird_sched/walt_enable 2>/dev/null\n");
+            sb.append("echo \"1\" > /proc/game_opt/early_detect/ed_enable 2>/dev/null\n");
+        } else {
+            // 与模块出厂 scx1/2.sh 尾部一致：启用 hmbird scx 调度与 game_opt 早检测
+            sb.append("echo \"1\" > /proc/hmbird_sched/scx_enable 2>/dev/null\n");
+            sb.append("echo \"1\" > /proc/game_opt/early_detect/ed_enable 2>/dev/null\n");
+        }
         return sb.toString();
     }
 
@@ -340,7 +414,14 @@ public class GovernorConfig {
 
     /** 生成 scx3.sh（全部 CPU0-7，切换调速器 + 负载。负载行无条件写入，非 scx 时节点不存在则跳过该行） */
     public static String generateScx3(Gov g) {
+        return generateScx3(g, false);
+    }
+
+    /** cVariant=方案3（C/scx3.sh，无风驰内核机型）：
+     *  小核 cpu0-3 与大核 cpu4-7 分组 target_loads；节点按调速器名（walt → walt/target_loads） */
+    public static String generateScx3(Gov g, boolean cVariant) {
         StringBuilder sb = new StringBuilder();
+        String node = loadsNode(g.governor);
         for (int i = 0; i < 8; i++) {
             String base = "/sys/devices/system/cpu/cpu" + i + "/cpufreq/";
             sb.append("chmod 777 ").append(base).append("scaling_governor\n");
@@ -352,7 +433,8 @@ public class GovernorConfig {
         }
         for (int i = 0; i < 8; i++) {
             String base = "/sys/devices/system/cpu/cpu" + i + "/cpufreq/";
-            sb.append("echo \"").append(g.targetLoads).append("\" > ").append(base).append("scx/target_loads\n");
+            String loads = (cVariant && i >= 4) ? nz(g.targetLoadsBig, g.targetLoads) : g.targetLoads;
+            sb.append("echo \"").append(loads).append("\" > ").append(base).append(node).append("/target_loads\n");
         }
         String fb = freqLimitBlock(g);
         if (!fb.isEmpty()) sb.append(fb);

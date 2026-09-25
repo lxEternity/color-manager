@@ -20,18 +20,20 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * 调度参数：自动检测 SOC，加载对应 a.all.sh / b.all.sh，
+ * 调度参数：自动检测 SOC，加载对应 a.all.sh / b.all.sh / c.all.sh，
  * 按模式（省电/均衡/性能/极速）展开参数编辑
  */
 public class ScheduleActivity extends ThemedActivity {
 
-    private AllConfig cfgA, cfgB;
+    private AllConfig cfgA, cfgB, cfgC;
     private String tab = "a";
     private boolean dirty = false;
     private boolean loading = true;
@@ -39,8 +41,10 @@ public class ScheduleActivity extends ThemedActivity {
 
     private final HashMap<String, EditText> inputs = new HashMap<>();
     private final HashMap<String, SeekBar> seekBars = new HashMap<>();
+    /** C 方案 json 为 2 参（小/大核同上限，不限 GPU），对应参数行在方案3页签下隐藏 */
+    private final List<View> cOnlyHideRows = new ArrayList<>();
     private boolean syncing = false;
-    private TextView tabAV, tabBV, socTip;
+    private TextView tabAV, tabBV, tabCV, socTip;
 
     /** 调度参数字段（fillInputs / collectCurrent / lax 共用），
      *  cpuMaxL/cpuMaxB/gpuMax = 小核/大核/GPU 上限%（照搬 Kin FSM maxL/maxB/gpu） */
@@ -57,19 +61,22 @@ public class ScheduleActivity extends ThemedActivity {
         socTip = findViewById(R.id.socTip);
         tabAV = findViewById(R.id.tabA);
         tabBV = findViewById(R.id.tabB);
+        tabCV = findViewById(R.id.tabC);
 
         soc = MainActivity.cachedSoc;
         if (soc == null) soc = SocInfo.autoDetect();
 
         String fileA = RootShell.CONFIG_DIR + "/a.all.sh";
         String fileB = RootShell.CONFIG_DIR + "/b.all.sh";
+        String fileC = RootShell.CONFIG_DIR + "/c.all.sh";
         socTip.setText(soc.known
                 ? String.format(Locale.US, "当前 SOC：%s（%s）→ 加载方案 %s", soc.code, soc.marketing,
-                        "a".equals(soc.config) ? "1" : "2")
+                        "a".equals(soc.config) ? "1" : "b".equals(soc.config) ? "2" : "3")
                 : "检测错误，默认加载方案1");
 
         tabAV.setOnClickListener(v -> switchTab("a"));
         tabBV.setOnClickListener(v -> switchTab("b"));
+        tabCV.setOnClickListener(v -> switchTab("c"));
         tab = soc.config; // 默认选中 SOC 对应配置
 
         findViewById(R.id.saveBtn).setOnClickListener(v -> saveConfig());
@@ -79,14 +86,17 @@ public class ScheduleActivity extends ThemedActivity {
 
         buildCards();
 
-        // 后台加载两份配置
+        // 后台加载三份配置
         new Thread(() -> {
             String a = RootShell.readFile(fileA);
             String b = RootShell.readFile(fileB);
+            String c = RootShell.readFile(fileC);
             cfgA = AllConfig.parse(a);
             cfgB = AllConfig.parse(b);
+            cfgC = AllConfig.parse(c);
             if (cfgA == null) cfgA = AllConfig.defaults();
             if (cfgB == null) cfgB = AllConfig.defaults();
+            if (cfgC == null) cfgC = AllConfig.defaultsC();
             runOnUiThread(() -> {
                 loading = false;
                 applyTabStyle();
@@ -123,10 +133,13 @@ public class ScheduleActivity extends ThemedActivity {
 
             addParam(box, key + ".opt2", "调度增强等级 opt2（0-100，越高越激进，省电设 0）");
             addParam(box, key + ".cpuMaxL", "小核上限 %（小核簇最高频率百分比，Kin maxL）");
-            addParam(box, key + ".cpuMaxB", "大核上限 %（大核簇最高频率百分比，Kin maxB）");
+            View rowMaxB = addParam(box, key + ".cpuMaxB", "大核上限 %（大核簇最高频率百分比，Kin maxB）");
             addParam(box, key + ".cpuMin", "CPU 下限 %（各簇最低频率百分比）");
-            addParam(box, key + ".gpuMax", "GPU 上限 %（0 或 100 = 不限制，Kin FSM gpu）");
+            View rowGpu = addParam(box, key + ".gpuMax", "GPU 上限 %（0 或 100 = 不限制，Kin FSM gpu）");
             addParam(box, key + ".llcc", "LLCC 系统缓存最大频率（Hz）");
+            // C 方案（方案3）json_cpu_max_min 为 2 参：小/大核同上限且不限 GPU，这两行在方案3页签下隐藏
+            cOnlyHideRows.add(rowMaxB);
+            cOnlyHideRows.add(rowGpu);
             addParam(box, key + ".uclampDisplay", "display 显示任务 uclamp 最低提升");
             addParam(box, key + ".uclampSsfg", "ssfg 前台服务组 uclamp 最低提升");
             addParam(box, key + ".uclampTouch", "touch 触控线程 uclamp 最低提升（影响跟手性）");
@@ -183,7 +196,7 @@ public class ScheduleActivity extends ThemedActivity {
     }
 
     /** 添加一个带说明、滑条+输入框联动的参数行 */
-    private void addParam(LinearLayout box, String key, String label) {
+    private View addParam(LinearLayout box, String key, String label) {
         View row = getLayoutInflater().inflate(R.layout.param_row, box, false);
         ((TextView) row.findViewById(R.id.label)).setText(label);
         EditText et = row.findViewById(R.id.input);
@@ -230,12 +243,13 @@ public class ScheduleActivity extends ThemedActivity {
         inputs.put(key, et);
         seekBars.put(key, sb);
         box.addView(row);
+        return row;
     }
 
     /** 把当前配置填充到输入框（默认参数可视化） */
     private void fillInputs() {
         AllConfig cfg = currentCfg();
-        AllConfig def = AllConfig.defaults();
+        AllConfig def = currentDefaults();
         for (String mode : AllConfig.MODE_KEYS) {
             AllConfig.Mode m = cfg.modes.get(mode);
             AllConfig.Mode dm = def.modes.get(mode);
@@ -305,10 +319,15 @@ public class ScheduleActivity extends ThemedActivity {
     }
 
     private AllConfig currentCfg() {
-        return "a".equals(tab) ? cfgA : cfgB;
+        return "a".equals(tab) ? cfgA : "b".equals(tab) ? cfgB : cfgC;
     }
 
-    /** 切换 a / b 配置页签 */
+    /** 当前页签方案的出厂默认（C 方案默认参数独立） */
+    private AllConfig currentDefaults() {
+        return "c".equals(tab) ? AllConfig.defaultsC() : AllConfig.defaults();
+    }
+
+    /** 切换 a / b / c 配置页签 */
     private void switchTab(String t) {
         if (t.equals(tab)) return;
         if (dirty) {
@@ -331,18 +350,22 @@ public class ScheduleActivity extends ThemedActivity {
     }
 
     private void applyTabStyle() {
-        boolean isA = "a".equals(tab);
+        boolean isA = "a".equals(tab), isB = "b".equals(tab), isC = "c".equals(tab);
         tabAV.setBackgroundResource(isA ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
         tabAV.setTextColor(isA ? 0xFF0077A8 : 0xFF7C8AA0);
-        tabBV.setBackgroundResource(isA ? R.drawable.bg_tab : R.drawable.bg_tab_sel);
-        tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0077A8);
+        tabBV.setBackgroundResource(isB ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        tabBV.setTextColor(isB ? 0xFF0077A8 : 0xFF7C8AA0);
+        tabCV.setBackgroundResource(isC ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        tabCV.setTextColor(isC ? 0xFF0077A8 : 0xFF7C8AA0);
+        // C 方案无大核独立上限与 GPU 上限参数（json 2 参），方案3页签下隐藏对应行
+        for (View v : cOnlyHideRows) v.setVisibility(isC ? View.GONE : View.VISIBLE);
     }
 
     /** 把当前页签输入收集进配置（保存与导出共用，仅当前方案） */
     private void collectCurrent() {
         AllConfig cfg = currentCfg();
         if (cfg == null) return;
-        AllConfig def = AllConfig.defaults();
+        AllConfig def = currentDefaults();
         for (String mode : AllConfig.MODE_KEYS) {
             AllConfig.Mode m = cfg.modes.get(mode);
             AllConfig.Mode dm = def.modes.get(mode);
@@ -364,8 +387,10 @@ public class ScheduleActivity extends ThemedActivity {
         }
         collectCurrent();
         String path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
-        String content = AllConfig.generate(currentCfg());
+        // C 方案（方案3）conf 用 C/ 脚本目录且 json 保持 2 参，与出厂 c.all.sh/WebUI 格式一致；
         // 方案2 的 conf 引用 B/ 脚本目录（调速器参数可按方案分别保存）
+        String content = "c".equals(tab) ? AllConfig.generateC(currentCfg())
+                : AllConfig.generate(currentCfg());
         if ("b".equals(tab)) content = content.replace("$mokzdz/A/", "$mokzdz/B/");
         final String out = content;
 
@@ -382,15 +407,15 @@ public class ScheduleActivity extends ThemedActivity {
         }).start();
     }
 
-    // ==================== 恢复默认值（可选方案1/方案2/全部） ====================
+    // ==================== 恢复默认值（可选方案1/方案2/方案3/全部） ====================
 
     /** 弹窗选择要恢复的方案，确认后立即写入出厂默认值并保存 */
     private void resetDefaults() {
-        if (cfgA == null || cfgB == null) {
+        if (cfgA == null || cfgB == null || cfgC == null) {
             Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
-        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        String[] opts = {"方案1", "方案2", "方案3", "方案1+方案2+方案3"};
         final int[] sel = {0};
         AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("恢复默认值")
@@ -402,22 +427,27 @@ public class ScheduleActivity extends ThemedActivity {
         ThemeStore.styleDialog(this, dlg);
     }
 
-    /** w: 0=方案1  1=方案2  2=方案1+方案2。内存替换 + 立即写对应 a/b.all.sh */
+    /** w: 0=方案1  1=方案2  2=方案3  3=全部。内存替换 + 立即写对应 a/b/c.all.sh */
     private void doResetDefaults(int w) {
         if (w != 1) cfgA = AllConfig.defaults();
-        if (w != 0) cfgB = AllConfig.defaults();
-        if ((w == 0 && "a".equals(tab)) || (w == 1 && "b".equals(tab)) || w == 2) {
+        if (w != 0 && w != 2) cfgB = AllConfig.defaults();
+        if (w == 2 || w == 3) cfgC = AllConfig.defaultsC();
+        boolean cur = (w == 3) || (w == 0 && "a".equals(tab))
+                || (w == 1 && "b".equals(tab)) || (w == 2 && "c".equals(tab));
+        if (cur) {
             fillInputs();
             dirty = false;   // 已直接持久化，无未保存修改
         }
-        final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : "方案1+方案2";
+        final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : w == 2 ? "方案3" : "方案1+方案2+方案3";
         new Thread(() -> {
             boolean ok = true;
             if (w != 1) ok = RootShell.writeFile(getCacheDir(), AllConfig.generate(cfgA),
                     RootShell.CONFIG_DIR + "/a.all.sh").ok() && ok;
-            if (w != 0) ok = RootShell.writeFile(getCacheDir(),
+            if (w != 0 && w != 2) ok = RootShell.writeFile(getCacheDir(),
                     AllConfig.generate(cfgB).replace("$mokzdz/A/", "$mokzdz/B/"),
                     RootShell.CONFIG_DIR + "/b.all.sh").ok() && ok;
+            if (w == 2 || w == 3) ok = RootShell.writeFile(getCacheDir(), AllConfig.generateC(cfgC),
+                    RootShell.CONFIG_DIR + "/c.all.sh").ok() && ok;
             final boolean okF = ok;
             runOnUiThread(() -> Toast.makeText(this, okF
                     ? "已恢复默认值并保存（" + label + "）"
@@ -425,23 +455,23 @@ public class ScheduleActivity extends ThemedActivity {
         }).start();
     }
 
-    // ==================== color.lax 导入导出（方案1+方案2 全部模式） ====================
+    // ==================== color.lax 导入导出（方案1/2/3 全部模式） ====================
 
     /** 导入文件选择器请求码 */
     private static final int REQ_IMPORT = 7301;
-    /** 导入方案选择：0=方案1  1=方案2  2=方案1+2 */
-    private int laxScheme = 2;
+    /** 导入方案选择：0=方案1  1=方案2  2=方案3  3=全部 */
+    private int laxScheme = 3;
 
-    /** 导出前先选择方案（方案1 / 方案2 / 方案1+2），再写入内部储存根目录 color.lax */
+    /** 导出前先选择方案（方案1 / 方案2 / 方案3 / 全部），再写入内部储存根目录 color.lax */
     private void exportLax() {
-        if (cfgA == null || cfgB == null) {
+        if (cfgA == null || cfgB == null || cfgC == null) {
             Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
-        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        String[] opts = {"方案1", "方案2", "方案3", "全部方案"};
         AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("选择要导出的方案")
-                .setSingleChoiceItems(opts, 2, (d, w) -> {
+                .setSingleChoiceItems(opts, 3, (d, w) -> {
                     d.dismiss();
                     doExport(w);
                 })
@@ -455,8 +485,9 @@ public class ScheduleActivity extends ThemedActivity {
         collectCurrent();   // 当前页签未保存的编辑也一并导出
         LinkedHashMap<String, String> block = new LinkedHashMap<>();
         if (scheme != 1) putLaxCfg(block, "a", cfgA);
-        if (scheme != 0) putLaxCfg(block, "b", cfgB);
-        final String label = scheme == 0 ? "方案1" : scheme == 1 ? "方案2" : "方案1+2";
+        if (scheme != 0 && scheme != 2) putLaxCfg(block, "b", cfgB);
+        if (scheme == 2 || scheme == 3) putLaxCfg(block, "c", cfgC);
+        final String label = scheme == 0 ? "方案1" : scheme == 1 ? "方案2" : scheme == 2 ? "方案3" : "全部方案";
         new Thread(() -> {
             RootShell.Result r = LaxStore.write(getCacheDir(), block);
             runOnUiThread(() -> Toast.makeText(this, r.ok()
@@ -474,16 +505,16 @@ public class ScheduleActivity extends ThemedActivity {
         }
     }
 
-    /** 导入前先选择要应用的方案（方案1 / 方案2 / 方案1+2），再打开文件选择器 */
+    /** 导入前先选择要应用的方案（方案1 / 方案2 / 方案3 / 全部），再打开文件选择器 */
     private void importLax() {
-        if (cfgA == null || cfgB == null) {
+        if (cfgA == null || cfgB == null || cfgC == null) {
             Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
-        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        String[] opts = {"方案1", "方案2", "方案3", "全部方案"};
         AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("选择要导入的方案")
-                .setSingleChoiceItems(opts, 2, (d, w) -> {
+                .setSingleChoiceItems(opts, 3, (d, w) -> {
                     d.dismiss();
                     laxScheme = w;
                     Intent it = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -502,7 +533,7 @@ public class ScheduleActivity extends ThemedActivity {
         if (requestCode != REQ_IMPORT || resultCode != RESULT_OK
                 || data == null || data.getData() == null) return;
         final Uri uri = data.getData();
-        if (cfgA == null || cfgB == null) {
+        if (cfgA == null || cfgB == null || cfgC == null) {
             Toast.makeText(this, "方案仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -520,7 +551,8 @@ public class ScheduleActivity extends ThemedActivity {
                 }
                 fillInputs();
                 dirty = true;
-                String label = laxScheme == 0 ? "方案1" : laxScheme == 1 ? "方案2" : "方案1+2";
+                String label = laxScheme == 0 ? "方案1" : laxScheme == 1 ? "方案2"
+                        : laxScheme == 2 ? "方案3" : "全部方案";
                 Toast.makeText(this, "已导入 " + n + " 项（" + label + "），点击保存后生效",
                         Toast.LENGTH_LONG).show();
             });
@@ -531,7 +563,8 @@ public class ScheduleActivity extends ThemedActivity {
     private int applyLaxScheme(Map<String, String> map) {
         int n = 0;
         if (laxScheme != 1) n += applyLaxCfg(map, cfgA, "a");
-        if (laxScheme != 0) n += applyLaxCfg(map, cfgB, "b");
+        if (laxScheme != 0 && laxScheme != 2) n += applyLaxCfg(map, cfgB, "b");
+        if (laxScheme == 2 || laxScheme == 3) n += applyLaxCfg(map, cfgC, "c");
         return n;
     }
 

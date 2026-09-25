@@ -37,6 +37,7 @@ chmod 777 /data/powercfg.json
 chmod 777 $MODULE_PATH/script/*
 chmod 777 $MODULE_PATH/A/*
 chmod 777 $MODULE_PATH/B/*
+chmod 777 $MODULE_PATH/C/*
 chmod 777 $MODULE_PATH/config/*
 chmod 777 $MODULE_PATH/*
 

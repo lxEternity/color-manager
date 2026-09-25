@@ -68,6 +68,34 @@ public class AllConfig {
         return c;
     }
 
+    /** 方案3（C 方案，无风驰内核机型如骁龙8gen2/8+）出厂默认：
+     *  json_cpu_max_min 保持 2 参（上限%/下限%，小/大核同值），GPU 不限制 */
+    public static AllConfig defaultsC() {
+        AllConfig c = new AllConfig();
+        Mode ps = new Mode();
+        ps.opt2 = "0"; ps.cpuMaxL = "36"; ps.cpuMaxB = "36"; ps.cpuMin = "4"; ps.gpuMax = "0"; ps.llcc = "300000";
+        ps.uclampDisplay = "4"; ps.uclampSsfg = "3"; ps.uclampTouch = "6";
+        ps.uclampMm = "4"; ps.uclampRt = "2"; ps.uclampTopApp = "8";
+        Mode bl = new Mode();
+        bl.opt2 = "32"; bl.cpuMaxL = "68"; bl.cpuMaxB = "68"; bl.cpuMin = "24"; bl.gpuMax = "0"; bl.llcc = "720000";
+        bl.uclampDisplay = "34"; bl.uclampSsfg = "30"; bl.uclampTouch = "44";
+        bl.uclampMm = "36"; bl.uclampRt = "44"; bl.uclampTopApp = "30";
+        Mode pf = new Mode();
+        pf.opt2 = "60"; pf.cpuMaxL = "94"; pf.cpuMaxB = "94"; pf.cpuMin = "38"; pf.gpuMax = "0"; pf.llcc = "1350000";
+        pf.uclampDisplay = "82"; pf.uclampSsfg = "78"; pf.uclampTouch = "94";
+        pf.uclampMm = "84"; pf.uclampRt = "94"; pf.uclampTopApp = "76";
+        Mode fa = new Mode();
+        fa.opt2 = "92"; fa.cpuMaxL = "100"; fa.cpuMaxB = "100"; fa.cpuMin = "46"; fa.gpuMax = "0"; fa.llcc = "1920000";
+        fa.uclampDisplay = "86"; fa.uclampSsfg = "82"; fa.uclampTouch = "96";
+        fa.uclampMm = "88"; fa.uclampRt = "96"; fa.uclampTopApp = "80";
+        fa.walt1 = "0"; fa.walt2 = "1500";
+        c.modes.put("powersave", ps);
+        c.modes.put("balance", bl);
+        c.modes.put("performance", pf);
+        c.modes.put("fast", fa);
+        return c;
+    }
+
     private static final Pattern P_ACTION = Pattern.compile("\\[\\[ \\$action == \"(\\w+)\" ]]");
     private static final Pattern P_OPT2 = Pattern.compile("opt2 (\\S+)");
     /** 新 4 参：小核上限% 大核上限% 下限% GPU上限%（后两参可选，兼容旧 2 参 conf） */
@@ -215,6 +243,69 @@ public class AllConfig {
         return sb.toString();
     }
 
+    /** 生成 C 方案（方案3）脚本内容：目录用 C/，json_cpu_max_min 保持 2 参（上限%/下限%），
+     *  与模块出厂 c.all.sh 及 WebUI 读写格式一致（出厂 C/json_cpu_max_min 仅支持 2 参） */
+    public static String generateC(AllConfig cfg) {
+        Mode ps = cfg.modes.get("powersave");
+        Mode bl = cfg.modes.get("balance");
+        Mode pf = cfg.modes.get("performance");
+        Mode fa = cfg.modes.get("fast");
+        StringBuilder sb = new StringBuilder();
+        sb.append("SOC_PLAT=$(getprop ro.board.platform)\n\n");
+
+        sb.append("if [[ $action == \"powersave\" ]]; then\n");
+        sb.append("\t# 省电\n");
+        sb.append("\techo \"powersave\" > $pan1\n");
+        sb.append("    $mokzdz/C/opt2 ").append(ps.opt2).append(" 2>/dev/null\n");
+        sb.append("    $mokzdz/C/conservative.sh\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(ps.cpuMaxL).append("\" \"").append(ps.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/C/freq0.sh 2>/dev/null\n");
+        sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(ps.llcc).append('\n');
+        sb.append("    \n");
+        appendUclamp(sb, ps);
+        sb.append("fi\n\n");
+
+        sb.append("if [[ $action == \"balance\" ]]; then\n");
+        sb.append("\t# 均衡\n");
+        appendUnlockC(sb);
+        sb.append("\techo \"balance\" > $pan1\n");
+        sb.append("    $mokzdz/C/opt2 ").append(bl.opt2).append(" 2>/dev/null\n");
+        sb.append("    $mokzdz/C/scx1.sh\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(bl.cpuMaxL).append("\" \"").append(bl.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/C/freq1.sh 2>/dev/null\n");
+        sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(bl.llcc).append('\n');
+        sb.append("   \n");
+        appendUclamp(sb, bl);
+        sb.append("fi\n\n");
+
+        sb.append("if [[ $action == \"performance\" ]]; then\n");
+        sb.append("\t# 性能\n");
+        appendUnlockC(sb);
+        sb.append("\techo \"performance\" > $pan1\n");
+        sb.append("    $mokzdz/C/opt2 ").append(pf.opt2).append(" 2>/dev/null\n");
+        sb.append("    $mokzdz/C/scx2.sh\n");
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(pf.cpuMaxL).append("\" \"").append(pf.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/C/freq2.sh 2>/dev/null\n");
+        sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(pf.llcc).append('\n');
+        appendUclamp(sb, pf);
+        sb.append("fi\n\n");
+
+        sb.append("if [[ $action == \"fast\" ]]; then\n");
+        sb.append("\t# 极速\n");
+        appendUnlockC(sb);
+        sb.append("\techo \"fast\" > $pan1\n");
+        sb.append("\t$mokzdz/C/walt_up_rate_limit_us \"").append(fa.walt1).append("\" \"").append(fa.walt2).append("\" 2>/dev/null\n");
+        sb.append("    $mokzdz/C/opt2 ").append(fa.opt2).append(" 2>/dev/null\n");
+        sb.append("    $mokzdz/C/scx3.sh\n");
+        sb.append("    $mokzdz/C/llcc.sh set_max_freq ").append(fa.llcc).append('\n');
+        sb.append("    $mokzdz/C/json_cpu_max_min \"").append(fa.cpuMaxL).append("\" \"").append(fa.cpuMin).append("\"\n");
+        sb.append("    sh $mokzdz/C/freq3.sh 2>/dev/null\n");
+        sb.append('\n');
+        appendUclamp(sb, fa);
+        sb.append("fi\n");
+        return sb.toString();
+    }
+
     /** 给已部署的方案 conf 补上 freq 调用行（幂等）：每个模式块的 json_cpu_max_min 之后
      *  追加 sh $mokzdz/{dir}/freq{块}.sh（a.all.sh 用 A，b.all.sh 用 B）。
      *  调速器页保存时对旧 conf 打补丁，无需重新保存调度 */
@@ -241,6 +332,13 @@ public class AllConfig {
 
     private static void appendUnlock(StringBuilder sb) {
         sb.append("    $mokzdz/A/llcc.sh unlock_llcc\n");
+        sb.append("    chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq\n");
+        sb.append("    chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq\n");
+        sb.append("    chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/boost_freq\n\n");
+    }
+
+    private static void appendUnlockC(StringBuilder sb) {
+        sb.append("    $mokzdz/C/llcc.sh unlock_llcc\n");
         sb.append("    chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq\n");
         sb.append("    chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq\n");
         sb.append("    chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/boost_freq\n\n");

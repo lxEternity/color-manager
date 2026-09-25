@@ -32,12 +32,15 @@ public class GovernorActivity extends ThemedActivity {
 
     private final GovernorConfig.Gov[] govsA = new GovernorConfig.Gov[4];
     private final GovernorConfig.Gov[] govsB = new GovernorConfig.Gov[4];
-    /** 当前页签（a=方案1 b=方案2）对应的配置数组引用 */
+    private final GovernorConfig.Gov[] govsC = new GovernorConfig.Gov[4];
+    /** 当前页签（a=方案1 b=方案2 c=方案3）对应的配置数组引用 */
     private GovernorConfig.Gov[] govs;
     private String tab = "a";
-    private TextView tabAV, tabBV;
+    private TextView tabAV, tabBV, tabCV;
     private final HashMap<String, EditText> inputs = new HashMap<>();
     private final HashMap<String, TextView> spinners = new HashMap<>();
+    /** C 方案（方案3）大小核分组独有的大核参数行（a/b 页签下隐藏） */
+    private final java.util.ArrayList<View> bigRows = new java.util.ArrayList<>();
     /** 每模式的 8 个核心芯片（key=模式索引） */
     private final HashMap<String, TextView[]> coreChips = new HashMap<>();
     /** 本机支持的调速器列表（首次扫描一次后缓存），空 = 扫描失败回退 GOV_PRESETS */
@@ -53,6 +56,8 @@ public class GovernorActivity extends ThemedActivity {
     private static final String[] FILES = {"conservative.sh", "scx1.sh", "scx2.sh", "scx3.sh"};
     /** 方案2 调速器脚本目录（与 A/ 结构相同，b.all.sh 引用） */
     private static final String GOV_DIR_B = "/data/adb/modules/colorFC/B";
+    /** 方案3 调速器脚本目录（无风驰内核机型如骁龙8gen2/8+，c.all.sh 引用；小核/大核分组参数） */
+    private static final String GOV_DIR_C = "/data/adb/modules/colorFC/C";
     private static final String[] NAMES = {"省电模式", "均衡模式", "性能模式", "极速模式"};
     private static final String[] DESCS = {
             "省电模式调速器参数（CPU0-7）",
@@ -68,12 +73,27 @@ public class GovernorActivity extends ThemedActivity {
             {"governor", "targetLoads"},
             {"governor", "targetLoads"}
     };
+    /** 方案3（C 方案）参数字段：小核/大核分组（Big 字段为大核 cpu4-7 独立值） */
+    private static final String[][] FIELDS_C = {
+            {"governor", "upThreshold", "upThresholdBig", "downThreshold", "downThresholdBig",
+                    "freqStep", "freqStepBig", "samplingRate", "samplingRateBig"},
+            {"governor", "targetLoads", "targetLoadsBig"},
+            {"governor", "targetLoads", "targetLoadsBig"},
+            {"governor", "targetLoads", "targetLoadsBig"}
+    };
     /** 出厂默认（与模块 A/ 出厂脚本一致：conservative.sh 95/90/1/8000、scx1=90、scx2=85、scx3=walt） */
     private static final String[][] DEFAULTS = {
             {"conservative", "95", "90", "1", "8000"},
             {"scx", "90"},
             {"scx", "85"},
             {"walt", "70"}
+    };
+    /** 方案3（C 方案）出厂默认（与模块 C/ 出厂脚本一致，小核/大核分组） */
+    private static final String[][] DEFAULTS_C = {
+            {"conservative", "96", "98", "88", "85", "1", "1", "10000", "12000"},
+            {"walt", "82", "76"},
+            {"walt", "74", "66"},
+            {"walt", "60", "52"}
     };
     /** 模块可能用于恢复 A/ 脚本的镜像位置（类似 conf 模板机制），保存时三重写入 */
     private static final String[] MIRROR_DIRS = {
@@ -96,8 +116,10 @@ public class GovernorActivity extends ThemedActivity {
         // 方案页签：默认选中 SOC 对应方案，与调度页一致
         tabAV = findViewById(R.id.tabA);
         tabBV = findViewById(R.id.tabB);
+        tabCV = findViewById(R.id.tabC);
         tabAV.setOnClickListener(v -> switchTab("a"));
         tabBV.setOnClickListener(v -> switchTab("b"));
+        tabCV.setOnClickListener(v -> switchTab("c"));
         SocInfo soc = MainActivity.cachedSoc;
         if (soc == null) soc = SocInfo.autoDetect();
         tab = soc.config != null ? soc.config : "a";
@@ -105,9 +127,10 @@ public class GovernorActivity extends ThemedActivity {
         buildCards();
 
         new Thread(() -> {
-            // 方案1（A/）与方案2（B/）分别解析，各自镜像兜底
+            // 方案1（A/）/方案2（B/）/方案3（C/）分别解析，各自镜像兜底
             GovernorConfig.Gov[] mirrorA = loadGovMirror("a");
             GovernorConfig.Gov[] mirrorB = loadGovMirror("b");
+            GovernorConfig.Gov[] mirrorC = loadGovMirror("c");
             for (int i = 0; i < 4; i++) {
                 GovernorConfig.Gov ga = GovernorConfig.parse(
                         RootShell.readFile(RootShell.GOV_DIR + "/" + FILES[i]), i == 0);
@@ -115,15 +138,32 @@ public class GovernorActivity extends ThemedActivity {
                 GovernorConfig.Gov gb = GovernorConfig.parse(
                         RootShell.readFile(GOV_DIR_B + "/" + FILES[i]), i == 0);
                 govsB[i] = mergeGov(gb, mirrorB[i], i);
+                GovernorConfig.Gov gc = GovernorConfig.parse(
+                        RootShell.readFile(GOV_DIR_C + "/" + FILES[i]), i == 0);
+                govsC[i] = mergeGov(gc, mirrorC[i], i);
             }
             loadGovScan();   // 本机支持的调速器：仅首次扫描，避免选到不支持的调速器
             runOnUiThread(() -> {
                 loading = false;
-                govs = "b".equals(tab) ? govsB : govsA;
+                govs = currentGovs();
                 applyTabStyle();
                 fillInputs();
             });
         }).start();
+    }
+
+    /** 当前页签对应的配置数组 */
+    private GovernorConfig.Gov[] currentGovs() {
+        return "b".equals(tab) ? govsB : "c".equals(tab) ? govsC : govsA;
+    }
+
+    /** 当前页签对应的参数字段/默认值（C 方案含大核分组字段） */
+    private String[][] curFields() {
+        return "c".equals(tab) ? FIELDS_C : FIELDS;
+    }
+
+    private String[][] curDefaults() {
+        return "c".equals(tab) ? DEFAULTS_C : DEFAULTS;
     }
 
     private void buildCards() {
@@ -155,16 +195,29 @@ public class GovernorActivity extends ThemedActivity {
             addGovernorSelector(box, idx + ".governor",
                     "调速器选择", i == 0 ? "conservative" : i == 3 ? "walt" : "scx");
             if (i == 0) {
-                addParam(box, idx + ".upThreshold", "up_threshold 升频阈值（% 负载超过即升频）", "95", true);
-                addParam(box, idx + ".downThreshold", "down_threshold 降频阈值（% 负载低于即降频）", "90", true);
-                addParam(box, idx + ".freqStep", "freq_step 每次调频步进（%）", "1", true);
-                addParam(box, idx + ".samplingRate", "sampling_rate 采样周期（µs）", "8000", false);
+                addParam(box, idx + ".upThreshold", "up_threshold 升频阈值·小核（% cpu0-3）", "95", true);
+                addParam(box, idx + ".upThresholdBig", "up_threshold 升频阈值·大核（% cpu4-7）", "98", true, true);
+                addParam(box, idx + ".downThreshold", "down_threshold 降频阈值·小核（% cpu0-3）", "90", true);
+                addParam(box, idx + ".downThresholdBig", "down_threshold 降频阈值·大核（% cpu4-7）", "85", true, true);
+                addParam(box, idx + ".freqStep", "freq_step 每次调频步进·小核（%）", "1", true);
+                addParam(box, idx + ".freqStepBig", "freq_step 每次调频步进·大核（%）", "1", true, true);
+                addParam(box, idx + ".samplingRate", "sampling_rate 采样周期·小核（µs）", "8000", false);
+                addParam(box, idx + ".samplingRateBig", "sampling_rate 采样周期·大核（µs）", "12000", false, true);
             } else {
-                addParam(box, idx + ".targetLoads", "target_loads 目标负载（%）",
+                addParam(box, idx + ".targetLoads", "target_loads 目标负载·小核（%）",
                         i == 1 ? "90" : i == 2 ? "85" : "70", true);
+                addParam(box, idx + ".targetLoadsBig", "target_loads 目标负载·大核（%）",
+                        i == 1 ? "76" : i == 2 ? "66" : "52", true, true);
             }
             container.addView(card);
         }
+        applyBigRowsVisibility();
+    }
+
+    /** 大核参数行仅 C 方案（方案3）页签可见（A/B 方案不分组） */
+    private void applyBigRowsVisibility() {
+        boolean showBig = "c".equals(tab);
+        for (View v : bigRows) v.setVisibility(showBig ? View.VISIBLE : View.GONE);
     }
 
     /** 启用核心选择行：8 个可点击芯片，按模式独立配置（各模式互不同步）。
@@ -254,10 +307,19 @@ public class GovernorActivity extends ThemedActivity {
     }
 
     private void addParam(LinearLayout box, String key, String label, String def, boolean seek) {
+        addParam(box, key, label, def, seek, false);
+    }
+
+    /** big=true：C 方案大核分组参数行（仅方案3 页签可见） */
+    private void addParam(LinearLayout box, String key, String label, String def, boolean seek, boolean big) {
         View row = getLayoutInflater().inflate(R.layout.param_row, box, false);
         ((TextView) row.findViewById(R.id.label)).setText(label);
         EditText et = row.findViewById(R.id.input);
         et.setText(def);
+        if (big) {
+            row.setVisibility(View.GONE);
+            bigRows.add(row);
+        }
         SeekBar sb = row.findViewById(R.id.seek);
         if (seek) {
             sb.setMax(100);
@@ -373,13 +435,15 @@ public class GovernorActivity extends ThemedActivity {
     private void fillInputs() {
         // 核心芯片按各模式配置显示（online 行解析结果，无记录则默认全启用）
         applyCoreChips();
+        String[][] fields = curFields();
+        String[][] defaults = curDefaults();
         for (int i = 0; i < 4; i++) {
             GovernorConfig.Gov g = govs[i];
-            for (int j = 0; j < FIELDS[i].length; j++) {
-                String key = i + "." + FIELDS[i][j];
-                String v = readField(g, FIELDS[i][j]);
-                if (v == null || v.isEmpty()) v = DEFAULTS[i][j];
-                if ("governor".equals(FIELDS[i][j])) {
+            for (int j = 0; j < fields[i].length; j++) {
+                String key = i + "." + fields[i][j];
+                String v = readField(g, fields[i][j]);
+                if (v == null || v.isEmpty()) v = defaults[i][j];
+                if ("governor".equals(fields[i][j])) {
                     TextView sp = spinners.get(key);
                     if (sp != null && v != null && !v.isEmpty()) sp.setText(v);
                     continue;
@@ -399,6 +463,11 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": return g.freqStep;
             case "samplingRate": return g.samplingRate;
             case "targetLoads": return g.targetLoads;
+            case "upThresholdBig": return g.upThresholdBig;
+            case "downThresholdBig": return g.downThresholdBig;
+            case "freqStepBig": return g.freqStepBig;
+            case "samplingRateBig": return g.samplingRateBig;
+            case "targetLoadsBig": return g.targetLoadsBig;
         }
         return "";
     }
@@ -411,12 +480,19 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": g.freqStep = v; break;
             case "samplingRate": g.samplingRate = v; break;
             case "targetLoads": g.targetLoads = v; break;
+            case "upThresholdBig": g.upThresholdBig = v; break;
+            case "downThresholdBig": g.downThresholdBig = v; break;
+            case "freqStepBig": g.freqStepBig = v; break;
+            case "samplingRateBig": g.samplingRateBig = v; break;
+            case "targetLoadsBig": g.targetLoadsBig = v; break;
         }
     }
 
     /** 把界面输入收集进 govs（保存与导出共用）。
      *  限频字段不再有 UI，统一归零 = 保存后彻底解除旧的小核/大核限频（限频交给限频模式开关） */
     private void collectInputs() {
+        String[][] fields = curFields();
+        String[][] defaults = curDefaults();
         for (int i = 0; i < 4; i++) {
             // 芯片状态写回
             TextView[] chips = coreChips.get(String.valueOf(i));
@@ -427,8 +503,8 @@ public class GovernorActivity extends ThemedActivity {
                 }
             }
             govs[i].minFreqL = govs[i].maxFreqL = govs[i].minFreqB = govs[i].maxFreqB = "0";
-            for (int j = 0; j < FIELDS[i].length; j++) {
-                String f = FIELDS[i][j];
+            for (int j = 0; j < fields[i].length; j++) {
+                String f = fields[i][j];
                 if ("governor".equals(f)) {
                     TextView sp = spinners.get(i + "." + f);
                     if (sp != null && sp.getText() != null && sp.getText().length() > 0) {
@@ -439,7 +515,7 @@ public class GovernorActivity extends ThemedActivity {
                 EditText et = inputs.get(i + "." + f);
                 if (et == null) continue;
                 String v = et.getText().toString().trim();
-                if (v.isEmpty()) v = DEFAULTS[i][j];
+                if (v.isEmpty()) v = defaults[i][j];
                 writeField(govs[i], f, v);
             }
         }
@@ -452,7 +528,7 @@ public class GovernorActivity extends ThemedActivity {
             return;
         }
         collectInputs();
-        saveAll("b".equals(tab) ? 2 : 1);
+        saveAll("b".equals(tab) ? 2 : "c".equals(tab) ? 3 : 1);
     }
 
     /** 切换方案页签：当前编辑写回内存后切换回显（不丢失） */
@@ -460,30 +536,36 @@ public class GovernorActivity extends ThemedActivity {
         if (t.equals(tab) || loading || govsA[0] == null) return;
         collectInputs();
         tab = t;
-        govs = "b".equals(tab) ? govsB : govsA;
+        govs = currentGovs();
         applyTabStyle();
+        applyBigRowsVisibility();
         fillInputs();
     }
 
     private void applyTabStyle() {
-        boolean isA = "a".equals(tab);
+        boolean isA = "a".equals(tab), isB = "b".equals(tab), isC = "c".equals(tab);
         tabAV.setBackgroundResource(isA ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
         tabAV.setTextColor(isA ? 0xFF0077A8 : 0xFF7C8AA0);
-        tabBV.setBackgroundResource(isA ? R.drawable.bg_tab : R.drawable.bg_tab_sel);
-        tabBV.setTextColor(isA ? 0xFF7C8AA0 : 0xFF0077A8);
+        tabBV.setBackgroundResource(isB ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        tabBV.setTextColor(isB ? 0xFF0077A8 : 0xFF7C8AA0);
+        tabCV.setBackgroundResource(isC ? R.drawable.bg_tab_sel : R.drawable.bg_tab);
+        tabCV.setTextColor(isC ? 0xFF0077A8 : 0xFF7C8AA0);
     }
 
-    /** scheme: 0=方案1+方案2  1=仅方案1(A)  2=仅方案2(B)。src 传入要持久化的配置数组
+    /** scheme: 0=方案1+方案2  1=仅方案1(A)  2=仅方案2(B)  3=仅方案3(C)。src 传入要持久化的配置数组
      *  （正常保存=当前页签收集值，恢复默认值=出厂默认数组），okMsg 为成功提示前缀 */
     private void persistGovs(GovernorConfig.Gov[] src, int scheme, String okMsg) {
+        final boolean isC = scheme == 3;
         new Thread(() -> {
             // 镜像按所选方案分别落盘（恢复默认值时镜像同步为默认配置，兜底回显不再指向旧值）
-            if (scheme != 2) saveMirrorFor(src, "a");
-            if (scheme != 1) saveMirrorFor(src, "b");
+            if (scheme != 2 && scheme != 3) saveMirrorFor(src, "a");
+            if (scheme != 1 && scheme != 3) saveMirrorFor(src, "b");
+            if (isC) saveMirrorFor(src, "c");
             java.util.ArrayList<String> saveDirs = new java.util.ArrayList<>();
-            if (scheme != 2) saveDirs.add(RootShell.GOV_DIR);
-            if (scheme != 1) saveDirs.add(GOV_DIR_B);
-            // 所选目录首次替换 json_cpu_max_min 前分别备份原 ELF；B/ 不存在时先创建
+            if (scheme != 2 && scheme != 3) saveDirs.add(RootShell.GOV_DIR);
+            if (scheme != 1 && scheme != 3) saveDirs.add(GOV_DIR_B);
+            if (isC) saveDirs.add(GOV_DIR_C);
+            // 所选目录首次替换 json_cpu_max_min 前分别备份原 ELF；目录不存在时先创建
             StringBuilder bk = new StringBuilder();
             for (String d : saveDirs) {
                 bk.append("mkdir -p '").append(d).append("'; ");
@@ -495,10 +577,12 @@ public class GovernorActivity extends ThemedActivity {
             // 9 文件集（4 调速器 + 4 限频 + json_cpu_max_min 复现脚本）× 所选目录
             String[] srcContents = new String[9];
             String[] srcNames = new String[9];
-            srcContents[0] = GovernorConfig.generateConservative(src[0]);
-            srcContents[1] = GovernorConfig.generateScx(src[1]);
-            srcContents[2] = GovernorConfig.generateScx(src[2]);
-            srcContents[3] = GovernorConfig.generateScx3(src[3]);
+            // C 方案（方案3）用分组变体：小核/大核独立参数 + walt 节点
+            srcContents[0] = isC ? GovernorConfig.generateConservative(src[0], false, true)
+                    : GovernorConfig.generateConservative(src[0]);
+            srcContents[1] = GovernorConfig.generateScx(src[1], isC);
+            srcContents[2] = GovernorConfig.generateScx(src[2], isC);
+            srcContents[3] = GovernorConfig.generateScx3(src[3], isC);
             srcContents[4] = GovernorConfig.generateFreqScript(src[0]);
             srcContents[5] = GovernorConfig.generateFreqScript(src[1]);
             srcContents[6] = GovernorConfig.generateFreqScript(src[2]);
@@ -525,26 +609,33 @@ public class GovernorActivity extends ThemedActivity {
             if (ok) {
                 StringBuilder mc = new StringBuilder();
                 for (String mirror : MIRROR_DIRS) {
-                    String mirrorB = mirror.endsWith("/A") ? mirror.substring(0, mirror.length() - 2) + "/B" : mirror + "B";
+                    String base = mirror.endsWith("/A") ? mirror.substring(0, mirror.length() - 2) : mirror;
                     if (saveDirs.contains(RootShell.GOV_DIR)) {
-                        mc.append("mkdir -p '").append(mirror).append("'; ");
+                        mc.append("mkdir -p '").append(base).append("/A'; ");
                         for (int i = 0; i < 9; i++) {
                             mc.append("cp '").append(RootShell.GOV_DIR).append("/").append(srcNames[i]).append("' '")
-                                    .append(mirror).append("/").append(srcNames[i]).append("'; ");
+                                    .append(base).append("/A/").append(srcNames[i]).append("'; ");
                         }
                     }
                     if (saveDirs.contains(GOV_DIR_B)) {
-                        mc.append("mkdir -p '").append(mirrorB).append("'; ");
+                        mc.append("mkdir -p '").append(base).append("/B'; ");
                         for (int i = 0; i < 9; i++) {
                             mc.append("cp '").append(GOV_DIR_B).append("/").append(srcNames[i]).append("' '")
-                                    .append(mirrorB).append("/").append(srcNames[i]).append("'; ");
+                                    .append(base).append("/B/").append(srcNames[i]).append("'; ");
+                        }
+                    }
+                    if (saveDirs.contains(GOV_DIR_C)) {
+                        mc.append("mkdir -p '").append(base).append("/C'; ");
+                        for (int i = 0; i < 9; i++) {
+                            mc.append("cp '").append(GOV_DIR_C).append("/").append(srcNames[i]).append("' '")
+                                    .append(base).append("/C/").append(srcNames[i]).append("'; ");
                         }
                     }
                 }
                 RootShell.exec(mc.toString());
             }
-            // 给已部署的方案 conf 幂等补上 freq 调用行（a 引用 A/，b 引用 B/，与各自目录的 freqN.sh 对应）
-            String[][] confs = {{"a.all.sh", "A"}, {"b.all.sh", "B"}};
+            // 给已部署的方案 conf 幂等补上 freq 调用行（a 引用 A/，b 引用 B/，c 引用 C/，与各自目录的 freqN.sh 对应）
+            String[][] confs = {{"a.all.sh", "A"}, {"b.all.sh", "B"}, {"c.all.sh", "C"}};
             for (String[] cf : confs) {
                 try {
                     String path = RootShell.CONFIG_DIR + "/" + cf[0];
@@ -574,12 +665,12 @@ public class GovernorActivity extends ThemedActivity {
         }).start();
     }
 
-    /** scheme: 0=方案1+方案2  1=仅方案1(A)  2=仅方案2(B) */
+    /** scheme: 0=方案1+方案2  1=仅方案1(A)  2=仅方案2(B)  3=仅方案3(C) */
     private void saveAll(int scheme) {
         persistGovs(govs, scheme, "保存成功");
     }
 
-    // ==================== 恢复默认值（可选方案1/方案2/全部） ====================
+    // ==================== 恢复默认值（可选方案1/方案2/方案3/全部） ====================
 
     /** 弹窗选择要恢复的方案，确认后立即写入出厂默认值并保存 */
     private void resetDefaults() {
@@ -587,7 +678,7 @@ public class GovernorActivity extends ThemedActivity {
             Toast.makeText(this, "配置仍在加载中", Toast.LENGTH_SHORT).show();
             return;
         }
-        String[] opts = {"方案1", "方案2", "方案1+方案2"};
+        String[] opts = {"方案1", "方案2", "方案3", "方案1+方案2"};
         final int[] sel = {0};
         AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("恢复默认值")
@@ -599,25 +690,30 @@ public class GovernorActivity extends ThemedActivity {
         ThemeStore.styleDialog(this, dlg);
     }
 
-    /** w: 0=方案1  1=方案2  2=方案1+方案2。内存替换 + 立即持久化到所选方案的脚本目录 */
+    /** w: 0=方案1  1=方案2  2=方案3  3=方案1+方案2。内存替换 + 立即持久化到所选方案的脚本目录 */
     private void doResetDefaults(int w) {
-        GovernorConfig.Gov[] def = defaultGovs();
-        if (w != 1) {
+        GovernorConfig.Gov[] def = w == 2 ? defaultGovsC() : defaultGovs();
+        if (w == 0 || w == 3) {
             GovernorConfig.Gov[] ca = copyGovs(def);
             for (int i = 0; i < 4; i++) govsA[i] = ca[i];
         }
-        if (w != 0) {
+        if (w == 1 || w == 3) {
             GovernorConfig.Gov[] cb = copyGovs(def);
             for (int i = 0; i < 4; i++) govsB[i] = cb[i];
         }
-        boolean curA = "a".equals(tab);
+        if (w == 2) {
+            GovernorConfig.Gov[] cc = copyGovs(def);
+            for (int i = 0; i < 4; i++) govsC[i] = cc[i];
+        }
         // 当前页签在恢复范围内才刷新输入框，避免覆盖另一页签的未保存编辑
-        if ((w != 1 && curA) || (w != 0 && !curA)) {
-            govs = curA ? govsA : govsB;
+        boolean inRange = (w == 3) || (w == 0 && "a".equals(tab))
+                || (w == 1 && "b".equals(tab)) || (w == 2 && "c".equals(tab));
+        if (inRange) {
+            govs = currentGovs();
             fillInputs();
         }
-        final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : "方案1+方案2";
-        persistGovs(def, w == 0 ? 1 : w == 1 ? 2 : 0,
+        final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : w == 2 ? "方案3" : "方案1+方案2";
+        persistGovs(def, w == 0 ? 1 : w == 1 ? 2 : w == 2 ? 3 : 0,
                 "已恢复默认值并保存（" + label + "）");
     }
 
@@ -637,6 +733,30 @@ public class GovernorActivity extends ThemedActivity {
             }
             // 限频字段保持 Gov 构造默认（0 = 不限制）
             // cores 保持构造默认（8 核全启用）
+            out[i] = g;
+        }
+        return out;
+    }
+
+    /** 方案3（C 方案）出厂默认：小核/大核分组参数（walt 调速器，无风驰内核机型） */
+    private GovernorConfig.Gov[] defaultGovsC() {
+        GovernorConfig.Gov[] out = new GovernorConfig.Gov[4];
+        for (int i = 0; i < 4; i++) {
+            GovernorConfig.Gov g = new GovernorConfig.Gov();
+            g.governor = DEFAULTS_C[i][0];
+            if (i == 0) {
+                g.upThreshold = DEFAULTS_C[0][1];
+                g.upThresholdBig = DEFAULTS_C[0][2];
+                g.downThreshold = DEFAULTS_C[0][3];
+                g.downThresholdBig = DEFAULTS_C[0][4];
+                g.freqStep = DEFAULTS_C[0][5];
+                g.freqStepBig = DEFAULTS_C[0][6];
+                g.samplingRate = DEFAULTS_C[0][7];
+                g.samplingRateBig = DEFAULTS_C[0][8];
+            } else {
+                g.targetLoads = DEFAULTS_C[i][1];
+                g.targetLoadsBig = DEFAULTS_C[i][2];
+            }
             out[i] = g;
         }
         return out;

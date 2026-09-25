@@ -88,7 +88,7 @@
         android:textColor="@color/textSecondary"
         android:textSize="12sp" />
 
-    <!-- a/b 配置切换 -->
+    <!-- a/b/c 配置切换 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -121,6 +121,22 @@
             android:gravity="center"
             android:background="@drawable/bg_tab"
             android:text="方案 2"
+            android:textColor="@color/textSecondary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="10dp"
+            android:layout_height="1dp" />
+
+        <TextView
+            android:id="@+id/tabC"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:background="@drawable/bg_tab"
+            android:text="方案 3"
             android:textColor="@color/textSecondary"
             android:textSize="14sp"
             android:textStyle="bold" />

@@ -144,13 +144,15 @@ on_install() {
     mkdir -p "$peiz"
     echo $(getprop ro.board.platform) > "$peiz1"
 
-    if [ ! -f "$MODPATH/config/a.$(getprop ro.board.platform).sh" ] && [ ! -f "$MODPATH/config/b.$(getprop ro.board.platform).sh" ]; then
+    if [ ! -f "$MODPATH/config/a.$(getprop ro.board.platform).sh" ] && [ ! -f "$MODPATH/config/b.$(getprop ro.board.platform).sh" ] && [ ! -f "$MODPATH/config/c.$(getprop ro.board.platform).sh" ]; then
         echo "all" > "$peiz1"
     fi
 
     echo "---------------------------"
     if cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors | grep -q "scx"; then
         echo "识别到scx调速器，启用默认配置刷入"
+    elif cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors | grep -q "walt"; then
+        echo "未检测到风驰(scx)调速器，启用C方案(walt)配置刷入"
     elif cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors | grep -q "hmbird"; then
         echo "识别到hmbird调速器，启用加强版配置模式刷入"
     else

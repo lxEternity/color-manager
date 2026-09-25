@@ -18,6 +18,8 @@ if test $(cat $mosdz/qhz) -eq 1 ; then
 	mokzdz="${mosdz%\/files}"
 	szwja=$mokzdz/config/a.$cpuxh.sh
 	szwjb=$mokzdz/config/b.$cpuxh.sh
+	szwjc=$mokzdz/config/c.$cpuxh.sh
+
 
 
 
@@ -52,8 +54,16 @@ if test $(cat $mosdz/qhz) -eq 1 ; then
 
 
 	else
-		#没有walt调速器则后选schedutil调速器
-		if cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors | grep -q "conservative"; then
+		#无scx（无风驰内核，如骁龙8gen2/8+等）：优先walt调速器的C方案
+		if cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors | grep -q "walt"; then
+			if test ! -f $szwjc ;then
+				echo "c方案配置文件不存在"
+			else
+				. $mokzdz/script/c.main.sh
+				. $mokzdz/config/c.$cpuxh.sh
+				echo "用c方案walt调速器"
+			fi
+		elif cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors | grep -q "conservative"; then
 			echo "只有b方案schedutil可用"
 			. $mokzdz/script/b.main.sh
 			. $mokzdz/config/b.$cpuxh.sh
@@ -64,10 +74,10 @@ if test $(cat $mosdz/qhz) -eq 1 ; then
 
 
 
+
 	#切换结束
 	echo "1" > $mosdz/qhz
 
 fi
-
 
 

@@ -4,8 +4,9 @@ import android.os.Build;
 
 /**
  * SOC 型号检测与配置映射
- * 天玑9300/9400/9500全系列、骁龙8gen1/2/3、8Elite(第一代) → 配置A
+ * 天玑9300/9400/9500全系列、骁龙8gen3、8Elite(第一代) → 配置A
  * 第五代8Elite (SM8850)、8s至尊版 (SM8845) → 配置B
+ * 骁龙8 Gen 2 / 8+ Gen 1 / 8 Gen 1（无风驰调速器） → 配置C（方案3）
  */
 public class SocInfo {
 
@@ -14,7 +15,7 @@ public class SocInfo {
     public final String marketing;  // 营销名
     public final String shortName;  // 短名（用于芯片图）
     public final String vendor;     // 厂商
-    public final String config;     // "a" / "b"
+    public final String config;     // "a" / "b" / "c"
     public final boolean known;     // 是否命中预设 SOC 列表
 
     private SocInfo(String platform, String code, String marketing, String shortName, String vendor, String config, boolean known) {
@@ -36,8 +37,9 @@ public class SocInfo {
             {"sm8845", "SM8845", "第五代骁龙 8（8 Gen 5）", "8 Gen 5", "Qualcomm", "b"},
             {"sm8750", "SM8750", "骁龙 8 至尊版（8 Elite）", "8 Elite", "Qualcomm", "a"},
             {"sm8650", "SM8650", "骁龙 8 Gen 3", "8 Gen 3", "Qualcomm", "a"},
-            {"sm8550", "SM8550", "骁龙 8 Gen 2", "8 Gen 2", "Qualcomm", "a"},
-            {"sm8450", "SM8450", "骁龙 8 Gen 1", "8 Gen 1", "Qualcomm", "a"},
+            {"sm8550", "SM8550", "骁龙 8 Gen 2", "8 Gen 2", "Qualcomm", "c"},
+            {"sm8475", "SM8475", "骁龙 8+ Gen 1", "8+ Gen 1", "Qualcomm", "c"},
+            {"sm8450", "SM8450", "骁龙 8 Gen 1", "8 Gen 1", "Qualcomm", "c"},
             {"mt6995", "MT6995", "天玑 9500 系列", "天玑 9500", "MediaTek", "a"},
             {"mt6993", "MT6993", "天玑 9500 系列", "天玑 9500", "MediaTek", "a"},
             {"mt6991", "MT6991", "天玑 9400 系列", "天玑 9400", "MediaTek", "a"},

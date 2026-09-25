@@ -388,14 +388,14 @@ const GOV_FILES = {powersave:'conservative.sh', balance:'scx1.sh', performance:'
 /* ============ 全局状态 ============ */
 let form = 'dispatch';        // dispatch | adapt
 let curMode = '';             // 当前运行模式
-let activeConf = '';          // config/a.all.sh 或 b.all.sh
-let activeScheme = 'a';       // A方案 / B方案
+let activeConf = '';          // config/a.all.sh / b.all.sh / c.all.sh
+let activeScheme = 'a';       // A方案 / B方案 / C方案
 let confText = '';             // 活动配置文件内容
 let modesData = {};            // 解析后的四模式参数
 let editMode = 'powersave';
 let govMode = 'powersave';    // 调速器页选中的模式
-let govData = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:''};
-let socScheme = '';            // SOC 识别的方案（a/b，与 Color 管理器 APP 一致）
+let govData = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:'', hasBig:false};
+let socScheme = '';            // SOC 识别的方案（a/b/c，与 Color 管理器 APP 一致）
 let socInfo = null;            // {code, marketing, scheme, known}
 
 /* ============ 形态检测与切换 ============ */
@@ -553,17 +553,19 @@ const SLIDER_DEFS = [
 
 async function detectActiveConf(){
   if(demoMode){ activeConf='config/a.all.sh'; activeScheme='a'; return; }
+  // 与 script/main.sh 顺序一致：scx→A，walt→C（无风驰内核如骁龙8gen2/8+），conservative→B
   const out = await shOut(
     `P=$(cat ${MOD}/files/peiz 2>/dev/null); [ -z "$P" ] && P=all; `+
     `if cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null | grep -q scx; then S=a; `+
+    `elif cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null | grep -q walt; then S=c; `+
     `elif cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null | grep -q conservative; then S=b; `+
     `else S=a; fi; echo "$S.$P"`);
-  const m = out.match(/^([ab])\.(\w+)$/);
+  const m = out.match(/^([abc])\.(\w+)$/);
   if(m){ activeScheme = m[1]; activeConf = `config/${m[1]}.${m[2]}.sh`; }
   else { activeScheme='a'; activeConf='config/a.all.sh'; }
 }
 
-/* ============ SOC 识别（方案1/方案2，与 Color 管理器 APP 一致） ============ */
+/* ============ SOC 识别（方案1/方案2/方案3，与 Color 管理器 APP 一致） ============ */
 const SOC_MAP = [
   // platform, 规范名, 营销名, 方案
   ['sm8975','SM8975','骁龙 8 至尊版 Gen 6 超级至尊版','b'],
@@ -573,8 +575,9 @@ const SOC_MAP = [
   ['sm8845','SM8845','第五代骁龙 8','b'],
   ['sm8750','SM8750','骁龙 8 至尊版','a'],
   ['sm8650','SM8650','骁龙 8 Gen 3','a'],
-  ['sm8550','SM8550','骁龙 8 Gen 2','a'],
-  ['sm8450','SM8450','骁龙 8 Gen 1','a'],
+  ['sm8550','SM8550','骁龙 8 Gen 2','c'],
+  ['sm8475','SM8475','骁龙 8+ Gen 1','c'],
+  ['sm8450','SM8450','骁龙 8 Gen 1','c'],
   ['mt6995','MT6995','天玑 9500 系列','a'],
   ['mt6993','MT6993','天玑 9500 系列','a'],
   ['mt6991','MT6991','天玑 9400 系列','a'],
@@ -597,7 +600,7 @@ async function detectSoc(){
   socScheme = socInfo.scheme;
   return socInfo;
 }
-function schemeGovName(){ return socScheme==='b' ? 'conservative' : 'scx'; }
+function schemeGovName(){ return socScheme==='b' ? 'conservative' : socScheme==='c' ? 'walt' : 'scx'; }
 
 function parseConf(text){
   const data = {};
@@ -606,7 +609,7 @@ function parseConf(text){
     const bm = text.match(re);
     const blk = bm ? bm[1] : '';
     const d = {};
-    d.opt2 = +(blk.match(/\$mokzdz\/[AB]\/opt2 (\d+)/)||[])[1] || 0;
+    d.opt2 = +(blk.match(/\$mokzdz\/[ABC]\/opt2 (\d+)/)||[])[1] || 0;
     const jm = blk.match(/json_cpu_max_min "(\d+)" "(\d+)"/);
     d.cpuMax = jm?+jm[1]:100; d.cpuMin = jm?+jm[2]:0;
     d.llcc = +(blk.match(/llcc\.sh set_max_freq (\d+)/)||[])[1] || 0;
@@ -690,7 +693,7 @@ function buildConf(text, data){
     if(!bm) return;
     let blk = bm[1];
     const d = data[mode];
-    blk = blk.replace(/(\$mokzdz\/[AB]\/opt2 )\d+/, '$1'+d.opt2);
+    blk = blk.replace(/(\$mokzdz\/[ABC]\/opt2 )\d+/, '$1'+d.opt2);
     blk = blk.replace(/json_cpu_max_min "\d+" "\d+"/, `json_cpu_max_min "${d.cpuMax}" "${d.cpuMin}"`);
     blk = blk.replace(/(llcc\.sh set_max_freq )\d+/, '$1'+d.llcc);
     blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/display\/cpu\.uclamp\.min)/, `echo "${d.uclampDisplay}"$2`);
@@ -725,27 +728,66 @@ const GOV_SLIDERS={
     {k:'samplingRate',t:'采样周期',min:1000,max:200000,step:1000,div:1000,suf:' ms'},
   ],
   scx:[{k:'targetLoads',t:'目标负载',min:1,max:100,step:1,suf:'%'}],
+  walt:[{k:'targetLoads',t:'目标负载',min:1,max:100,step:1,suf:'%'}],
 };
 
+/* 分组解析：小核=cpu0-3 首个值，大核=cpu4-7 首个值（C方案大小核参数独立） */
+function govGrpVal(text, rx){
+  rx.lastIndex = 0;
+  let small=null, big=null, m;
+  while((m=rx.exec(text))){
+    const cpu=+m[2], v=m[1];
+    if(cpu<=3 && small===null) small=v;
+    else if(cpu>=4 && big===null) big=v;
+  }
+  return [small||'', big||''];
+}
+
 function parseGovScript(text){
-  const d = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:''};
+  const d = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:'',
+             upThresholdBig:'', downThresholdBig:'', freqStepBig:'', samplingRateBig:'', targetLoadsBig:'', hasBig:false};
   d.governor = (text.match(/echo "?([\w.-]+)"? > \S*scaling_governor/)||[])[1]||'';
-  d.upThreshold = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/up_threshold/)||[])[1]||'';
-  d.downThreshold = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/down_threshold/)||[])[1]||'';
-  d.freqStep = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/freq_step/)||[])[1]||'';
-  d.samplingRate = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/sampling_rate/)||[])[1]||'';
-  d.targetLoads = (text.match(/echo "?([\w.-]+)"? > \S*scx\/target_loads/)||[])[1]||'';
+  [d.upThreshold,     d.upThresholdBig]     = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/conservative\/up_threshold/g);
+  [d.downThreshold,   d.downThresholdBig]   = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/conservative\/down_threshold/g);
+  [d.freqStep,        d.freqStepBig]        = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/conservative\/freq_step/g);
+  [d.samplingRate,    d.samplingRateBig]    = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/conservative\/sampling_rate/g);
+  [d.targetLoads,     d.targetLoadsBig]     = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/(?:scx|walt)\/target_loads/g);
+  // 兜底：无 cpu 编号的路径（与旧脚本兼容）
+  if(!d.upThreshold)   d.upThreshold   = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/up_threshold/)||[])[1]||'';
+  if(!d.downThreshold) d.downThreshold = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/down_threshold/)||[])[1]||'';
+  if(!d.freqStep)      d.freqStep      = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/freq_step/)||[])[1]||'';
+  if(!d.samplingRate)  d.samplingRate  = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/sampling_rate/)||[])[1]||'';
+  if(!d.targetLoads)   d.targetLoads   = (text.match(/echo "?([\w.-]+)"? > \S*(?:scx|walt)\/target_loads/)||[])[1]||'';
+  // 大核存在且与小核取值不同 → 双组滑条
+  const sm=[d.upThreshold,d.downThreshold,d.freqStep,d.samplingRate,d.targetLoads];
+  const bg=[d.upThresholdBig,d.downThresholdBig,d.freqStepBig,d.samplingRateBig,d.targetLoadsBig];
+  d.hasBig = bg.some((v,i)=>v && v!==sm[i]);
   return d;
 }
 
 function buildGovScript(text, d){
   let out = text;
-  out = out.replace(/(echo "?)[\w.-]+("? > \S*scaling_governor)/g, '$1'+d.governor+'$2');
-  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/up_threshold)/g, '$1'+d.upThreshold+'$2');
-  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/down_threshold)/g, '$1'+d.downThreshold+'$2');
-  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/freq_step)/g, '$1'+d.freqStep+'$2');
-  out = out.replace(/(echo "?)[\w.-]+("? > \S*conservative\/sampling_rate)/g, '$1'+d.samplingRate+'$2');
-  out = out.replace(/(echo "?)[\w.-]+("? > \S*scx\/target_loads)/g, '$1'+d.targetLoads+'$2');
+  // 空值不回写，避免生成 "echo > path" 的坏脚本
+  const rep=(rx,v)=>{ if(v!==''&&v!=null) out=out.replace(rx,'$1'+v+'$2'); };
+  rep(/(echo "?)[\w.-]+("? > \S*scaling_governor)/g, d.governor);
+  // 1) 兜底：先按统一值替换（含 cpu$cpu 循环变量的脚本）；之后大小组再覆盖
+  rep(/(echo "?)[\w.-]+("? > \S*conservative\/up_threshold)/g, d.upThreshold);
+  rep(/(echo "?)[\w.-]+("? > \S*conservative\/down_threshold)/g, d.downThreshold);
+  rep(/(echo "?)[\w.-]+("? > \S*conservative\/freq_step)/g, d.freqStep);
+  rep(/(echo "?)[\w.-]+("? > \S*conservative\/sampling_rate)/g, d.samplingRate);
+  rep(/(echo "?)[\w.-]+("? > \S*(?:scx|walt)\/target_loads)/g, d.targetLoads);
+  // 2) 小核 cpu0-3
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/up_threshold)/g, d.upThreshold);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/down_threshold)/g, d.downThreshold);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/freq_step)/g, d.freqStep);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/sampling_rate)/g, d.samplingRate);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/(?:scx|walt)\/target_loads)/g, d.targetLoads);
+  // 3) 大核 cpu4-7（未区分大小核时与小核同值）
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/up_threshold)/g, d.upThresholdBig||d.upThreshold);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/down_threshold)/g, d.downThresholdBig||d.downThreshold);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/freq_step)/g, d.freqStepBig||d.freqStep);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/sampling_rate)/g, d.samplingRateBig||d.samplingRate);
+  rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/(?:scx|walt)\/target_loads)/g, d.targetLoadsBig||d.targetLoads);
   return out;
 }
 
@@ -757,19 +799,19 @@ async function loadGov(){
     govData = parseGovScript(DEMO_GOV[govMode]);
     if(!govData.governor) govData.governor = schemeGovName();
   }else{
-    // 模块调速器脚本目录为大写 A/B（socScheme 是小写方案号，直接拼路径会指向不存在的目录）
-    const govDir = socScheme==='b' ? 'B' : 'A';
+    // 模块调速器脚本目录为大写 A/B/C（socScheme 是小写方案号，直接拼路径会指向不存在的目录）
+    const govDir = socScheme==='b' ? 'B' : socScheme==='c' ? 'C' : 'A';
     const t = await shOut(`cat ${MOD}/${govDir}/${file} 2>/dev/null`);
     govData = parseGovScript(t);
     if(!govData.governor) govData.governor = schemeGovName();
-    if(!GOV_SLIDERS[govData.governor]){
+    if(!govSliderDefs()){
       ['upThreshold','downThreshold','freqStep','samplingRate','targetLoads'].forEach(k=>{
         if(!govData[k]) govData[k]='0';
       });
     }
   }
   $('socTip').textContent = socInfo.known
-    ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${socScheme==='a'?'1':'2'}`
+    ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${socScheme==='a'?'1':socScheme==='b'?'2':'3'}`
     : `当前SOC：${socInfo.code} → 默认加载方案1`;
   $('govNow').textContent = schemeGovName();
   const chips=$('govChips'); chips.innerHTML='';
@@ -799,29 +841,47 @@ function renderDd(){
     L.appendChild(it);
   });
 }
+/* 当前调速器对应的滑条定义：
+   walt 特殊处理——C方案(walt/target_loads)→目标负载；A方案极速(walt+conservative参数)→conservative 组 */
+function govSliderDefs(){
+  if(govData.governor==='walt'){
+    return (govData.targetLoads||govData.targetLoadsBig) ? GOV_SLIDERS.walt : GOV_SLIDERS.conservative;
+  }
+  return GOV_SLIDERS[govData.governor];
+}
 function renderGovSliders(){
   const box=$('govSliders'); box.innerHTML='';
-  const defs=GOV_SLIDERS[govData.governor];
+  const defs=govSliderDefs();
   if(!defs){ box.innerHTML=`<div class="gv-note" style="margin:4px 2px">该调速器无附加参数，保存即切换生效</div>`; return; }
-  defs.forEach(d=>{
-    const row=document.createElement('div'); row.className='sl';
-    row.innerHTML=`<label>${d.t}</label>
-      <input type="range" min="${d.min}" max="${d.max}" step="${d.step}"
-        value="${govData[d.k]||0}">
-      <output></output>`;
-    const inp=row.querySelector('input'), out=row.querySelector('output');
-    const upd=()=>{ const v=+inp.value; govData[d.k]=v;
-      out.textContent=(d.div?v/d.div:v)+d.suf;
-      const p=(v-d.min)/(d.max-d.min)*100; inp.style.setProperty('--p',p+'%'); };
-    inp.oninput=upd; upd(); box.appendChild(row);
+  // C方案大小核参数独立（hasBig）→ 双组滑条：小核 cpu0-3 / 大核 cpu4-7
+  const groups = govData.hasBig ? [['','小核·cpu0-3'],['Big','大核·cpu4-7']] : [['','']];
+  groups.forEach(([sfx,gn])=>{
+    if(gn){
+      const h=document.createElement('div'); h.className='gv-note';
+      h.style.cssText='margin:10px 2px 2px;font-weight:600';
+      h.textContent=gn; box.appendChild(h);
+    }
+    defs.forEach(d=>{
+      const k=d.k+sfx;
+      const row=document.createElement('div'); row.className='sl';
+      row.innerHTML=`<label>${d.t}${gn?'·'+gn.split('·')[0]:''}</label>
+        <input type="range" min="${d.min}" max="${d.max}" step="${d.step}"
+          value="${govData[k]||0}">
+        <output></output>`;
+      const inp=row.querySelector('input'), out=row.querySelector('output');
+      const upd=()=>{ const v=+inp.value; govData[k]=v;
+        out.textContent=(d.div?v/d.div:v)+d.suf;
+        const p=(v-d.min)/(d.max-d.min)*100; inp.style.setProperty('--p',p+'%'); };
+      inp.oninput=upd; upd(); box.appendChild(row);
+    });
   });
 }
 async function saveGov(){
   if(demoMode){ toast('演示模式：真机保存将写入调速器脚本'); return; }
   await detectSoc();
   const file = GOV_FILES[govMode];
-  // 调速器脚本目录为大写 A/B（小写 socScheme 拼路径会写到不存在的目录导致保存失败）
-  const govDir = socScheme==='b' ? 'B' : 'A';
+  // 调速器脚本目录为大写 A/B/C（小写 socScheme 拼路径会写到不存在的目录导致保存失败）
+  const govDir = socScheme==='b' ? 'B' : socScheme==='c' ? 'C' : 'A';
   const t = await shOut(`cat ${MOD}/${govDir}/${file} 2>/dev/null`);
   const merged = buildGovScript(t, govData);
   const ok = await writeFile(`${MOD}/${govDir}/${file}`, merged);

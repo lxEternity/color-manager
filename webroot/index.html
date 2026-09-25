@@ -11,6 +11,11 @@
   --ac:#0096C8; --ac2:#A02CF0; --orange:#E08A00;
   --mc0:#00B5A3; --mc2:#E08A00; --soft:#E5F7FD;
   --ok:#0FA968; --warn:#D94343;
+  /* 图表配色（照搬 opbatt 电池工具包） */
+  --chart-power-line:#67d98a; --chart-temp-line:#ff8086;
+  --chart-grid:rgba(45,140,255,.055); --chart-text:#7f8896;
+  --chart-tooltip-bg:rgba(20,31,56,.94); --chart-tooltip-text:#fff;
+  --chart-datalabel-text:#fff;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{background:var(--bg);color:var(--t1);font:14px/1.45 -apple-system,"HarmonyOS Sans SC","MiSans",Roboto,sans-serif;padding-bottom:64px}
@@ -38,6 +43,24 @@ header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
 .cell b{font-size:13px}
 .cell b em{font-style:normal;font-size:10px;color:var(--t2);font-weight:400}
 
+/* 功耗曲线图表（结构照搬 opbatt 电池工具包） */
+.chart-header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.chart-title{font-weight:700;font-size:15px}
+.chart-legend{display:flex;gap:5px;flex-wrap:wrap}
+.legend-pill{border:1px solid var(--stroke);color:var(--t2);background:var(--card);
+  border-radius:999px;align-items:center;gap:5px;padding:4px 9px;font-size:11px;font-weight:650;display:inline-flex}
+.legend-pill--power{color:var(--chart-power-line)}
+.legend-pill--temp{color:var(--chart-temp-line)}
+.legend-pill--muted{color:var(--t3)}
+.pw-toprow{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.pw-stat{background:var(--soft);border-radius:12px;padding:8px 10px}
+.pw-stat small{display:block;color:var(--t3);font-size:10px;margin-bottom:2px}
+.pw-stat b{font-size:15px;font-weight:800}
+#pwBadge{font-size:13px}
+#pwBadge.chg{color:var(--ok)} #pwBadge.dsg{color:var(--ac)}
+.chart-frame{position:relative;height:210px;border-radius:12px;overflow:hidden}
+.chart-frame canvas{width:100%!important;height:100%!important}
+
 /* 形态切换 */
 .form-h{display:flex;align-items:center;justify-content:space-between}
 .form-h .t b{font-size:16px}
@@ -62,6 +85,7 @@ header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
 .chip .dot{width:7px;height:7px;border-radius:50%}
 .chip.on{box-shadow:0 2px 8px rgba(27,37,64,.08)}
 .desc{color:var(--t3);font-size:12px;margin:-2px 2px 11px}
+.soc-row{color:var(--ac);font-size:12px;font-weight:600;margin:-4px 2px 11px}
 .hint{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.5}
 
 /* 滑条 */
@@ -214,6 +238,24 @@ nav button.on{color:var(--ac);font-weight:700}
     </div>
   </div>
 
+  <!-- 实时功耗曲线（图表样式照搬 opbatt 电池工具包） -->
+  <div class="card" id="pwCard">
+    <div class="chart-header">
+      <span class="chart-title">实时功耗曲线</span>
+      <div class="chart-legend">
+        <span class="legend-pill legend-pill--power">功率</span>
+        <span class="legend-pill legend-pill--temp">温度</span>
+        <span class="legend-pill legend-pill--muted">最近 30 条</span>
+      </div>
+    </div>
+    <div class="pw-toprow">
+      <div class="pw-stat"><small>实时功率</small><b id="pwNow">--</b></div>
+      <div class="pw-stat"><small>电池温度</small><b id="pwTemp">--</b></div>
+      <div class="pw-stat"><small>充放状态</small><b id="pwBadge">--</b></div>
+    </div>
+    <div class="chart-frame" id="trendFrame"><canvas id="pwChart"></canvas></div>
+  </div>
+
   <!-- 入口（仅调度形态） -->
   <div id="homeEntries">
     <div class="card entry" onclick="go('modes')">
@@ -247,8 +289,9 @@ nav button.on{color:var(--ac);font-weight:700}
   <div id="govBody">
     <div class="chips" id="govChips"></div>
     <div class="desc" id="govDesc"></div>
+    <div class="soc-row" id="socTip">--</div>
     <div class="card gov-head">
-      <div class="cur"><small>当前调速器(实时)</small><b id="govNow">--</b></div>
+      <div class="cur"><small>当前调速器</small><b id="govNow">--</b></div>
       <div class="dd" id="dd">
         <button class="dd-btn" onclick="ddToggle(event)">
           <span id="ddLabel">切换调速器</span>
@@ -259,7 +302,6 @@ nav button.on{color:var(--ac);font-weight:700}
     </div>
     <div class="card" id="govSliders"></div>
     <button class="btn" onclick="saveGov()">保存</button>
-    <div class="hint" id="govFileHint" style="text-align:center;margin-top:8px"></div>
   </div>
 </section>
 
@@ -275,6 +317,8 @@ nav button.on{color:var(--ac);font-weight:700}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>调速器</button>
 </div></nav>
 
+<script src="lib/chart.umd.js"></script>
+<script src="lib/chartjs-plugin-datalabels.min.js"></script>
 <script>
 /* ============ ksu.exec 桥 ============ */
 const $ = id => document.getElementById(id);
@@ -315,7 +359,8 @@ let modesData = {};            // 解析后的四模式参数
 let editMode = 'powersave';
 let govMode = 'powersave';    // 调速器页选中的模式
 let govData = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:''};
-let govCur = '';
+let socScheme = '';            // SOC 识别的方案（a/b，与 Color 管理器 APP 一致）
+let socInfo = null;            // {code, marketing, scheme, known}
 
 /* ============ 形态检测与切换 ============ */
 async function detectForm(){
@@ -405,9 +450,10 @@ function errnoTag(r){ return (r&&r.errno!=null)?r.errno:'?'; }
 
 /* ============ 主页刷新 ============ */
 async function refreshHome(){
+  await detectSoc();
   if(demoMode){
     $('vSoc').textContent='66%'; $('vTemp').textContent='31.2℃'; $('vCpu').textContent='8 核';
-    $('vGov').textContent='scx'; $('vMax').textContent='3.07GHz'; $('vMem').textContent='9.2GB';
+    $('vGov').textContent=schemeGovName(); $('vMax').textContent='3.07GHz'; $('vMem').textContent='9.2GB';
     $('curMode').textContent='balance';
     renderHomeChips('balance');
     return;
@@ -416,7 +462,6 @@ async function refreshHome(){
     `echo "SOC=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)";`+
     `echo "BT=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)";`+
     `echo "CPU=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | grep -c .)";`+
-    `echo "GOV=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)";`+
     `echo "MAX=$(M=0; for f in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do v=$(cat $f 2>/dev/null); [ -n "$v" ] && [ "$v" -gt "$M" ] && M=$v; done; echo $M)";`+
     `echo "MEM=$(awk '/MemAvailable/{print int($2/1024)"M"}' /proc/meminfo 2>/dev/null)";`+
     (form==='dispatch'
@@ -432,7 +477,7 @@ async function refreshHome(){
   $('vSoc').textContent = g('SOC')==='--'?'--':g('SOC')+'%';
   const bt = g('BT'); $('vTemp').textContent = bt==='--'?'--':(bt/10).toFixed(1)+'℃';
   $('vCpu').textContent = g('CPU')+' 核';
-  $('vGov').textContent = g('GOV');
+  $('vGov').textContent = schemeGovName();
   const mf = g('MAX'); $('vMax').textContent = (mf==='--'||!/^[0-9]+$/.test(mf)||+mf===0)?'--':(mf/1000).toFixed(0)+' MHz';
   $('vMem').textContent = g('MEM');
   if(form==='dispatch'){
@@ -501,6 +546,42 @@ async function detectActiveConf(){
   else { activeScheme='a'; activeConf='config/a.all.sh'; }
 }
 
+/* ============ SOC 识别（方案1/方案2，与 Color 管理器 APP 一致） ============ */
+const SOC_MAP = [
+  // platform, 规范名, 营销名, 方案
+  ['sm8975','SM8975','骁龙 8 至尊版 Gen 6 超级至尊版','b'],
+  ['sm8950','SM8950','骁龙 8 至尊版 Gen 6','b'],
+  ['sm8875','SM8875','骁龙 8 至尊版 Gen 5','b'],
+  ['sm8850','SM8850','骁龙 8 至尊版 Gen 5','b'],
+  ['sm8845','SM8845','第五代骁龙 8','b'],
+  ['sm8750','SM8750','骁龙 8 至尊版','a'],
+  ['sm8650','SM8650','骁龙 8 Gen 3','a'],
+  ['sm8550','SM8550','骁龙 8 Gen 2','a'],
+  ['sm8450','SM8450','骁龙 8 Gen 1','a'],
+  ['mt6995','MT6995','天玑 9500 系列','a'],
+  ['mt6993','MT6993','天玑 9500 系列','a'],
+  ['mt6991','MT6991','天玑 9400 系列','a'],
+  ['mt6989','MT6989','天玑 9300 / 9400E','a'],
+];
+async function detectSoc(){
+  if(socInfo) return socInfo;
+  let plat = '';
+  if(demoMode){ plat = 'sm8750'; }
+  else{
+    plat = await shOut(
+      `for k in ro.board.platform ro.soc.model ro.mediatek.platform ro.hardware; `+
+      `do v=$(getprop $k 2>/dev/null); [ -n "$v" ] && { echo "$v"; break; }; done`);
+  }
+  const p = (plat||'').trim().toLowerCase();
+  const row = SOC_MAP.find(r=>r[0]===p);
+  socInfo = row
+    ? {code:row[1], marketing:row[2], scheme:row[3], known:true}
+    : {code:p?p.toUpperCase():'--', marketing:'未知', scheme:'a', known:false};
+  socScheme = socInfo.scheme;
+  return socInfo;
+}
+function schemeGovName(){ return socScheme==='b' ? 'conservative' : 'scx'; }
+
 function parseConf(text){
   const data = {};
   MODE_KEYS.forEach(mode=>{
@@ -543,7 +624,6 @@ async function loadModes(){
     chips.appendChild(c);
   });
   renderMode();
-  $('modesFileHint').textContent = '写入 ' + activeConf + '（' + (activeScheme==='a'?'A':'B') + '方案）· 保存后如为当前运行模式则立即应用';
 }
 
 function renderMode(){
@@ -654,21 +734,25 @@ function buildGovScript(text, d){
 
 async function loadGov(){
   if(form!=='dispatch') return;
+  await detectSoc();
   const file = GOV_FILES[govMode];
   if(demoMode){
     govData = parseGovScript(DEMO_GOV[govMode]);
+    if(!govData.governor) govData.governor = schemeGovName();
   }else{
-    govCur = await shOut(`cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null`);
-    const t = await shOut(`cat ${MOD}/${activeScheme}/${file} 2>/dev/null`);
+    const t = await shOut(`cat ${MOD}/${socScheme}/${file} 2>/dev/null`);
     govData = parseGovScript(t);
-    if(!govData.governor) govData.governor = govCur || 'scx';
+    if(!govData.governor) govData.governor = schemeGovName();
     if(!GOV_SLIDERS[govData.governor]){
       ['upThreshold','downThreshold','freqStep','samplingRate','targetLoads'].forEach(k=>{
         if(!govData[k]) govData[k]='0';
       });
     }
   }
-  $('govNow').textContent = govCur || (demoMode?'scx':'--');
+  $('socTip').textContent = socInfo.known
+    ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${socScheme==='a'?'1':'2'}`
+    : `当前SOC：${socInfo.code} → 默认加载方案1`;
+  $('govNow').textContent = schemeGovName();
   const chips=$('govChips'); chips.innerHTML='';
   MODE_KEYS.forEach((k,i)=>{
     const c=document.createElement('button');
@@ -680,7 +764,6 @@ async function loadGov(){
   });
   $('govDesc').textContent = MODE_DESC[MODE_KEYS.indexOf(govMode)];
   renderDd(); renderGovSliders();
-  $('govFileHint').textContent = '写入 ' + activeScheme + '/' + file + '（' + (activeScheme==='a'?'A':'B') + '方案）· 保存后如为当前运行模式则立即应用';
 }
 
 function ddToggle(e){ e.stopPropagation(); $('dd').classList.toggle('open'); }
@@ -716,10 +799,11 @@ function renderGovSliders(){
 }
 async function saveGov(){
   if(demoMode){ toast('演示模式：真机保存将写入调速器脚本'); return; }
+  await detectSoc();
   const file = GOV_FILES[govMode];
-  const t = await shOut(`cat ${MOD}/${activeScheme}/${file} 2>/dev/null`);
+  const t = await shOut(`cat ${MOD}/${socScheme}/${file} 2>/dev/null`);
   const merged = buildGovScript(t, govData);
-  const ok = await writeFile(`${MOD}/${activeScheme}/${file}`, merged);
+  const ok = await writeFile(`${MOD}/${socScheme}/${file}`, merged);
   if(!ok){ toast('写入失败'); return; }
   if(govMode===curMode){
     const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
@@ -728,8 +812,157 @@ async function saveGov(){
   }else{
     toast('已保存（切换到该模式时生效）');
   }
-  $('govNow').textContent = govCur;
+  $('govNow').textContent = schemeGovName();
 }
+
+/* ============ 实时功耗曲线（Chart.js，配置与配色照搬 opbatt 电池工具包） ============ */
+const PW_MAXPTS = 30, PW_INTERVAL = 2000, PW_STORE_KEY = 'colorFC_pwlog';
+let pwChart = null, pwLabels = [], pwPower = [], pwTemp = [], pwTimer = null, pwNeedRescale = true;
+function pwCssVar(k, fallback){
+  const v = getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+  return v || fallback;
+}
+function pwPersist(){
+  try{ localStorage.setItem(PW_STORE_KEY, JSON.stringify(
+    {t:Date.now(), labels:pwLabels, power:pwPower, temp:pwTemp})); }catch(e){}
+}
+function pwRestore(){
+  try{
+    const s = localStorage.getItem(PW_STORE_KEY); if(!s) return;
+    const j = JSON.parse(s);
+    if(j && Array.isArray(j.labels) && Array.isArray(j.power) && Array.isArray(j.temp)
+       && j.labels.length && Date.now()-j.t < 2*3600e3){
+      pwLabels=j.labels.slice(-PW_MAXPTS); pwPower=j.power.slice(-PW_MAXPTS); pwTemp=j.temp.slice(-PW_MAXPTS);
+      pwNeedRescale=true;
+    }
+  }catch(e){}
+}
+function pwPush(w, tp, label){
+  pwLabels.push(label || new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+  pwPower.push(Math.round(w*100)/100);
+  pwTemp.push(tp==null||isNaN(tp)?null:Math.round(tp*10)/10);
+  while(pwLabels.length>PW_MAXPTS){ pwLabels.shift(); pwPower.shift(); pwTemp.shift(); }
+  pwNeedRescale = true;
+  pwPersist();
+  pwRender();
+}
+async function pwSample(){
+  let w=null, tp=null, st='';
+  if(demoMode){
+    const t = Date.now();
+    const chg = Math.floor(t/120000)%4 === 0;
+    w = chg ? 9.5+Math.random()*1.2 : 2.4 + Math.sin(t/28000)*1.0 + Math.random()*0.3;
+    tp = 33 + Math.sin(t/60000)*3.5 + Math.random();
+    st = chg ? 'Charging' : 'Discharging';
+  }else{
+    const out = await shOut(
+      `echo "I=$(cat /sys/class/power_supply/battery/current_now 2>/dev/null)";`+
+      `echo "V=$(cat /sys/class/power_supply/battery/voltage_now 2>/dev/null)";`+
+      `echo "T=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)";`+
+      `echo "S=$(cat /sys/class/power_supply/battery/status 2>/dev/null)"`);
+    const g = k => (out.match(new RegExp('^'+k+'=(.*)$','m'))||[])[1]||'';
+    const cur=parseFloat(g('I')), volt=parseFloat(g('V')), tv=parseFloat(g('T'));
+    st = g('S').trim();
+    if(isFinite(cur) && isFinite(volt) && cur!==0 && volt!==0){
+      w = Math.abs(cur)*volt/1e12;      // µA × µV → W
+      tp = isFinite(tv) ? tv/10 : null;
+    }
+  }
+  const badge = $('pwBadge');
+  if(w==null){
+    $('pwNow').textContent='--'; $('pwTemp').textContent='--';
+    badge.textContent = demoMode?'演示':'--'; badge.className='';
+    return;
+  }
+  pwPush(w, tp);
+  $('pwNow').textContent = w.toFixed(2)+' W';
+  $('pwTemp').textContent = (tp==null)?'--':tp.toFixed(1)+' ℃';
+  if(/^Charg/i.test(st)){ badge.textContent='充电中'; badge.className='chg'; }
+  else if(/^(Full|Not charg)/i.test(st)){ badge.textContent='已接电'; badge.className='chg'; }
+  else { badge.textContent='放电中'; badge.className='dsg'; }
+}
+function pwRender(){
+  const c = $('pwChart');
+  if(!c || typeof Chart === 'undefined' || !c.clientWidth) return;
+  try{
+    if(!pwChart){
+      if(typeof ChartDataLabels !== 'undefined') Chart.register(ChartDataLabels);
+      pwChart = new Chart(c, {
+        type:'line',
+        data:{ labels:pwLabels, datasets:[
+          { label:'功率', data:pwPower, yAxisID:'yPower',
+            borderColor:pwCssVar('--chart-power-line','#67d98a'),
+            borderWidth:2, fill:false, tension:.35, borderCapStyle:'round', borderJoinStyle:'round',
+            pointRadius:0, pointHoverRadius:4, pointHitRadius:10,
+            datalabels:{ display:e=>e.dataIndex===e.dataset.data.length-1, align:'left', anchor:'end', offset:8,
+              formatter:v=>v==null?'--':v.toFixed(1)+' W' } },
+          { label:'温度', data:pwTemp, yAxisID:'yTemp',
+            borderColor:pwCssVar('--chart-temp-line','#ff8086'),
+            borderWidth:2, fill:false, tension:.3, borderCapStyle:'round', borderJoinStyle:'round',
+            pointRadius:0, pointHoverRadius:4, pointHitRadius:10,
+            datalabels:{ display:e=>e.dataIndex===e.dataset.data.length-1, align:'left', anchor:'end', offset:6,
+              formatter:v=>v==null?'--':v.toFixed(1)+' ℃' } }
+        ]},
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          devicePixelRatio:Math.min(Math.max(window.devicePixelRatio||1,1),4),
+          animation:{duration:220, easing:'easeOutCubic'},
+          interaction:{mode:'index', intersect:false},
+          layout:{padding:{top:16, right:16, bottom:2, left:2}},
+          scales:{
+            x:{grid:{color:pwCssVar('--chart-grid','rgba(45,140,255,.055)'), drawTicks:false},
+               ticks:{color:pwCssVar('--chart-text','#7f8896'), autoSkip:true, maxTicksLimit:4, font:{size:10}}},
+            yPower:{position:'left', min:0, suggestedMax:12,
+               grid:{color:pwCssVar('--chart-grid','rgba(45,140,255,.055)'), drawTicks:false},
+               ticks:{color:pwCssVar('--chart-text','#7f8896'), callback:v=>v+'W', font:{size:10}, maxTicksLimit:6}},
+            yTemp:{position:'right', min:20, suggestedMax:45,
+               grid:{drawOnChartArea:false, drawTicks:false},
+               ticks:{color:pwCssVar('--chart-text','#7f8896'), callback:v=>v+'℃', font:{size:10}, maxTicksLimit:6}}
+          },
+          plugins:{
+            legend:{display:false},
+            tooltip:{backgroundColor:pwCssVar('--chart-tooltip-bg','rgba(20,31,56,.94)'),
+               titleColor:pwCssVar('--chart-tooltip-text','#fff'), bodyColor:pwCssVar('--chart-tooltip-text','#fff'),
+               displayColors:true, padding:10, cornerRadius:12,
+               titleFont:{size:11, weight:'700'}, bodyFont:{size:10, weight:'600'}},
+            datalabels:{color:pwCssVar('--chart-datalabel-text','#fff'),
+               backgroundColor:ctx=>ctx.dataset.label==='功率'
+                 ? pwCssVar('--chart-power-line','#67d98a') : pwCssVar('--chart-temp-line','#ff8086'),
+               borderRadius:999, padding:{top:3, right:7, bottom:3, left:7},
+               font:{weight:'700', size:9}, clip:false, clamp:true}
+          }
+        }
+      });
+    }else{
+      pwChart.data.labels = pwLabels;
+      pwChart.data.datasets[0].data = pwPower;
+      pwChart.data.datasets[1].data = pwTemp;
+    }
+    if(pwNeedRescale && pwPower.length){
+      const valid = pwPower.filter(v=>v!=null);
+      const mx = valid.length?Math.max(...valid):0.1;
+      const tv = pwTemp.filter(v=>v!=null);
+      const tmn = tv.length?Math.min(...tv,45):45, tmx = tv.length?Math.max(...tv,20):20;
+      pwChart.options.scales.yPower.min = 0;
+      pwChart.options.scales.yPower.max = Math.max(10, Math.ceil(1.15*mx));
+      pwChart.options.scales.yTemp.min = Math.max(15, Math.floor(tmn-2));
+      pwChart.options.scales.yTemp.max = Math.max(40, Math.ceil(tmx+2));
+      pwNeedRescale = false;
+    }
+    pwChart.update('none');
+  }catch(e){ /* 图表初始化异常不阻塞页面 */ }
+}
+function pwStart(){
+  if(pwTimer) return;
+  pwRestore();
+  pwRender();
+  pwSample();
+  pwTimer = setInterval(pwSample, PW_INTERVAL);
+}
+function pwStop(){
+  if(pwTimer){ clearInterval(pwTimer); pwTimer=null; }
+}
+window.addEventListener('resize', ()=>{ if(pwChart) pwChart.resize(); });
 
 /* ============ 页面切换 ============ */
 function go(p){
@@ -737,7 +970,7 @@ function go(p){
     $('pg-'+k).classList.toggle('on',k===p);
     $('nb-'+k).classList.toggle('on',k===p);
   });
-  if(p==='home') refreshHome();
+  if(p==='home'){ refreshHome(); pwStart(); } else { pwStop(); }
   if(p==='modes') loadModes();
   if(p==='gov') loadGov();
 }
@@ -807,10 +1040,11 @@ const DEMO_GOV = {
 
 /* ============ 启动 ============ */
 (async ()=>{
-  if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); return; }
+  if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); pwStart(); return; }
   await detectForm();
   renderFormCard();
   refreshHome();
+  pwStart();
 })();
 </script>
 </body>

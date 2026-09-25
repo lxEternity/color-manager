@@ -1,3 +1,15 @@
+v1.3.9.7
+1. 主页新增实时功耗曲线（图表引擎与配色照搬 opbatt 电池工具包，Chart.js + datalabels）：
+   - 功率（W）/电池温度（℃）双 Y 轴曲线，滚动记录最近 30 条采样（2 秒/条），localStorage 持久化
+   - 顶部实时功率 / 电池温度 / 充放状态三数据格，充电中·放电中·已接电状态自动识别
+   - 曲线末端胶囊数值标签、深色圆角悬浮提示，离开主页自动停止采样
+2. 调速器方案选择改为 SOC 识别（与 Color 管理器 APP 完全一致）：
+   - 13 项 SOC 映射表（sm8850/8845/8875/8950/8975 → 方案2，其余骁龙8系与天玑旗舰 → 方案1，未知默认方案1）
+   - getprop ro.board.platform → ro.soc.model → ro.mediatek.platform → ro.hardware 多级回退
+   - 调速器页显示"当前SOC：xxx → 加载方案 x"，当前调速器按方案显示 scx/conservative（不再读 sysfs，
+     避免部分设备 scaling_governor 读值异常导致显示不正常）
+3. 移除调度参数页与调速器页的"写入 xxx 路径"提示
+
 v1.3.9.6
 1. WebUI 修复：主页"大核最高频"改为遍历全部 cpufreq policy 取最大值（不再依赖 policy7，适配无 policy7 的 SoC）
 2. WebUI 文案简化：形态卡片显示"Color调度"/"自适应限频"，提示改为

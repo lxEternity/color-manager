@@ -56,6 +56,8 @@ public class PowerHistoryManager {
     private static final int KEEP_SAMPLES = 15000;
     /** 会话断流阈值：超过 15 分钟无采样则视为新会话 */
     private static final long GAP_MS = 15 * 60_000;
+    /** 曲线断流绘制阈值：相邻采样间隔超过 3 分钟断开，不画误连斜线 */
+    private static final long GAP_DRAW = 3 * 60_000L;
 
     private static final List<Sample> data = new ArrayList<>();
     private static long lastT = 0;
@@ -80,6 +82,9 @@ public class PowerHistoryManager {
                 s.watts = Double.parseDouble(p[2]);
                 s.status = p[3].charAt(0);
                 if (p.length >= 5) s.tempC = Double.parseDouble(p[4]);
+                // 归一化符号（旧版记录全为绝对值）：放电负、充电/满电正，曲线上下半区语义一致
+                s.watts = (s.status == 'C' || s.status == 'F')
+                        ? Math.abs(s.watts) : -Math.abs(s.watts);
                 data.add(s);
             }
         } catch (Exception ignored) {
@@ -103,8 +108,10 @@ public class PowerHistoryManager {
         Sample s = new Sample();
         s.t = now;
         s.level = st.level;
-        // 保留符号：放电为负、充电为正（applyCellMode 已按状态定号），显示层按符号区分充/放电
-        s.watts = st.watts;
+        // 符号按充放电状态定号（与显示层 applyCellMode 一致）：充电/满电正、放电负；
+        // 幅值取 |watts|（原始节点符号机型差异大不可信）
+        double mag = Math.abs(st.watts);
+        s.watts = (status == 'C' || status == 'F') ? mag : -mag;
         s.status = status;
         s.tempC = st.tempC;
         data.add(s);
@@ -299,28 +306,30 @@ public class PowerHistoryManager {
             }
             final PowerMonitor.BatteryStat fl = live;
             act.runOnUiThread(() -> {
-                AlertDialog dlg = new AlertDialog.Builder(act)
+                // 弹窗配色基底：跟随日/夜与沉浸背景明暗（浅色主题+深色壁纸 → 深色弹窗）
+                final boolean darkBase = ThemeStore.dialogDarkBase(act);
+                AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(act))
                         .setTitle("功耗记录")
-                        .setView(buildDetailBody(act, ss, fl))
+                        .setView(buildDetailBody(act, ss, fl, darkBase))
                         .setPositiveButton("关闭", null)
                         .setNeutralButton("清空记录", (d, w) -> {
                             clear(act);
                             Toast.makeText(act, "已清空功耗记录", Toast.LENGTH_SHORT).show();
                         })
                         .show();
-                // 自定义背景图沉浸：弹窗底同步玻璃透明度，透出背景
-                if (immersiveOn(act) && dlg.getWindow() != null) {
-                    ColorDrawable cd = new ColorDrawable(act.getColor(R.color.bgCard));
-                    cd.setAlpha(glassA(act));
-                    dlg.getWindow().setBackgroundDrawable(cd);
-                }
+                ThemeStore.styleDialog(act, dlg);   // 圆角卡片 + 尺寸优化（含沉浸玻璃）
             });
         }).start();
     }
 
-    /** 详细记录内容：标题 + 曲线 + 摘要行 */
-    private static View buildDetailBody(Context ctx, List<Sample> ss, PowerMonitor.BatteryStat live) {
+    /** 详细记录内容：标题 + 曲线 + 摘要行（颜色按弹窗配色基底 darkBase 自适应） */
+    private static View buildDetailBody(Context ctx, List<Sample> ss, PowerMonitor.BatteryStat live,
+                                        boolean darkBase) {
         int dp = Math.round(ctx.getResources().getDisplayMetrics().density);
+        int cPrimary = darkBase ? 0xFFE7EDF9 : 0xFF1B2540;
+        int cSecondary = darkBase ? 0xFF9CACCB : 0xFF5D6B85;
+        int cGreen = ctx.getColor(R.color.green);
+        int cAccent = ctx.getColor(R.color.accent);
         LinearLayout root = new LinearLayout(ctx);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp * 4, dp * 2, dp * 4, 0);
@@ -366,13 +375,13 @@ public class PowerHistoryManager {
         head.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(ctx);
         title.setText("使用过程 · 近3小时");
-        title.setTextColor(ctx.getColor(R.color.textPrimary));
+        title.setTextColor(cPrimary);
         title.setTextSize(13);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         head.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         TextView lvl = new TextView(ctx);
         lvl.setText(levelNow >= 0 ? "电量 " + levelNow + "%" : "电量 --");
-        lvl.setTextColor(ctx.getColor(charging || full ? R.color.green : R.color.accent));
+        lvl.setTextColor(charging || full ? cGreen : cAccent);
         lvl.setTextSize(12);
         lvl.setTypeface(Typeface.DEFAULT_BOLD);
         head.addView(lvl);
@@ -406,7 +415,7 @@ public class PowerHistoryManager {
                         wh);
                 TextView ci = new TextView(ctx);
                 ci.setText(chargeInfo);
-                ci.setTextColor(ctx.getColor(fullAt > 0 || charging ? R.color.green : R.color.textSecondary));
+                ci.setTextColor(fullAt > 0 || charging ? cGreen : cSecondary);
                 ci.setTextSize(10);
                 ci.setTypeface(Typeface.DEFAULT_BOLD);
                 ci.setPadding(0, dp * 3, 0, 0);
@@ -417,20 +426,20 @@ public class PowerHistoryManager {
         if (n == 0) {
             TextView empty = new TextView(ctx);
             empty.setText("暂无记录 · 保持应用运行将自动采样（每分钟一条）");
-            empty.setTextColor(ctx.getColor(R.color.textSecondary));
+            empty.setTextColor(cSecondary);
             empty.setTextSize(10);
             empty.setPadding(0, dp * 6, 0, 0);
             root.addView(empty);
         }
 
-        SceneChart chart = new SceneChart(ctx, ss, glassA(ctx));
+        SceneChart chart = new SceneChart(ctx, ss, glassA(ctx), darkBase);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp * 230);
         cp.topMargin = dp * 6;
         root.addView(chart, cp);
 
         // 摘要行（Scene: 总能耗 / 平均温度 / 电压 / 充电状态）
-        root.addView(colRow(ctx, dp, false, new String[][]{
+        root.addView(colRow(ctx, dp, false, darkBase, new String[][]{
                 {"总能耗", n > 0 ? String.format(Locale.US, "%.1fWh", energyWh) : "--"},
                 {"平均温度", avgTemp > 0 ? String.format(Locale.US, "%.1f℃", avgTemp) : "--"},
                 {"电压", volts > 0 ? String.format(Locale.US, "%.2fV", volts) : "--"},
@@ -438,7 +447,7 @@ public class PowerHistoryManager {
         }));
 
         // 大数字行（Scene: 平均功耗 / 峰值 / 已使用 / 理论续航）
-        root.addView(colRow(ctx, dp, true, new String[][]{
+        root.addView(colRow(ctx, dp, true, darkBase, new String[][]{
                 {"平均功耗", n > 0 ? String.format(Locale.US, "%.2fW", avgW) : "--"},
                 {"峰值", n > 0 ? String.format(Locale.US, "%.2fW", peakW) : "--"},
                 {"已使用", n > 1 ? fmtDur(spanMs) : "--"},
@@ -447,8 +456,10 @@ public class PowerHistoryManager {
         return root;
     }
 
-    /** 横向等分列；big=true 数值在上（大号主题色），否则标签在上 */
-    private static LinearLayout colRow(Context ctx, int dp, boolean big, String[]... cols) {
+    /** 横向等分列；big=true 数值在上（大号主题色），否则标签在上（颜色按弹窗明暗基底自适应） */
+    private static LinearLayout colRow(Context ctx, int dp, boolean big, boolean darkBase, String[]... cols) {
+        int cLabel = darkBase ? 0xFF9CACCB : ctx.getColor(R.color.textDim);
+        int cValue = darkBase ? 0xFFE7EDF9 : ctx.getColor(R.color.textPrimary);
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         for (String[] col : cols) {
@@ -456,13 +467,13 @@ public class PowerHistoryManager {
             cell.setOrientation(LinearLayout.VERTICAL);
             TextView l = new TextView(ctx);
             l.setText(col[0]);
-            l.setTextColor(ctx.getColor(R.color.textDim));
+            l.setTextColor(cLabel);
             l.setTextSize(9);
             TextView v = new TextView(ctx);
             v.setText(col[1]);
             v.setTextSize(big ? 16 : 12);
             v.setTypeface(Typeface.DEFAULT_BOLD);
-            v.setTextColor(big ? ctx.getColor(R.color.accent) : ctx.getColor(R.color.textPrimary));
+            v.setTextColor(big ? ctx.getColor(R.color.accent) : cValue);
             if (big) {
                 cell.addView(v);
                 cell.addView(l);
@@ -513,7 +524,7 @@ public class PowerHistoryManager {
         private final Paint pFill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint pDot = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        SceneChart(Context ctx, List<Sample> ss, int cardAlpha) {
+        SceneChart(Context ctx, List<Sample> ss, int cardAlpha, boolean darkBase) {
             super(ctx);
             this.ss = ss;
             this.cardAlpha = cardAlpha;
@@ -521,10 +532,11 @@ public class PowerHistoryManager {
             cAccent = ctx.getColor(R.color.accent);
             cGreen = ctx.getColor(R.color.green);
             cOrange = ctx.getColor(R.color.orange);
-            cCard = ctx.getColor(R.color.bgCard);
-            cGrid = ctx.getColor(R.color.divider);
-            cDim = ctx.getColor(R.color.textSecondary);
-            cText = ctx.getColor(R.color.textPrimary);
+            // 配色基底随弹窗明暗自适应（深色弹窗上资源色会看不清）
+            cCard = darkBase ? 0xFF0D1220 : ctx.getColor(R.color.bgCard);
+            cGrid = darkBase ? 0x339CACCB : ctx.getColor(R.color.divider);
+            cDim = darkBase ? 0xFF9CACCB : ctx.getColor(R.color.textSecondary);
+            cText = darkBase ? 0xFFE7EDF9 : ctx.getColor(R.color.textPrimary);
             pGrid.setColor(cDim);
             pGrid.setStrokeWidth(1);
             pGrid.setAlpha(170);   // 水平网格明显
@@ -591,8 +603,11 @@ public class PowerHistoryManager {
             // 温度轴固定 20~70℃（5 档，10℃ 一档），与功率网格线共用
             float tMin = 20f, tMax = 70f;
 
-            long t0 = ss.get(0).t;
-            long span = Math.max(60_000L, ss.get(n - 1).t - t0);
+            // X 轴固定整个 3 小时窗口（now-180min → now）：曲线从左往右延伸，
+            // 最新点贴近右缘，时间刻度与真实时间一一对应
+            long tEnd = System.currentTimeMillis();
+            long t0 = tEnd - 180 * 60_000L;
+            long span = 180 * 60_000L;
             Sample last = ss.get(n - 1);
             float yMid = (top + bottom) / 2f;   // 0 功率基准线
 
@@ -630,44 +645,67 @@ public class PowerHistoryManager {
             int i = 0;
             while (i < n) {
                 boolean ch = ss.get(i).status == 'C';
+                // 段尾：充放电状态切换 或 采样断流(>3min) 处断开
+                int j = i + 1;
+                while (j < n && (ss.get(j).status == 'C') == ch
+                        && ss.get(j).t - ss.get(j - 1).t <= GAP_DRAW) {
+                    j++;
+                }
+                int col = ch ? cGreen : cAccent;
+                boolean gapBefore = i == 0 || ss.get(i).t - ss.get(i - 1).t > GAP_DRAW;
+                if (j - i == 1 && gapBefore && i > 0) {
+                    // 中段孤立采样点（两侧均断流）：只画圆点不画线，避免长斜线误连
+                    pDot.setColor(col);
+                    c.drawCircle(xOf(ss.get(i).t, t0, span, left, pw),
+                            yOf(ss.get(i).watts, yMid, ph, vmax), 2 * dp, pDot);
+                    i = j;
+                    continue;
+                }
                 Path line = new Path();
                 Path fill = new Path();
                 float px0 = xOf(ss.get(i).t, t0, span, left, pw);
                 float py0 = yOf(ss.get(i).watts, yMid, ph, vmax);
-                if (i > 0) {   // 与前一段衔接处用本段颜色补画连接线
-                    float prx = xOf(ss.get(i - 1).t, t0, span, left, pw);
-                    float pry = yOf(ss.get(i - 1).watts, yMid, ph, vmax);
-                    line.moveTo(prx, pry);
-                    fill.moveTo(prx, yMid);
-                    fill.lineTo(prx, pry);
+                if (i == 0) {
+                    // 曲线起点统一锚定左下角：从角落引出后升/降到首个采样点
+                    line.moveTo(left, bottom);
+                    line.lineTo(px0, py0);
+                } else if (!gapBefore) {   // 与前段衔接：用本段颜色补连接线，曲线保持连续
+                    line.moveTo(xOf(ss.get(i - 1).t, t0, span, left, pw),
+                            yOf(ss.get(i - 1).watts, yMid, ph, vmax));
+                    line.lineTo(px0, py0);
+                } else {
+                    line.moveTo(px0, py0);
+                }
+                // 渐变填充统一锚定 0 线（左下角起始引线不参与填充，面积保持干净）
+                if (i > 0 && !gapBefore) {
+                    fill.moveTo(xOf(ss.get(i - 1).t, t0, span, left, pw), yMid);
+                    fill.lineTo(xOf(ss.get(i - 1).t, t0, span, left, pw),
+                            yOf(ss.get(i - 1).watts, yMid, ph, vmax));
                 } else {
                     fill.moveTo(px0, yMid);
                 }
-                line.lineTo(px0, py0);
                 fill.lineTo(px0, py0);
-                int j = i + 1;
-                while (j < n && (ss.get(j).status == 'C') == ch) {
-                    line.lineTo(xOf(ss.get(j).t, t0, span, left, pw),
-                            yOf(ss.get(j).watts, yMid, ph, vmax));
-                    fill.lineTo(xOf(ss.get(j).t, t0, span, left, pw),
-                            yOf(ss.get(j).watts, yMid, ph, vmax));
-                    j++;
+                for (int k = i + 1; k < j; k++) {
+                    float x = xOf(ss.get(k).t, t0, span, left, pw);
+                    float y = yOf(ss.get(k).watts, yMid, ph, vmax);
+                    line.lineTo(x, y);
+                    fill.lineTo(x, y);
                 }
                 fill.lineTo(xOf(ss.get(j - 1).t, t0, span, left, pw), yMid);
                 fill.close();
-                int col = ch ? cGreen : cAccent;
                 pLine.setColor(col);
-                // 渐变锚定本段基准（充电从 0 线向上淡出 / 放电从 0 线向下淡出）
+                // 渐变面积：近 0 线浓、向上/下边缘淡出
                 pFill.setShader(new LinearGradient(0, yMid, 0, ch ? top : bottom,
-                        0x00000000, (col & 0x00FFFFFF) | 0x2E000000, Shader.TileMode.CLAMP));
-                c.drawPath(fill, pFill);   // 分段渐变面积（近 0 线浓、远端淡）
-                c.drawPath(line, pLine);   // 分段实线曲线
+                        (col & 0x00FFFFFF) | 0x33000000, 0x00000000, Shader.TileMode.CLAMP));
+                c.drawPath(fill, pFill);   // 分段渐变面积
+                c.drawPath(line, pLine);   // 实线曲线：随时间从左往右自然上升/下降
                 i = j;
             }
 
-            // 温度曲线（橙色实线，右轴 20~70℃，仅存在温度数据时绘制）
+            // 温度曲线（橙色实线，右轴 20~70℃，仅存在温度数据时绘制；断流处同样断线）
             if (hasTemp) {
                 Path tp = new Path();
+                long prevT = 0;
                 boolean started = false;
                 for (Sample s : ss) {
                     float x = xOf(s.t, t0, span, left, pw);
@@ -675,9 +713,12 @@ public class PowerHistoryManager {
                     if (!started) {
                         tp.moveTo(x, y);
                         started = true;
+                    } else if (s.t - prevT > GAP_DRAW) {
+                        tp.moveTo(x, y);   // 断流：抬笔重落，不画跨间隔斜线
                     } else {
                         tp.lineTo(x, y);
                     }
+                    prevT = s.t;
                 }
                 c.drawPath(tp, pTemp);
                 pDot.setColor(cOrange);

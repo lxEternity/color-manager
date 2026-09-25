@@ -11,6 +11,7 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -138,6 +139,62 @@ public class ThemeStore {
         cfg.uiMode = (cfg.uiMode & ~Configuration.UI_MODE_NIGHT_MASK)
                 | Configuration.UI_MODE_NIGHT_YES;
         return base.createConfigurationContext(cfg);
+    }
+
+    // ==================== 弹窗统一主题（圆角卡片，跟随日/夜与沉浸背景明暗） ====================
+
+    /** 弹窗配色基底：沉浸模式按背景实际明暗（浅色主题+深色壁纸 → 深色弹窗），否则跟随日夜开关 */
+    public static boolean dialogDarkBase(Context c) {
+        boolean img = imageBg(c) && bgFile(c).exists();
+        boolean transp = transparentBg(c) && !img;
+        return (img || transp) ? immersiveDarkBase(c) : dark(c);
+    }
+
+    /** 弹窗 Context：Material 深/浅 Dialog 主题，标题/正文/列表/按钮文字配色整体跟随 */
+    public static Context dialogCtx(Activity a) {
+        return new android.view.ContextThemeWrapper(a, dialogDarkBase(a)
+                ? android.R.style.Theme_Material_Dialog_Alert
+                : android.R.style.Theme_Material_Light_Dialog_Alert);
+    }
+
+    /** 弹窗统一圆角卡片样式（在 show() 之后调用）：
+     *  24dp 大圆角 + 卡片底色（沉浸时玻璃半透明）+ 轻描边 + 强调色按钮 + 宽度优化 */
+    public static void styleDialog(Context c, android.app.AlertDialog d) {
+        android.view.Window w = d.getWindow();
+        if (w == null) return;
+        boolean darkBase = dialogDarkBase(c);
+        boolean immersive = (imageBg(c) && bgFile(c).exists()) || transparentBg(c);
+        float dp = c.getResources().getDisplayMetrics().density;
+
+        GradientDrawable g = new GradientDrawable();
+        int base = darkBase ? 0xFF161D2F : 0xFFFFFFFF;   // bgCard 深浅变体
+        int a = immersive ? Math.max(200, Math.round(glassAlpha(c) * 2.2f)) : 255;
+        g.setColor((base & 0x00FFFFFF) | (a << 24));
+        g.setCornerRadius(24 * dp);
+        g.setStroke(Math.round(dp), darkBase ? 0xFF2A3550 : 0xFFDCE6F2);
+        w.setBackgroundDrawable(g);
+        try {
+            w.setDimAmount(immersive ? 0.25f : 0.5f);
+        } catch (Exception ignored) {
+        }
+
+        // 按钮统一强调色（按钮在 show() 后才存在）
+        int accent = c.getResources().getColor(R.color.accent);
+        android.widget.Button[] bs = {
+                d.getButton(android.app.AlertDialog.BUTTON_POSITIVE),
+                d.getButton(android.app.AlertDialog.BUTTON_NEGATIVE),
+                d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)};
+        for (android.widget.Button b : bs) if (b != null) b.setTextColor(accent);
+
+        // 尺寸优化：宽度 = min(屏宽 - 32dp, 400dp)，高度自适应；避免默认过宽/贴边
+        try {
+            Point size = new Point();
+            ((WindowManager) c.getSystemService(Context.WINDOW_SERVICE))
+                    .getDefaultDisplay().getRealSize(size);
+            int want = Math.min(size.x - Math.round(32 * dp), Math.round(400 * dp));
+            if (want > 0) w.setLayout(want, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        } catch (Exception ignored) {
+        }
     }
 
     /** 在 super.onCreate 前调用：切换日/夜基础主题 */

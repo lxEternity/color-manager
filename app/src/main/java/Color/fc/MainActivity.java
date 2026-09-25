@@ -522,7 +522,7 @@ public class MainActivity extends ThemedActivity {
                 "强制单电芯"
         };
         int checked = cellMode == 2 ? 1 : (cellMode == 1 ? 2 : 0);
-        new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("电芯模式")
                 .setSingleChoiceItems(items, checked, (d, w) -> {
                     cellMode = w == 1 ? 2 : (w == 2 ? 1 : 0);
@@ -532,6 +532,7 @@ public class MainActivity extends ThemedActivity {
                 })
                 .setNegativeButton("取消", null)
                 .show();
+        ThemeStore.styleDialog(this, dlg);
     }
 
     private void updatePower(PowerMonitor.BatteryStat st) {

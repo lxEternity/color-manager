@@ -370,6 +370,11 @@ public class ModeActivity extends ThemedActivity {
 
     /** 滑条 0~100 + 圆角数值框联动对话框（单位 %） */
     private void sliderDialog(String title, String msg, int cur, final IntCb cb) {
+        // 弹窗配色基底：跟随日/夜与沉浸背景明暗（自定义视图颜色同步，不依赖资源）
+        final boolean darkBase = ThemeStore.dialogDarkBase(this);
+        final int cPrimary = darkBase ? 0xFFE7EDF9 : 0xFF1B2540;
+        final int cSecondary = darkBase ? 0xFF9CACCB : 0xFF5D6B85;
+
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(20), dp(4), dp(20), dp(2));
@@ -389,9 +394,9 @@ public class ModeActivity extends ThemedActivity {
         valBox.setOrientation(LinearLayout.HORIZONTAL);
         valBox.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable vbg = new GradientDrawable();
-        vbg.setColor(0x14808FA6);
+        vbg.setColor(darkBase ? 0x26FFFFFF : 0x14808FA6);
         vbg.setCornerRadius(dp(8));
-        vbg.setStroke(dp(1), 0x2E0077A8);
+        vbg.setStroke(dp(1), darkBase ? 0x339CACCB : 0x2E0077A8);
         valBox.setBackground(vbg);
         valBox.setPadding(dp(8), 0, dp(7), 0);
         LinearLayout.LayoutParams vlp = new LayoutParams(dp(74), LayoutParams.WRAP_CONTENT);
@@ -403,7 +408,7 @@ public class ModeActivity extends ThemedActivity {
         et.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(3)});
         et.setText(String.valueOf(cur));
         et.setTextSize(13);
-        et.setTextColor(getResources().getColor(R.color.textPrimary));
+        et.setTextColor(cPrimary);
         et.setBackgroundColor(0);
         et.setMinHeight(0);
         et.setMinimumHeight(0);
@@ -414,7 +419,7 @@ public class ModeActivity extends ThemedActivity {
 
         TextView pct = new TextView(this);
         pct.setText("%");
-        pct.setTextColor(getResources().getColor(R.color.textSecondary));
+        pct.setTextColor(cSecondary);
         pct.setTextSize(12);
         valBox.addView(pct);
 
@@ -456,7 +461,7 @@ public class ModeActivity extends ThemedActivity {
             }
         });
 
-        new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle(title)
                 .setMessage(msg)
                 .setView(box)
@@ -471,6 +476,7 @@ public class ModeActivity extends ThemedActivity {
                 })
                 .setNegativeButton("取消", null)
                 .show();
+        ThemeStore.styleDialog(this, dlg);   // 圆角卡片 + 尺寸优化
     }
 
     /** idx: 0=小核上限% 1=大核上限% */
@@ -496,11 +502,12 @@ public class ModeActivity extends ThemedActivity {
     private void pickMode(final ModeCb cb) {
         String[] labels = new String[MODES.length];
         for (int i = 0; i < MODES.length; i++) labels[i] = MODES[i][1];
-        new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("选择调度模式")
                 .setItems(labels, (d, which) -> cb.on(MODES[which][0]))
                 .setNegativeButton("取消", null)
                 .show();
+        ThemeStore.styleDialog(this, dlg);
     }
 
     private void saveConf() {

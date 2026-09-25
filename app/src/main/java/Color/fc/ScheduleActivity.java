@@ -312,12 +312,13 @@ public class ScheduleActivity extends ThemedActivity {
     private void switchTab(String t) {
         if (t.equals(tab)) return;
         if (dirty) {
-            new AlertDialog.Builder(this)
+            AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                     .setTitle("未保存的修改")
                     .setMessage("当前方案已修改但未保存，切换后将丢失，是否继续？")
                     .setPositiveButton("继续", (d, w) -> doSwitch(t))
                     .setNegativeButton("取消", null)
                     .show();
+            ThemeStore.styleDialog(this, dlg);
         } else {
             doSwitch(t);
         }
@@ -391,17 +392,14 @@ public class ScheduleActivity extends ThemedActivity {
         }
         String[] opts = {"方案1", "方案2", "方案1+方案2"};
         final int[] sel = {0};
-        AlertDialog dlg = new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("恢复默认值")
                 .setMessage("选择要恢复出厂默认参数的方案，点击确定后立即写入并保存")
                 .setSingleChoiceItems(opts, 0, (d, w) -> sel[0] = w)
                 .setPositiveButton("确定", (d, w) -> doResetDefaults(sel[0]))
                 .setNegativeButton("取消", null)
-                .create();
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
-        }
-        dlg.show();
+                .show();
+        ThemeStore.styleDialog(this, dlg);
     }
 
     /** w: 0=方案1  1=方案2  2=方案1+方案2。内存替换 + 立即写对应 a/b.all.sh */
@@ -441,18 +439,15 @@ public class ScheduleActivity extends ThemedActivity {
             return;
         }
         String[] opts = {"方案1", "方案2", "方案1+方案2"};
-        AlertDialog dlg = new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("选择要导出的方案")
                 .setSingleChoiceItems(opts, 2, (d, w) -> {
                     d.dismiss();
                     doExport(w);
                 })
                 .setNegativeButton("取消", null)
-                .create();
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
-        }
-        dlg.show();
+                .show();
+        ThemeStore.styleDialog(this, dlg);
     }
 
     /** 按所选方案导出（只覆盖文件中对应方案的小节，另一方案保持原样） */
@@ -486,7 +481,7 @@ public class ScheduleActivity extends ThemedActivity {
             return;
         }
         String[] opts = {"方案1", "方案2", "方案1+方案2"};
-        AlertDialog dlg = new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
                 .setTitle("选择要导入的方案")
                 .setSingleChoiceItems(opts, 2, (d, w) -> {
                     d.dismiss();
@@ -497,11 +492,8 @@ public class ScheduleActivity extends ThemedActivity {
                     startActivityForResult(it, REQ_IMPORT);
                 })
                 .setNegativeButton("取消", null)
-                .create();
-        if (dlg.getWindow() != null) {
-            dlg.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
-        }
-        dlg.show();
+                .show();
+        ThemeStore.styleDialog(this, dlg);
     }
 
     @Override

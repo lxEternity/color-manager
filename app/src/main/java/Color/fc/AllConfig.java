@@ -12,8 +12,13 @@ public class AllConfig {
 
     public static class Mode {
         public String opt2 = "0";
-        public String cpuMax = "42";
+        /** 小核上限 %（json_cpu_max_min 参数一，照搬 Kin FSM maxL） */
+        public String cpuMaxL = "42";
+        /** 大核上限 %（json_cpu_max_min 参数二，照搬 Kin FSM maxB） */
+        public String cpuMaxB = "42";
         public String cpuMin = "5";
+        /** GPU 上限 %（0=不限制，照搬 Kin FSM gpu） */
+        public String gpuMax = "0";
         public String llcc = "350000";
         public String uclampDisplay = "6";
         public String uclampSsfg = "5";
@@ -36,23 +41,23 @@ public class AllConfig {
             "fast · 极限性能，全力释放"
     };
 
-    /** 默认参数（a/b 初始一致） */
+    /** 默认参数（a/b 初始一致）。GPU 上限照搬 Kin FSM 内置曲线：省电40/均衡60/性能85/极速100 */
     public static AllConfig defaults() {
         AllConfig c = new AllConfig();
         Mode ps = new Mode();
-        ps.opt2 = "0"; ps.cpuMax = "42"; ps.cpuMin = "5"; ps.llcc = "350000";
+        ps.opt2 = "0"; ps.cpuMaxL = "42"; ps.cpuMaxB = "42"; ps.cpuMin = "5"; ps.gpuMax = "40"; ps.llcc = "350000";
         ps.uclampDisplay = "6"; ps.uclampSsfg = "5"; ps.uclampTouch = "8";
         ps.uclampMm = "6"; ps.uclampRt = "3"; ps.uclampTopApp = "10";
         Mode bl = new Mode();
-        bl.opt2 = "26"; bl.cpuMax = "64"; bl.cpuMin = "20"; bl.llcc = "680000";
+        bl.opt2 = "26"; bl.cpuMaxL = "64"; bl.cpuMaxB = "64"; bl.cpuMin = "20"; bl.gpuMax = "60"; bl.llcc = "680000";
         bl.uclampDisplay = "30"; bl.uclampSsfg = "28"; bl.uclampTouch = "40";
         bl.uclampMm = "32"; bl.uclampRt = "40"; bl.uclampTopApp = "26";
         Mode pf = new Mode();
-        pf.opt2 = "52"; pf.cpuMax = "90"; pf.cpuMin = "35"; pf.llcc = "1220000";
+        pf.opt2 = "52"; pf.cpuMaxL = "90"; pf.cpuMaxB = "90"; pf.cpuMin = "35"; pf.gpuMax = "85"; pf.llcc = "1220000";
         pf.uclampDisplay = "78"; pf.uclampSsfg = "76"; pf.uclampTouch = "92";
         pf.uclampMm = "80"; pf.uclampRt = "92"; pf.uclampTopApp = "74";
         Mode fa = new Mode();
-        fa.opt2 = "88"; fa.cpuMax = "100"; fa.cpuMin = "42"; fa.llcc = "1800000";
+        fa.opt2 = "88"; fa.cpuMaxL = "100"; fa.cpuMaxB = "100"; fa.cpuMin = "42"; fa.gpuMax = "100"; fa.llcc = "1800000";
         fa.uclampDisplay = "82"; fa.uclampSsfg = "80"; fa.uclampTouch = "94";
         fa.uclampMm = "84"; fa.uclampRt = "94"; fa.uclampTopApp = "78";
         fa.walt1 = "0"; fa.walt2 = "1500";
@@ -65,7 +70,9 @@ public class AllConfig {
 
     private static final Pattern P_ACTION = Pattern.compile("\\[\\[ \\$action == \"(\\w+)\" ]]");
     private static final Pattern P_OPT2 = Pattern.compile("opt2 (\\S+)");
-    private static final Pattern P_JSON = Pattern.compile("json_cpu_max_min \"(\\S+)\" \"(\\S+)\"");
+    /** 新 4 参：小核上限% 大核上限% 下限% GPU上限%（后两参可选，兼容旧 2 参 conf） */
+    private static final Pattern P_JSON = Pattern.compile(
+            "json_cpu_max_min \"(\\S+)\" \"(\\S+)\"(?: \"(\\S+)\")?(?: \"(\\S+)\")?");
     private static final Pattern P_LLCC = Pattern.compile("llcc\\.sh set_max_freq (\\S+)");
     private static final Pattern P_ECHO = Pattern.compile("echo \"?([\\w.-]+)\"? > (\\S+)");
     private static final Pattern P_WALT = Pattern.compile("walt_up_rate_limit_us \"(\\S+)\" \"(\\S+)\"");
@@ -104,8 +111,17 @@ public class AllConfig {
                 }
                 Matcher mj = P_JSON.matcher(line);
                 if (mj.find()) {
-                    md.cpuMax = mj.group(1);
-                    md.cpuMin = mj.group(2);
+                    md.cpuMaxL = mj.group(1);
+                    md.cpuMaxB = mj.group(2);
+                    if (mj.group(3) != null) {
+                        // 新 4 参：小核上限% 大核上限% 下限% GPU上限%
+                        md.cpuMin = mj.group(3);
+                        if (mj.group(4) != null) md.gpuMax = mj.group(4);
+                    } else {
+                        // 旧 2 参（原 ELF 语义）：参数一=上限%（小/大核同值），参数二=下限%
+                        md.cpuMaxB = mj.group(1);
+                        md.cpuMin = mj.group(2);
+                    }
                     continue;
                 }
                 Matcher ml = P_LLCC.matcher(line);
@@ -147,7 +163,8 @@ public class AllConfig {
         sb.append("\techo \"powersave\" > $pan1\n");
         sb.append("    $mokzdz/A/opt2 ").append(ps.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/A/conservative.sh\n");
-        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(ps.cpuMax).append("\" \"").append(ps.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(ps.cpuMaxL).append("\" \"").append(ps.cpuMaxB)
+                .append("\" \"").append(ps.cpuMin).append("\" \"").append(ps.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/A/freq0.sh 2>/dev/null\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(ps.llcc).append('\n');
         sb.append("    \n");
@@ -160,7 +177,8 @@ public class AllConfig {
         sb.append("\techo \"balance\" > $pan1\n");
         sb.append("    $mokzdz/A/opt2 ").append(bl.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/A/scx1.sh\n");
-        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(bl.cpuMax).append("\" \"").append(bl.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(bl.cpuMaxL).append("\" \"").append(bl.cpuMaxB)
+                .append("\" \"").append(bl.cpuMin).append("\" \"").append(bl.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/A/freq1.sh 2>/dev/null\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(bl.llcc).append('\n');
         sb.append("   \n");
@@ -173,7 +191,8 @@ public class AllConfig {
         sb.append("\techo \"performance\" > $pan1\n");
         sb.append("    $mokzdz/A/opt2 ").append(pf.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/A/scx2.sh\n");
-        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(pf.cpuMax).append("\" \"").append(pf.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(pf.cpuMaxL).append("\" \"").append(pf.cpuMaxB)
+                .append("\" \"").append(pf.cpuMin).append("\" \"").append(pf.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/A/freq2.sh 2>/dev/null\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(pf.llcc).append('\n');
         appendUclamp(sb, pf);
@@ -187,7 +206,8 @@ public class AllConfig {
         sb.append("    $mokzdz/A/opt2 ").append(fa.opt2).append(" 2>/dev/null\n");
         sb.append("    $mokzdz/A/scx3.sh\n");
         sb.append("    $mokzdz/A/llcc.sh set_max_freq ").append(fa.llcc).append('\n');
-        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(fa.cpuMax).append("\" \"").append(fa.cpuMin).append("\"\n");
+        sb.append("    $mokzdz/A/json_cpu_max_min \"").append(fa.cpuMaxL).append("\" \"").append(fa.cpuMaxB)
+                .append("\" \"").append(fa.cpuMin).append("\" \"").append(fa.gpuMax).append("\"\n");
         sb.append("    sh $mokzdz/A/freq3.sh 2>/dev/null\n");
         sb.append('\n');
         appendUclamp(sb, fa);

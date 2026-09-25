@@ -64,19 +64,21 @@ public class GovernorActivity extends ThemedActivity {
             "性能模式调速器参数（CPU 0/3/5/7）",
             "极速模式全核调速器参数（CPU0-7）"
     };
-    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用），minFreq/maxFreq = CPU 自定义限频（MHz，0=不限制） */
+    /** 每模式的参数字段（fillInputs / collectInputs / lax 共用），
+     *  minFreqL/maxFreqL/minFreqB/maxFreqB = 小核/大核自定义限频（MHz，0=不限制，照搬 Kin 分簇方案） */
     private static final String[][] FIELDS = {
-            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate", "minFreq", "maxFreq"},
-            {"governor", "targetLoads", "minFreq", "maxFreq"},
-            {"governor", "targetLoads", "minFreq", "maxFreq"},
-            {"governor", "targetLoads", "minFreq", "maxFreq"}
+            {"governor", "upThreshold", "downThreshold", "freqStep", "samplingRate",
+                    "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"},
+            {"governor", "targetLoads", "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"},
+            {"governor", "targetLoads", "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"},
+            {"governor", "targetLoads", "minFreqL", "maxFreqL", "minFreqB", "maxFreqB"}
     };
-    /** 出厂默认（与模块 A/ 出厂脚本一致：conservative.sh 95/90/1/8000、scx1=90、scx2=85、scx3=walt） */
+    /** 出厂默认（与模块 A/ 出厂脚本一致：conservative.sh 95/90/1/8000、scx1=90、scx2=85、scx3=walt，限频全不限制） */
     private static final String[][] DEFAULTS = {
-            {"conservative", "95", "90", "1", "8000", "0", "0"},
-            {"scx", "90", "0", "0"},
-            {"scx", "85", "0", "0"},
-            {"walt", "70", "0", "0"}
+            {"conservative", "95", "90", "1", "8000", "0", "0", "0", "0"},
+            {"scx", "90", "0", "0", "0", "0"},
+            {"scx", "85", "0", "0", "0", "0"},
+            {"walt", "70", "0", "0", "0", "0"}
     };
     /** 模块可能用于恢复 A/ 脚本的镜像位置（类似 conf 模板机制），保存时三重写入 */
     private static final String[] MIRROR_DIRS = {
@@ -167,16 +169,19 @@ public class GovernorActivity extends ThemedActivity {
                 addParam(box, idx + ".targetLoads", "target_loads 目标负载（%）",
                         i == 1 ? "90" : i == 2 ? "85" : "70", true);
             }
-            addFreqSelector(box, idx + ".minFreq", "CPU 最小频率限制");
-            addFreqSelector(box, idx + ".maxFreq", "CPU 最大频率限制");
+            addFreqSelector(box, idx + ".minFreqL", "小核最小频率限制");
+            addFreqSelector(box, idx + ".maxFreqL", "小核最大频率限制");
+            addFreqSelector(box, idx + ".minFreqB", "大核最小频率限制");
+            addFreqSelector(box, idx + ".maxFreqB", "大核最大频率限制");
             container.addView(card);
         }
     }
 
-    /** 启用核心选择行：8 个可点击芯片，选中=启用该核心 */
+    /** 启用核心选择行：8 个可点击芯片。状态=实时 sysfs online，点击即时写 sysfs
+     *  （照搬 Kin-app，不写入调速脚本，切换方案不影响核心开关状态） */
     private void addCoreSelector(LinearLayout box, int idx) {
         TextView label = new TextView(this);
-        label.setText("启用或关闭核心");
+        label.setText("启用或关闭核心（即时生效，独立于方案）");
         label.setTextSize(11);
         label.setTextColor(getResources().getColor(R.color.textSecondary));
         label.setPadding(dp(2), dp(4), dp(2), dp(4));
@@ -198,20 +203,21 @@ public class GovernorActivity extends ThemedActivity {
             GradientDrawable bg = new GradientDrawable();
             bg.setCornerRadius(dp(8));
             chip.setBackground(bg);
-            chip.setTag(Boolean.TRUE);   // 默认启用，fillInputs 按脚本覆盖
+            chip.setTag(Boolean.TRUE);   // 初始按在线，refreshCoreChips 按实时状态覆盖
             styleChip(chip, true);
             final int core = c;
             chip.setOnClickListener(v -> {
                 if (loading) return;
-                boolean on = !Boolean.TRUE.equals(chip.getTag());
                 if (core == 0) {
                     Toast.makeText(this, "CPU0 为主核，系统不允许关闭", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                chip.setTag(on);
-                styleChip(chip, on);
-                // 即时生效（照搬 Kin-app：直接写 sysfs online 节点，不等脚本/重启）
-                new Thread(() -> CpuCoreManager.setCoreOnline(core, on)).start();
+                final boolean on = !Boolean.TRUE.equals(chip.getTag());
+                new Thread(() -> {
+                    // 即时写 sysfs（照搬 Kin-app：echo 0/1 > cpuN/online），随后按回读的真实状态刷新全部芯片
+                    CpuCoreManager.setCoreOnline(core, on);
+                    runOnUiThread(this::refreshCoreChips);
+                }).start();
             });
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(30), dp(30));
             clp.rightMargin = dp(6);
@@ -221,6 +227,24 @@ public class GovernorActivity extends ThemedActivity {
         }
         coreChips.put(String.valueOf(idx), chips);
         box.addView(row);
+    }
+
+    /** 按实时 sysfs online 状态刷新 4 个方案卡片的全部核心芯片（后台读，UI 刷） */
+    private void refreshCoreChips() {
+        new Thread(() -> {
+            final boolean[] live = new boolean[8];
+            for (int c = 0; c < 8; c++) live[c] = CpuCoreManager.coreOnline(c);
+            runOnUiThread(() -> {
+                for (int i = 0; i < 4; i++) {
+                    TextView[] chips = coreChips.get(String.valueOf(i));
+                    if (chips == null) continue;
+                    for (int c = 0; c < 8; c++) {
+                        chips[c].setTag(live[c]);
+                        styleChip(chips[c], live[c]);
+                    }
+                }
+            });
+        }).start();
     }
 
     /** 芯片选中/未选样式 */
@@ -510,16 +534,10 @@ public class GovernorActivity extends ThemedActivity {
     }
 
     private void fillInputs() {
+        // 核心芯片显示实时 sysfs 在线状态（不再读脚本里的 online 行）
+        refreshCoreChips();
         for (int i = 0; i < 4; i++) {
             GovernorConfig.Gov g = govs[i];
-            // 刷新核心芯片
-            TextView[] chips = coreChips.get(String.valueOf(i));
-            if (chips != null && g != null) {
-                for (int c = 0; c < 8; c++) {
-                    chips[c].setTag(g.cores[c]);
-                    styleChip(chips[c], g.cores[c]);
-                }
-            }
             for (int j = 0; j < FIELDS[i].length; j++) {
                 String key = i + "." + FIELDS[i][j];
                 String v = readField(g, FIELDS[i][j]);
@@ -529,7 +547,7 @@ public class GovernorActivity extends ThemedActivity {
                     if (sp != null && v != null && !v.isEmpty()) sp.setText(v);
                     continue;
                 }
-                if ("minFreq".equals(FIELDS[i][j]) || "maxFreq".equals(FIELDS[i][j])) {
+                if (isFreqField(FIELDS[i][j])) {
                     TextView tv = freqVals.get(key);
                     if (tv != null) tv.setText(normF(v).isEmpty() ? "不限制" : v.trim());
                     continue;
@@ -541,6 +559,11 @@ public class GovernorActivity extends ThemedActivity {
         }
     }
 
+    /** 是否限频字段（小核/大核 × 最小/最大） */
+    private static boolean isFreqField(String f) {
+        return "minFreqL".equals(f) || "maxFreqL".equals(f) || "minFreqB".equals(f) || "maxFreqB".equals(f);
+    }
+
     private String readField(GovernorConfig.Gov g, String f) {
         switch (f) {
             case "governor": return g.governor;
@@ -549,8 +572,10 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": return g.freqStep;
             case "samplingRate": return g.samplingRate;
             case "targetLoads": return g.targetLoads;
-            case "minFreq": return g.minFreq;
-            case "maxFreq": return g.maxFreq;
+            case "minFreqL": return g.minFreqL;
+            case "maxFreqL": return g.maxFreqL;
+            case "minFreqB": return g.minFreqB;
+            case "maxFreqB": return g.maxFreqB;
         }
         return "";
     }
@@ -563,8 +588,10 @@ public class GovernorActivity extends ThemedActivity {
             case "freqStep": g.freqStep = v; break;
             case "samplingRate": g.samplingRate = v; break;
             case "targetLoads": g.targetLoads = v; break;
-            case "minFreq": g.minFreq = v; break;
-            case "maxFreq": g.maxFreq = v; break;
+            case "minFreqL": g.minFreqL = v; break;
+            case "maxFreqL": g.maxFreqL = v; break;
+            case "minFreqB": g.minFreqB = v; break;
+            case "maxFreqB": g.maxFreqB = v; break;
         }
     }
 
@@ -588,7 +615,7 @@ public class GovernorActivity extends ThemedActivity {
                     }
                     continue;
                 }
-                if ("minFreq".equals(f) || "maxFreq".equals(f)) {
+                if (isFreqField(f)) {
                     TextView tv = freqVals.get(i + "." + f);
                     if (tv == null) continue;
                     String s = tv.getText().toString().trim();
@@ -658,10 +685,10 @@ public class GovernorActivity extends ThemedActivity {
             srcContents[1] = GovernorConfig.generateScx(src[1]);
             srcContents[2] = GovernorConfig.generateScx(src[2]);
             srcContents[3] = GovernorConfig.generateScx3(src[3]);
-            srcContents[4] = GovernorConfig.generateFreqScript(src[0], 0);
-            srcContents[5] = GovernorConfig.generateFreqScript(src[1], 1);
-            srcContents[6] = GovernorConfig.generateFreqScript(src[2], 2);
-            srcContents[7] = GovernorConfig.generateFreqScript(src[3], 3);
+            srcContents[4] = GovernorConfig.generateFreqScript(src[0]);
+            srcContents[5] = GovernorConfig.generateFreqScript(src[1]);
+            srcContents[6] = GovernorConfig.generateFreqScript(src[2]);
+            srcContents[7] = GovernorConfig.generateFreqScript(src[3]);
             srcContents[8] = GovernorConfig.generateJmmScript();
             for (int i = 0; i < 4; i++) srcNames[i] = FILES[i];
             for (int i = 0; i < 4; i++) srcNames[4 + i] = "freq" + i + ".sh";
@@ -794,12 +821,16 @@ public class GovernorActivity extends ThemedActivity {
                 g.downThreshold = DEFAULTS[0][2];
                 g.freqStep = DEFAULTS[0][3];
                 g.samplingRate = DEFAULTS[0][4];
-                g.minFreq = DEFAULTS[0][5];
-                g.maxFreq = DEFAULTS[0][6];
+                g.minFreqL = DEFAULTS[0][5];
+                g.maxFreqL = DEFAULTS[0][6];
+                g.minFreqB = DEFAULTS[0][7];
+                g.maxFreqB = DEFAULTS[0][8];
             } else {
                 g.targetLoads = DEFAULTS[i][1];
-                g.minFreq = DEFAULTS[i][2];
-                g.maxFreq = DEFAULTS[i][3];
+                g.minFreqL = DEFAULTS[i][2];
+                g.maxFreqL = DEFAULTS[i][3];
+                g.minFreqB = DEFAULTS[i][4];
+                g.maxFreqB = DEFAULTS[i][5];
             }
             // cores 保持构造默认（8 核全启用）
             out[i] = g;
@@ -820,8 +851,10 @@ public class GovernorActivity extends ThemedActivity {
             g.samplingRate = s.samplingRate;
             g.targetLoads = s.targetLoads;
             g.ignoreNiceLoad = s.ignoreNiceLoad;
-            g.minFreq = s.minFreq;
-            g.maxFreq = s.maxFreq;
+            g.minFreqL = s.minFreqL;
+            g.maxFreqL = s.maxFreqL;
+            g.minFreqB = s.minFreqB;
+            g.maxFreqB = s.maxFreqB;
             System.arraycopy(s.cores, 0, g.cores, 0, 8);
             out[i] = g;
         }
@@ -848,8 +881,10 @@ public class GovernorActivity extends ThemedActivity {
                 } else {
                     o.put("loads", g.targetLoads);
                 }
-                o.put("fmin", g.minFreq);
-                o.put("fmax", g.maxFreq);
+                o.put("fminL", g.minFreqL);
+                o.put("fmaxL", g.maxFreqL);
+                o.put("fminB", g.minFreqB);
+                o.put("fmaxB", g.maxFreqB);
                 StringBuilder cs = new StringBuilder();
                 for (boolean c : g.cores) cs.append(c ? '1' : '0');
                 o.put("cores", cs.toString());
@@ -887,8 +922,17 @@ public class GovernorActivity extends ThemedActivity {
                 } else {
                     if (o.has("loads")) g.targetLoads = o.getString("loads");
                 }
-                if (o.has("fmin")) g.minFreq = o.getString("fmin");
-                if (o.has("fmax")) g.maxFreq = o.getString("fmax");
+                if (o.has("fminL")) g.minFreqL = o.getString("fminL");
+                if (o.has("fmaxL")) g.maxFreqL = o.getString("fmaxL");
+                if (o.has("fminB")) g.minFreqB = o.getString("fminB");
+                if (o.has("fmaxB")) g.maxFreqB = o.getString("fmaxB");
+                // 旧版镜像兼容：单对 fmin/fmax → 小核/大核同值
+                if (o.has("fmin") && g.minFreqL == null && g.minFreqB == null) {
+                    g.minFreqL = g.minFreqB = o.getString("fmin");
+                }
+                if (o.has("fmax") && g.maxFreqL == null && g.maxFreqB == null) {
+                    g.maxFreqL = g.maxFreqB = o.getString("fmax");
+                }
                 String cs = o.optString("cores", "");
                 if (cs.length() == 8) {
                     for (int c = 0; c < 8; c++) g.cores[c] = cs.charAt(c) == '1';
@@ -921,10 +965,14 @@ public class GovernorActivity extends ThemedActivity {
             o.targetLoads = pick(script == null ? null : script.targetLoads,
                     mirror == null ? null : mirror.targetLoads);
         }
-        o.minFreq = pick(script == null ? null : script.minFreq,
-                mirror == null ? null : mirror.minFreq);
-        o.maxFreq = pick(script == null ? null : script.maxFreq,
-                mirror == null ? null : mirror.maxFreq);
+        o.minFreqL = pick(script == null ? null : script.minFreqL,
+                mirror == null ? null : mirror.minFreqL);
+        o.maxFreqL = pick(script == null ? null : script.maxFreqL,
+                mirror == null ? null : mirror.maxFreqL);
+        o.minFreqB = pick(script == null ? null : script.minFreqB,
+                mirror == null ? null : mirror.minFreqB);
+        o.maxFreqB = pick(script == null ? null : script.maxFreqB,
+                mirror == null ? null : mirror.maxFreqB);
         boolean[] src = script != null && script.hasOnline ? script.cores
                 : mirror != null ? mirror.cores : null;
         if (src != null) System.arraycopy(src, 0, o.cores, 0, 8);
@@ -978,8 +1026,10 @@ public class GovernorActivity extends ThemedActivity {
             if (!eqv(a.targetLoads, b.targetLoads)) return false;
         }
         // 限频字段：null/空/"0" 均视为"不限制"，等价比较（避免不限制时回读误报不符）
-        if (!eqvF(a.minFreq, b.minFreq)) return false;
-        if (!eqvF(a.maxFreq, b.maxFreq)) return false;
+        if (!eqvF(a.minFreqL, b.minFreqL)) return false;
+        if (!eqvF(a.maxFreqL, b.maxFreqL)) return false;
+        if (!eqvF(a.minFreqB, b.minFreqB)) return false;
+        if (!eqvF(a.maxFreqB, b.maxFreqB)) return false;
         return java.util.Arrays.equals(a.cores, b.cores);
     }
 
@@ -1026,8 +1076,10 @@ public class GovernorActivity extends ThemedActivity {
             cs.setLength(0);
             for (boolean c : g.cores) cs.append(c ? '1' : '0');
             block.put("gov." + i + ".cores", cs.toString());
-            block.put("gov." + i + ".fmin", g.minFreq == null || g.minFreq.isEmpty() ? "0" : g.minFreq);
-            block.put("gov." + i + ".fmax", g.maxFreq == null || g.maxFreq.isEmpty() ? "0" : g.maxFreq);
+            block.put("gov." + i + ".fminL", g.minFreqL == null || g.minFreqL.isEmpty() ? "0" : g.minFreqL);
+            block.put("gov." + i + ".fmaxL", g.maxFreqL == null || g.maxFreqL.isEmpty() ? "0" : g.maxFreqL);
+            block.put("gov." + i + ".fminB", g.minFreqB == null || g.minFreqB.isEmpty() ? "0" : g.minFreqB);
+            block.put("gov." + i + ".fmaxB", g.maxFreqB == null || g.maxFreqB.isEmpty() ? "0" : g.maxFreqB);
         }
         new Thread(() -> {
             RootShell.Result r = LaxStore.write(getCacheDir(), block);
@@ -1117,12 +1169,31 @@ public class GovernorActivity extends ThemedActivity {
                 for (int c = 0; c < 8; c++) g.cores[c] = cs.charAt(c) == '1';
                 n++;
             }
-            if ((v = map.get("gov." + i + ".fmin")) != null && !v.isEmpty()) {
-                g.minFreq = v;
+            if ((v = map.get("gov." + i + ".fminL")) != null && !v.isEmpty()) {
+                g.minFreqL = v;
                 n++;
             }
-            if ((v = map.get("gov." + i + ".fmax")) != null && !v.isEmpty()) {
-                g.maxFreq = v;
+            if ((v = map.get("gov." + i + ".fmaxL")) != null && !v.isEmpty()) {
+                g.maxFreqL = v;
+                n++;
+            }
+            if ((v = map.get("gov." + i + ".fminB")) != null && !v.isEmpty()) {
+                g.minFreqB = v;
+                n++;
+            }
+            if ((v = map.get("gov." + i + ".fmaxB")) != null && !v.isEmpty()) {
+                g.maxFreqB = v;
+                n++;
+            }
+            // 旧版 lax 兼容：单对 fmin/fmax → 小核/大核同值
+            if ((v = map.get("gov." + i + ".fmin")) != null && !v.isEmpty()
+                    && map.get("gov." + i + ".fminL") == null && map.get("gov." + i + ".fminB") == null) {
+                g.minFreqL = g.minFreqB = v;
+                n++;
+            }
+            if ((v = map.get("gov." + i + ".fmax")) != null && !v.isEmpty()
+                    && map.get("gov." + i + ".fmaxL") == null && map.get("gov." + i + ".fmaxB") == null) {
+                g.maxFreqL = g.maxFreqB = v;
                 n++;
             }
         }

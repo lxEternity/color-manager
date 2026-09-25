@@ -31,7 +31,7 @@ public class ModeActivity extends ThemedActivity {
     /** 模块工作目录（quanj.sh: mingc="qingtd"） */
     private static final String MOKML = "/sdcard/Android/qingtd";
     private static final String CONF_FILE = MOKML + "/动态模式切换.conf";
-    /** 单应用负载限制：低频率/高频率（独立文件，选择即保存） */
+    /** 单应用负载限制：小核/大核上限%（独立文件，选择即保存） */
     private static final String LOAD_FILE = AppFreqLimiter.CONF;
     /** 模块目录内的 conf 模板（service.sh 开机恢复源） */
     private static final String MODULE_CONF_FILE = "/data/adb/modules/colorFC/qingtd/动态模式切换.conf";
@@ -49,15 +49,13 @@ public class ModeActivity extends ThemedActivity {
     private String moren = "powersave";
     /** 应用规则：包名 -> 模式 */
     private final LinkedHashMap<String, String> rules = new LinkedHashMap<>();
-    /** 单应用负载限制：包名 -> {低频率MHz, 高频率MHz, 占用%}（0=未设） */
+    /** 单应用负载限制：包名 -> {小核上限%, 大核上限%}（0=未设；旧版绝对 MHz 值 >100 兼容执行） */
     private final LinkedHashMap<String, long[]> loads = new LinkedHashMap<>();
     /** 当前展开功能列表的应用行 */
     private String expandedPkg = null;
     /** 删除模式：应用行显示红 X */
     private boolean deleteMode = false;
     private TextView btnDelMode, btnDoneMode;
-    /** 本机频率档位（MHz 降序，首次扫描缓存） */
-    private long[] cpuFreqs = new long[0];
     private boolean confLoaded = false;
 
     @Override
@@ -86,7 +84,6 @@ public class ModeActivity extends ThemedActivity {
 
     private void loadState() {
         new Thread(() -> {
-            loadFreqScan();
             String conf = RootShell.readFile(CONF_FILE);
             parseLoads(RootShell.readFile(LOAD_FILE));
             if (conf != null) {
@@ -99,7 +96,7 @@ public class ModeActivity extends ThemedActivity {
         }).start();
     }
 
-    /** 解析单应用负载限制文件（包名=低频率MHz,高频率MHz,占用%） */
+    /** 解析单应用负载限制文件（包名=小核上限%,大核上限%；旧版三段格式（低MHz,高MHz,占用%）忽略第三段） */
     private void parseLoads(String conf) {
         loads.clear();
         if (conf == null) return;
@@ -111,8 +108,7 @@ public class ModeActivity extends ThemedActivity {
             try {
                 String[] v = line.substring(eq + 1).trim().split(",");
                 loads.put(line.substring(0, eq).trim(),
-                        new long[]{parseMhz(v.length > 0 ? v[0] : null), parseMhz(v.length > 1 ? v[1] : null),
-                                parseMhz(v.length > 2 ? v[2] : null)});
+                        new long[]{parseMhz(v.length > 0 ? v[0] : null), parseMhz(v.length > 1 ? v[1] : null)});
             } catch (Exception ignored) {
             }
         }
@@ -128,12 +124,11 @@ public class ModeActivity extends ThemedActivity {
 
     /** 选择即保存：写入 单应用负载.conf，并立即拉起执行服务 */
     private void writeLoads() {
-        StringBuilder sb = new StringBuilder("#单应用负载：包名=低频率MHz,高频率MHz,占用%（0=未设）\n");
+        StringBuilder sb = new StringBuilder("#单应用负载：包名=小核上限%,大核上限%（0=未设；旧版绝对MHz值>100兼容）\n");
         for (Map.Entry<String, long[]> e : loads.entrySet()) {
             long[] v = e.getValue();
-            if (v[0] <= 0 && v[1] <= 0 && v[2] <= 0) continue;
-            sb.append(e.getKey()).append('=').append(v[0]).append(',').append(v[1])
-                    .append(',').append(v[2]).append('\n');
+            if (v[0] <= 0 && v[1] <= 0) continue;
+            sb.append(e.getKey()).append('=').append(v[0]).append(',').append(v[1]).append('\n');
         }
         new Thread(() -> {
             RootShell.Result r = RootShell.writeFile(getCacheDir(), sb.toString(), LOAD_FILE);
@@ -145,74 +140,6 @@ public class ModeActivity extends ThemedActivity {
             }
             AppLimitService.ensure(this);   // 写入完成后再启动服务，确保读到最新配置
         }).start();
-    }
-
-    /** 本机频率档位（MHz 降序，结果缓存到 SharedPreferences，仅首次扫描） */
-    private void loadFreqScan() {
-        try {
-            String csv = getSharedPreferences("colorfc", MODE_PRIVATE).getString("freqScan", "");
-            if (!csv.isEmpty()) {
-                String[] ps = csv.split(",");
-                long[] arr = new long[ps.length];
-                int n = 0;
-                for (String p : ps) {
-                    try {
-                        arr[n++] = Long.parseLong(p);
-                    } catch (Exception ignored) {
-                    }
-                }
-                cpuFreqs = java.util.Arrays.copyOf(arr, n);
-                return;
-            }
-            StringBuilder cmd = new StringBuilder();
-            for (int c = 0; c < 8; c++) {
-                cmd.append("cat /sys/devices/system/cpu/cpu").append(c)
-                        .append("/cpufreq/scaling_available_frequencies 2>/dev/null; ");
-            }
-            java.util.TreeSet<Long> set = new java.util.TreeSet<>(java.util.Collections.reverseOrder());
-            RootShell.Result r = RootShell.exec(cmd.toString());
-            if (r.ok() && r.out != null) {
-                for (String tok : r.out.trim().split("\\s+")) {
-                    try {
-                        long k = Long.parseLong(tok);
-                        if (k > 1000) set.add(k / 1000);
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-            if (set.size() < 2) {
-                StringBuilder fb = new StringBuilder();
-                for (int c = 0; c < 8; c++) {
-                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
-                            .append("/cpufreq/cpuinfo_min_freq 2>/dev/null; ");
-                    fb.append("cat /sys/devices/system/cpu/cpu").append(c)
-                            .append("/cpufreq/cpuinfo_max_freq 2>/dev/null; ");
-                }
-                r = RootShell.exec(fb.toString());
-                if (r.ok() && r.out != null) {
-                    for (String tok : r.out.trim().split("\\s+")) {
-                        try {
-                            long k = Long.parseLong(tok);
-                            if (k > 1000) set.add(k / 1000);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-            }
-            if (!set.isEmpty()) {
-                StringBuilder sbCsv = new StringBuilder();
-                for (long v : set) {
-                    if (sbCsv.length() > 0) sbCsv.append(',');
-                    sbCsv.append(v);
-                }
-                getSharedPreferences("colorfc", MODE_PRIVATE).edit()
-                        .putString("freqScan", sbCsv.toString()).commit();
-                cpuFreqs = new long[set.size()];
-                int n = 0;
-                for (long v : set) cpuFreqs[n++] = v;
-            }
-        } catch (Exception ignored) {
-        }
     }
 
     // ==================== 应用策略 ====================
@@ -371,7 +298,7 @@ public class ModeActivity extends ThemedActivity {
         renderRules();
     }
 
-    /** 展开的换行功能列表：模式选择 / 低频率 / 高频率 / 占用率 */
+    /** 展开的换行功能列表：模式选择 / 小核上限 / 大核上限 */
     private View expandPanel(String pkg) {
         WrapLayout wrap = new WrapLayout(this, dp(8), dp(8));
         wrap.setPadding(dp(12), 0, dp(12), dp(12));
@@ -389,9 +316,8 @@ public class ModeActivity extends ThemedActivity {
         wrap.addView(mc);
 
         long[] ld = loads.get(pkg);
-        wrap.addView(loadChip("低频率", ld != null && ld[0] > 0, v -> pickFreq(pkg, true)));
-        wrap.addView(loadChip("高频率", ld != null && ld[1] > 0, v -> pickFreq(pkg, false)));
-        wrap.addView(loadChip("占用率", ld != null && ld[2] > 0, v -> pickPct(pkg)));
+        wrap.addView(loadChip("小核上限", ld != null && ld[0] > 0, v -> pickCap(pkg, true)));
+        wrap.addView(loadChip("大核上限", ld != null && ld[1] > 0, v -> pickCap(pkg, false)));
         return wrap;
     }
 
@@ -427,61 +353,23 @@ public class ModeActivity extends ThemedActivity {
         return c;
     }
 
-    /** 低频率 / 高频率 频率选择（档位来自本机扫描，选择即保存） */
-    private void pickFreq(String pkg, boolean min) {
-        final String title = min ? "低频率" : "高频率";
-        if (cpuFreqs.length == 0) {
-            pickFreqManual(pkg, min, title);
-            return;
-        }
+    /** 小核/大核上限（Kin maxL/maxB 语义）：滑条 0~100% + 小数值框（0=不限制，选择即保存） */
+    private void pickCap(String pkg, boolean little) {
         long[] ld = loads.get(pkg);
-        long cur = ld == null ? 0 : (min ? ld[0] : ld[1]);
-        int checked = 0;
-        if (cur > 0) {
-            for (int i = 0; i < cpuFreqs.length; i++) {
-                if (cpuFreqs[i] == cur) {
-                    checked = i + 1;
-                    break;
-                }
-            }
-        }
-        String[] items = new String[cpuFreqs.length + 1];
-        items[0] = "关闭";
-        for (int i = 0; i < cpuFreqs.length; i++) items[i + 1] = cpuFreqs[i] + " MHz";
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setSingleChoiceItems(items, checked, (d, w) -> {
-                    setLoad(pkg, min, w == 0 ? 0 : cpuFreqs[w - 1]);
-                    d.dismiss();
-                })
-                .setNegativeButton("取消", null)
-                .show();
+        long raw = ld == null ? 0 : (little ? ld[0] : ld[1]);
+        // 旧版绝对 MHz 值（>100）：按 100% 展示，保存后即转为百分比格式
+        int cur = (int) Math.min(100, Math.max(0, raw));
+        String msg = raw > 100
+                ? "当前为旧版绝对 MHz 值（" + raw + "），保存后将转为百分比上限"
+                : "按本机各簇最高频率的百分比封顶，0 = 不限制";
+        sliderDialog(little ? "小核上限" : "大核上限", msg, cur,
+                v -> setLoad(pkg, little ? 0 : 1, v));
     }
 
-    /** 无档位数据时手动输入（MHz，0=关闭） */
-    private void pickFreqManual(String pkg, boolean min, String title) {
-        final android.widget.EditText et = new android.widget.EditText(this);
-        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        long[] ld = loads.get(pkg);
-        et.setText(String.valueOf(ld == null ? 0 : (min ? ld[0] : ld[1])));
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(et)
-                .setPositiveButton("确定", (d, w) -> {
-                    try {
-                        setLoad(pkg, min, Math.max(0, Long.parseLong(et.getText().toString().trim())));
-                    } catch (Exception ignored) {
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
+    private interface IntCb { void on(int v); }
 
-    /** 占用率：滑条 0%~100% + 小数值框手动输入（0=关闭） */
-    private void pickPct(String pkg) {
-        long[] ld = loads.get(pkg);
-        int cur = (int) Math.min(100, Math.max(0, ld == null ? 0 : ld[2]));
-
+    /** 滑条 0~100 + 圆角数值框联动对话框（单位 %） */
+    private void sliderDialog(String title, String msg, int cur, final IntCb cb) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(20), dp(4), dp(20), dp(2));
@@ -569,7 +457,8 @@ public class ModeActivity extends ThemedActivity {
         });
 
         new AlertDialog.Builder(this)
-                .setTitle("占用率")
+                .setTitle(title)
+                .setMessage(msg)
                 .setView(box)
                 .setPositiveButton("确定", (d, w) -> {
                     int v;
@@ -578,22 +467,18 @@ public class ModeActivity extends ThemedActivity {
                     } catch (Exception e) {
                         v = sb.getProgress();
                     }
-                    setLoad(pkg, 2, Math.min(100, Math.max(0, v)));
+                    cb.on(Math.min(100, Math.max(0, v)));
                 })
                 .setNegativeButton("取消", null)
                 .show();
     }
 
-    private void setLoad(String pkg, boolean min, long mhz) {
-        setLoad(pkg, min ? 0 : 1, mhz);
-    }
-
-    /** idx: 0=低频率MHz 1=高频率MHz 2=占用% */
+    /** idx: 0=小核上限% 1=大核上限% */
     private void setLoad(String pkg, int idx, long val) {
         long[] ld = loads.get(pkg);
-        if (ld == null) ld = new long[]{0, 0, 0};
+        if (ld == null) ld = new long[]{0, 0};
         ld[idx] = val;
-        if (ld[0] <= 0 && ld[1] <= 0 && ld[2] <= 0) loads.remove(pkg);
+        if (ld[0] <= 0 && ld[1] <= 0) loads.remove(pkg);
         else loads.put(pkg, ld);
         writeLoads();
         renderRules();

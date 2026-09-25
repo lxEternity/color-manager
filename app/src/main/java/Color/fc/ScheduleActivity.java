@@ -42,9 +42,10 @@ public class ScheduleActivity extends ThemedActivity {
     private boolean syncing = false;
     private TextView tabAV, tabBV, socTip;
 
-    /** 调度参数字段（fillInputs / collectCurrent / lax 共用） */
-    private static final String[] FIELDS = {"opt2", "cpuMax", "cpuMin", "llcc", "uclampDisplay",
-            "uclampSsfg", "uclampTouch", "uclampMm", "uclampRt", "uclampTopApp", "walt1", "walt2"};
+    /** 调度参数字段（fillInputs / collectCurrent / lax 共用），
+     *  cpuMaxL/cpuMaxB/gpuMax = 小核/大核/GPU 上限%（照搬 Kin FSM maxL/maxB/gpu） */
+    private static final String[] FIELDS = {"opt2", "cpuMaxL", "cpuMaxB", "cpuMin", "gpuMax", "llcc",
+            "uclampDisplay", "uclampSsfg", "uclampTouch", "uclampMm", "uclampRt", "uclampTopApp", "walt1", "walt2"};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -121,8 +122,10 @@ public class ScheduleActivity extends ThemedActivity {
             });
 
             addParam(box, key + ".opt2", "调度增强等级 opt2（0-100，越高越激进，省电设 0）");
-            addParam(box, key + ".cpuMax", "CPU 最高频率百分比（json_cpu_max_min 参数一）");
-            addParam(box, key + ".cpuMin", "CPU 最低频率百分比（json_cpu_max_min 参数二）");
+            addParam(box, key + ".cpuMaxL", "小核上限 %（小核簇最高频率百分比，Kin maxL）");
+            addParam(box, key + ".cpuMaxB", "大核上限 %（大核簇最高频率百分比，Kin maxB）");
+            addParam(box, key + ".cpuMin", "CPU 下限 %（各簇最低频率百分比）");
+            addParam(box, key + ".gpuMax", "GPU 上限 %（0 或 100 = 不限制，Kin FSM gpu）");
             addParam(box, key + ".llcc", "LLCC 系统缓存最大频率（Hz）");
             addParam(box, key + ".uclampDisplay", "display 显示任务 uclamp 最低提升");
             addParam(box, key + ".uclampSsfg", "ssfg 前台服务组 uclamp 最低提升");
@@ -175,7 +178,7 @@ public class ScheduleActivity extends ThemedActivity {
         String f = key.substring(key.indexOf('.') + 1);
         if ("llcc".equals(f)) return new ParamRange(300000, 1800000, 10000);
         if ("walt1".equals(f) || "walt2".equals(f)) return new ParamRange(0, 2000, 20);
-        // opt2 / cpuMax / cpuMin / uclamp* 均为百分比
+        // opt2 / cpuMaxL / cpuMaxB / cpuMin / gpuMax / uclamp* 均为百分比
         return new ParamRange(0, 100, 1);
     }
 
@@ -237,8 +240,10 @@ public class ScheduleActivity extends ThemedActivity {
             AllConfig.Mode m = cfg.modes.get(mode);
             AllConfig.Mode dm = def.modes.get(mode);
             set("opt2", mode, m, dm);
-            set("cpuMax", mode, m, dm);
+            set("cpuMaxL", mode, m, dm);
+            set("cpuMaxB", mode, m, dm);
             set("cpuMin", mode, m, dm);
+            set("gpuMax", mode, m, dm);
             set("llcc", mode, m, dm);
             set("uclampDisplay", mode, m, dm);
             set("uclampSsfg", mode, m, dm);
@@ -263,8 +268,10 @@ public class ScheduleActivity extends ThemedActivity {
     private String value(AllConfig.Mode m, String f) {
         switch (f) {
             case "opt2": return m.opt2;
-            case "cpuMax": return m.cpuMax;
+            case "cpuMaxL": return m.cpuMaxL;
+            case "cpuMaxB": return m.cpuMaxB;
             case "cpuMin": return m.cpuMin;
+            case "gpuMax": return m.gpuMax;
             case "llcc": return m.llcc;
             case "uclampDisplay": return m.uclampDisplay;
             case "uclampSsfg": return m.uclampSsfg;
@@ -281,8 +288,10 @@ public class ScheduleActivity extends ThemedActivity {
     private void assign(AllConfig.Mode m, String f, String v) {
         switch (f) {
             case "opt2": m.opt2 = v; break;
-            case "cpuMax": m.cpuMax = v; break;
+            case "cpuMaxL": m.cpuMaxL = v; break;
+            case "cpuMaxB": m.cpuMaxB = v; break;
             case "cpuMin": m.cpuMin = v; break;
+            case "gpuMax": m.gpuMax = v; break;
             case "llcc": m.llcc = v; break;
             case "uclampDisplay": m.uclampDisplay = v; break;
             case "uclampSsfg": m.uclampSsfg = v; break;

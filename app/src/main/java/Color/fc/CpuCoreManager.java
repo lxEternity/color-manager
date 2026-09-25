@@ -17,16 +17,64 @@ public class CpuCoreManager {
 
     private static final String CPU_BASE = "/sys/devices/system/cpu";
 
-    /** 全核快照：在线状态 + 每核当前频率 */
+    /** 全核快照：在线状态 + 每核当前频率 + 每核实时占用 */
     public static class Snapshot {
         public int cores = 0;          // 核心总数
         public boolean[] online;       // 各核在线状态（索引即核心号）
         public int[] freqMhz;          // 各核当前频率 MHz（读不到 -1）
+        public float[] busy;           // 各核实时占用 %（/proc/stat 差分；首次 0）
         public int onlineCount() {
             int n = 0;
             for (int i = 0; i < cores && i < online.length; i++) if (online[i]) n++;
             return n;
         }
+    }
+
+    // ===== /proc/stat 每核 tick 上次采样（差分算实时占用，免 root）=====
+    private static long[] prevIdle = null, prevTotal = null;
+
+    /** /proc/stat 差分 → 每核占用 %（连续调用间隔即采样窗口；首次调用返回全 0） */
+    public static float[] coreBusy(int cores) {
+        float[] out = new float[cores];
+        try {
+            File f = new File("/proc/stat");
+            BufferedReader r = new BufferedReader(new InputStreamReader(new java.io.FileInputStream(f)));
+            long[] idle = new long[cores], total = new long[cores];
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (!line.startsWith("cpu")) continue;
+                int sp = line.indexOf(' ');
+                if (sp < 4) continue;   // "cpu" 总行跳过（cpu 后必须紧跟数字）
+                String numStr = line.substring(3, sp);
+                int c;
+                try {
+                    c = Integer.parseInt(numStr);
+                } catch (Exception e) {
+                    continue;
+                }
+                if (c < 0 || c >= cores) continue;
+                String[] p = line.trim().split("\\s+");
+                if (p.length < 5) continue;
+                // p[1..] user nice system idle iowait irq softirq steal…
+                long id = Long.parseLong(p[4]) + (p.length > 5 ? Long.parseLong(p[5]) : 0);
+                long tot = 0;
+                for (int i = 1; i < p.length && i <= 8; i++) tot += Long.parseLong(p[i]);
+                idle[c] = id;
+                total[c] = tot;
+            }
+            r.close();
+            if (prevIdle != null && prevIdle.length == cores) {
+                for (int i = 0; i < cores; i++) {
+                    long dt = total[i] - prevTotal[i];
+                    long di = idle[i] - prevIdle[i];
+                    if (dt > 0) out[i] = Math.max(0, Math.min(100, 100f * (dt - di) / dt));
+                }
+            }
+            prevIdle = idle;
+            prevTotal = total;
+        } catch (Exception ignored) {
+        }
+        return out;
     }
 
     /** File 直读（无 root），失败/空返回 null */
@@ -118,6 +166,7 @@ public class CpuCoreManager {
         sp.cores = cores;
         sp.online = new boolean[cores];
         sp.freqMhz = new int[cores];
+        sp.busy = coreBusy(cores);   // 免 root /proc/stat 差分（实时占用）
         for (int i = 0; i < cores; i++) sp.online[i] = true;
 
         // 免 root 直读（online 多为 0644 可读，cpufreq 多为 0444 可读）

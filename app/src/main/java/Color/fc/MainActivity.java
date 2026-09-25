@@ -243,7 +243,7 @@ public class MainActivity extends ThemedActivity {
 
     // ==================== CPU 核心状态与管理（照搬 Kin-app 逻辑）====================
 
-    /** CPU 核心状态循环：3s 快照一次（online + 频率），驱动点阵/列表/摘要刷新 */
+    /** CPU 核心状态循环：1s 快照一次（online + 频率 + 实时占用），驱动点阵/列表/摘要刷新 */
     private void startCpuLoop() {
         handler.postDelayed(new Runnable() {
             @Override
@@ -252,11 +252,11 @@ public class MainActivity extends ThemedActivity {
                     final CpuCoreManager.Snapshot sp = refreshCpuSnapshot();
                     runOnUiThread(() -> {
                         if (sp != null) updateCpuUi(sp);
-                        handler.postDelayed(this, 3000);
+                        handler.postDelayed(this, 1000);
                     });
                 }).start();
             }
-        }, 500);
+        }, 300);
     }
 
     /** 取核心快照；首次/核心数变化时在 UI 线程构建点阵与开关行 */
@@ -292,7 +292,7 @@ public class MainActivity extends ThemedActivity {
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(14), dp(14));
             dlp.setMarginEnd(dp(6));
             dot.setLayoutParams(dlp);
-            dot.setBackground(makeDotShape(true));
+            dot.setBackground(makeDotShape(true, 0));
             cpuDots.addView(dot);
             cpuDotViews[i] = dot;
 
@@ -343,13 +343,15 @@ public class MainActivity extends ThemedActivity {
         return g;
     }
 
-    /** 点阵方块背景 */
-    private android.graphics.drawable.GradientDrawable makeDotShape(boolean on) {
+    /** 点阵方块背景：在线按实时负载加深（35%~100% 主题色），离线空心 */
+    private android.graphics.drawable.GradientDrawable makeDotShape(boolean on, float load) {
         android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
         g.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
         g.setCornerRadius(dp(4));
         if (on) {
-            g.setColor(getResources().getColor(R.color.accent));
+            int base = getResources().getColor(R.color.accent);
+            int alpha = Math.round(89 + 166 * Math.min(1f, Math.max(0f, load / 100f)));   // 0x59~0xFF
+            g.setColor((base & 0x00FFFFFF) | (alpha << 24));
         } else {
             g.setColor(0x00000000);
             g.setStroke(dp(2), getResources().getColor(R.color.bgCardStroke));
@@ -391,7 +393,7 @@ public class MainActivity extends ThemedActivity {
             boolean on = sp.online[i];
             // 点阵
             View dot = cpuDotViews[i];
-            if (dot != null) dot.setBackground(makeDotShape(on));
+            if (dot != null) dot.setBackground(makeDotShape(on, on && sp.busy != null ? sp.busy[i] : 0));
             // 列表行文字：CPU0 · 小核 1804MHz（离线显示"已停用"）
             TextView name = cpuRowNames[i];
             if (name != null) {

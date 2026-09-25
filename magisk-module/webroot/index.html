@@ -321,6 +321,7 @@ nav button.on{color:var(--ac);font-weight:700}
       </div>
     </div>
     <div class="chips" id="logRange" style="margin-bottom:8px">
+      <button class="chip" data-h="1" onclick="setLogRange(this)">近1小时</button>
       <button class="chip on" data-h="24" onclick="setLogRange(this)">近24小时</button>
       <button class="chip" data-h="72" onclick="setLogRange(this)">近3天</button>
       <button class="chip" data-h="168" onclick="setLogRange(this)">近7天</button>
@@ -334,7 +335,7 @@ nav button.on{color:var(--ac);font-weight:700}
       <div class="cell"><i>估算耗电</i><b id="stMWh">--</b></div>
       <div class="cell"><i>覆盖时长</i><b id="stSpan">--</b></div>
     </div>
-    <div class="hint">由模块后台守护每 30 秒采样一次，数据保留 7 天（/data/adb/colorFC_store/pwlog）</div>
+    <div class="hint">由模块后台守护每 2 秒采样一次，数据保留 7 天（/data/adb/colorFC_store/pwlog）</div>
   </div>
 </section>
 
@@ -756,7 +757,9 @@ async function loadGov(){
     govData = parseGovScript(DEMO_GOV[govMode]);
     if(!govData.governor) govData.governor = schemeGovName();
   }else{
-    const t = await shOut(`cat ${MOD}/${socScheme}/${file} 2>/dev/null`);
+    // 模块调速器脚本目录为大写 A/B（socScheme 是小写方案号，直接拼路径会指向不存在的目录）
+    const govDir = socScheme==='b' ? 'B' : 'A';
+    const t = await shOut(`cat ${MOD}/${govDir}/${file} 2>/dev/null`);
     govData = parseGovScript(t);
     if(!govData.governor) govData.governor = schemeGovName();
     if(!GOV_SLIDERS[govData.governor]){
@@ -817,9 +820,11 @@ async function saveGov(){
   if(demoMode){ toast('演示模式：真机保存将写入调速器脚本'); return; }
   await detectSoc();
   const file = GOV_FILES[govMode];
-  const t = await shOut(`cat ${MOD}/${socScheme}/${file} 2>/dev/null`);
+  // 调速器脚本目录为大写 A/B（小写 socScheme 拼路径会写到不存在的目录导致保存失败）
+  const govDir = socScheme==='b' ? 'B' : 'A';
+  const t = await shOut(`cat ${MOD}/${govDir}/${file} 2>/dev/null`);
   const merged = buildGovScript(t, govData);
-  const ok = await writeFile(`${MOD}/${socScheme}/${file}`, merged);
+  const ok = await writeFile(`${MOD}/${govDir}/${file}`, merged);
   if(!ok){ toast('写入失败'); return; }
   if(govMode===curMode){
     const peiz = (await shOut(`cat ${MOD}/files/peiz 2>/dev/null`)) || 'all';
@@ -875,6 +880,35 @@ async function cycleCellMode(){
   pwNeedRescale = true;
   pwPersist(); pwRender(); pwSample();
 }
+/* ---- 电芯自动检测（对齐 APP PowerMonitor）：串联双芯=总压>5.5V；
+   并联双芯=存在 ≥2 个独立 Battery 节点（排除 bms/fg/充电泵等辅助节点）---- */
+let dualAutoCache = null;
+async function detectDualCell(){
+  if(demoMode){ dualAutoCache = false; return dualAutoCache; }
+  if(dualAutoCache !== null) return dualAutoCache;
+  try{
+    const out = await shOut(
+      'V=$(cat /sys/class/power_supply/battery/voltage_now 2>/dev/null); '+
+      'N=0; for d in /sys/class/power_supply/*; do '+
+      't=$(cat "$d/type" 2>/dev/null); n=$(basename "$d"); '+
+      'case "$n" in *bms*|*fg*|*gauge*|*charg*|*pump*|*parallel*|*usb*|*dc*) continue;; esac; '+
+      '[ "$t" = "Battery" ] && N=$((N+1)); done; echo "$V|$N"');
+    const parts = out.split('|');
+    const vn = parseFloat(parts[0]), cnt = parseInt(parts[1])||0;
+    if(isFinite(vn) && vn!==0){
+      const b = Math.abs(vn);
+      const V = b>1000000 ? vn/1e6 : (b>2500 ? vn/1000 : vn);
+      if(V>=5.5){ dualAutoCache = true; return true; }   // 串联双芯（节点报总压，功率已是总值）
+    }
+    dualAutoCache = cnt>=2;                               // 并联双芯（每芯各报一半电流）
+  }catch(e){ dualAutoCache = false; }
+  return dualAutoCache;
+}
+/** 当前是否需要按双芯口径×2（手动双芯 或 自动检测为双芯），且节点报的是单芯数据 */
+function needCellDouble(V){
+  const dual = cellMode===2 || (cellMode===0 && dualAutoCache===true);
+  return dual && V>0 && V<5.5;
+}
 function pwPersist(){
   try{ localStorage.setItem(PW_STORE_KEY, JSON.stringify(
     {t:Date.now(), labels:pwLabels, power:pwPower, temp:pwTemp, chg:pwChg})); }catch(e){}
@@ -926,8 +960,8 @@ async function pwSample(){
       const a=Math.abs(cur), A = a>100000 ? cur/1e6 : (a>1 ? cur/1000 : cur);
       const b=Math.abs(volt), V = b>1000000 ? volt/1e6 : (b>2500 ? volt/1000 : volt);
       w = Math.abs(A*V);
-      /* 手动双电芯：节点只报单芯电压/电流时功率×2（对齐 APP applyCellMode） */
-      if(cellMode===2 && V>0 && V<5.5) w *= 2;
+      /* 电芯口径修正：手动双芯 或 自动检测为双芯，且节点只报单芯电压/电流时功率×2 */
+      if(needCellDouble(V)) w *= 2;
       tp = calibT(tv);
     }
   }
@@ -1021,6 +1055,7 @@ function pwRender(){
 function pwStart(){
   if(pwTimer) return;
   pwRestore();
+  detectDualCell();          // 电芯自动检测（结果缓存，节点静态只查一次）
   pwRender();
   pwSample();
   pwTimer = setInterval(pwSample, PW_INTERVAL);
@@ -1041,7 +1076,7 @@ function setLogRange(btn){
 async function loadLog(){
   if(logBusy) return; logBusy = true;
   try{
-    let rows = [];
+    let rows = [], stats = null;
     if(demoMode){
       const now = Date.now(), step = 30e3, n = Math.floor(logRangeH*3600e3/step);
       let cap = 78, t0 = now - n*step;
@@ -1054,32 +1089,86 @@ async function loadLog(){
         rows.push({t, w:Math.round(w*100)/100, temp:Math.round((33+Math.sin(ph2)*3.5)*10)/10, chg});
       }
     }else{
+      /* 2 秒采样后数据量大（7 天≈30 万行），改由 awk 在设备端按时间桶聚合后回传：
+         桶大小自适应（≤2 万桶），统计（均值/峰值/能耗）由 awk 端按原始行精确计算 */
+      await detectDualCell();
       const days = Math.ceil(logRangeH/24);
       const cut = Math.floor(Date.now()/1000) - logRangeH*3600;
-      let files = [];
+      const bs = Math.max(2, Math.ceil(logRangeH*3600/20000));
+      const dbl = (cellMode===2 || (cellMode===0 && dualAutoCache===true)) ? 1 : 0;
+      let flist = [];
       for(let i=0;i<days;i++){
         const f = await shOut(`date -d "-${i} days" +%Y%m%d 2>/dev/null || date -v -${i}d +%Y%m%d 2>/dev/null`);
         const d8 = (f||'').trim();
-        if(/^\d{8}$/.test(d8)) files.push('pwlog-'+d8+'.csv');
+        if(/^\d{8}$/.test(d8)) flist.push('pwlog-'+d8+'.csv');
       }
-      files.push('pwlog-'+(await shOut('date +%Y%m%d')).trim()+'.csv');
-      files = [...new Set(files)];
-      let csv = '';
-      for(const f of files) csv += await shOut(`cat /data/adb/colorFC_store/pwlog/${f} 2>/dev/null`);
-      for(const line of csv.split('\n')){
+      flist.push('pwlog-'+(await shOut('date +%Y%m%d')).trim()+'.csv');
+      flist = [...new Set(flist)].map(f=>'/data/adb/colorFC_store/pwlog/'+f).join(' ');
+      const out = await shOut(
+        'for f in'+flist+'; do [ -f "$f" ] && cat "$f"; done | awk -F, '+
+        '-v cut='+cut+' -v bs='+bs+' -v dbl='+dbl+' \''+
+        'NF>=5 && $1 ~ /^[0-9]+$/ {\n'+
+        '  t=$1+0; if(t<cut) next;\n'+
+        '  w=$2+0; v=0; if(NF>=6) v=$6+0;\n'+
+        '  if(dbl && v>0 && v<5.5) w*=2;\n'+                       // 双芯口径且该行为单芯电压 → ×2
+        '  tp=$3+0; if(tp>600)tp/=100; else if(tp>60)tp/=10; if(!(tp>=0&&tp<=90)) tp=-1;\n'+
+        '  b=int(t/bs)*bs;\n'+
+        '  S[b]+=w; C[b]++;\n'+
+        '  if($5=="1"){WC[b]+=w; NC[b]++; WCT+=w; NCT++} else {WD[b]+=w; ND[b]++; WDT+=w; NDT++}\n'+
+        '  if(tp>=0){ST[b]+=tp; NT[b]++; if(tp>MT)MT=tp}\n'+
+        '  if(N==0){T0=t;T1=t;LB=b;HB=b} else {if(t<T0)T0=t; if(t>T1)T1=t; if(b<LB)LB=b; if(b>HB)HB=b}\n'+
+        '  N++\n'+
+        '}\n'+
+        'END{\n'+
+        '  if(N>0){\n'+
+        '    printf "S,%d,%d,%d,%.1f,%d,%.2f,%d,%.2f\\n", N, T0, T1, MT, NDT, WDT, NCT, WCT;\n'+
+        '    for(b=LB;b<=HB;b+=bs) if(C[b]>0)\n'+
+        '      printf "%d,%.3f,%.1f,%d\\n", b, S[b]/C[b], (NT[b]>0?ST[b]/NT[b]:-1), (NC[b]*2>=C[b]?1:0);\n'+
+        '  }\n'+
+        '}\'');
+      let summary = null;
+      for(const line of out.split('\n')){
         const p = line.trim().split(',');
-        if(p.length!==5 || !/^\d+$/.test(p[0])) continue;
-        const t = +p[0];
-        if(t < cut) continue;
-        // 温度自适应归一（0.01℃/0.1℃/℃ 历史数据统一处理，超物理范围视为无效）
-        rows.push({t:t*1000, w:parseFloat(p[1]), temp:calibT(parseFloat(p[2])), chg:p[4]==='1'});
+        if(p[0]==='S' && p.length>=9){ summary = p; continue; }
+        if(p.length<4 || !/^\d+$/.test(p[0])) continue;
+        const avgt = parseFloat(p[2]);
+        rows.push({t:+p[0]*1000, w:parseFloat(p[1]),
+          temp:(avgt>=0&&!isNaN(avgt))?avgt:null, chg:p[3]==='1'});
       }
-      rows.sort((a,b)=>a.t-b.t);
+      if(summary){
+        const n=+summary[1], t0=+summary[2], t1=+summary[3], mt=+summary[4],
+              nd=+summary[5], sd=+summary[6], nc=+summary[7], wc=+summary[8];
+        stats = {
+          n,
+          avgD: nd>0? sd/nd : null,
+          avgC: nc>0? wc/nc : null,
+          maxT: mt>0? mt : null,
+          mWh: nd>0? sd*(t1-t0)/n*1000/3600 : null,
+          span: t1-t0
+        };
+      }
     }
-    renderLog(rows);
+    renderLog(rows, stats);
   }finally{ logBusy = false; }
 }
-function renderLog(rows){
+/** 由行数据计算统计（演示模式用；真机统计由 awk 端按原始行精确算出） */
+function statsFromRows(rows){
+  const dRows = rows.filter(r=>!r.chg), cRows = rows.filter(r=>r.chg);
+  const avg = a => a.length? a.reduce((x,y)=>x+y.w,0)/a.length : null;
+  const ts = rows.filter(r=>r.temp!=null&&!isNaN(r.temp)).map(r=>r.temp);
+  const mWh = dRows.length>1
+    ? dRows.reduce((a,r)=>a+r.w,0) * (rows[rows.length-1].t-rows[0].t)/rows.length/1000 * 1000/3600
+    : null;
+  return {
+    n: rows.length,
+    avgD: avg(dRows), avgC: avg(cRows),
+    maxT: ts.length? Math.max(...ts) : null,
+    mWh,
+    span: rows.length>1? (rows[rows.length-1].t-rows[0].t)/1000 : 0
+  };
+}
+function renderLog(rows, stats){
+  const st = stats || statsFromRows(rows);
   // 降采样到最多 600 桶（桶内取均值）
   const MAXPTS = 600;
   let labels=[], power=[], temp=[], chgs=[];
@@ -1098,20 +1187,21 @@ function renderLog(rows){
     rows.forEach(r=>{ labels.push(fmtClock(r.t)); power.push(r.w);
       temp.push(r.temp!=null&&!isNaN(r.temp)?r.temp:null); chgs.push(r.chg); });
   }
-  // 统计
-  const dRows = rows.filter(r=>!r.chg), cRows = rows.filter(r=>r.chg);
-  const avg = a => a.length? a.reduce((x,y)=>x+y.w,0)/a.length : 0;
-  $('stCount').textContent = rows.length;
-  $('stAvgD').textContent = dRows.length? avg(dRows).toFixed(2)+' W' : '--';
-  $('stAvgC').textContent = cRows.length? avg(cRows).toFixed(2)+' W' : '--';
-  const ts = rows.filter(r=>r.temp!=null&&!isNaN(r.temp)).map(r=>r.temp);
-  $('stMaxT').textContent = ts.length? Math.max(...ts).toFixed(1)+' ℃' : '--';
-  const mWh = dRows.reduce((a,r)=>a+r.w,0) * (rows.length>1?(rows[rows.length-1].t-rows[0].t)/rows.length/1000:0) * 1000/3600;
-  $('stMWh').textContent = dRows.length>1? (mWh>=1000?(mWh/1000).toFixed(2)+' Wh':mWh.toFixed(0)+' mWh') : '--';
-  $('stSpan').textContent = rows.length>1? fmtSpan((rows[rows.length-1].t-rows[0].t)/1000) : '--';
+  // 统计（真机=awk 端按原始行精确算出；演示=由行数据计算）
+  $('stCount').textContent = st.n;
+  $('stAvgD').textContent = st.avgD!=null? st.avgD.toFixed(2)+' W' : '--';
+  $('stAvgC').textContent = st.avgC!=null? st.avgC.toFixed(2)+' W' : '--';
+  $('stMaxT').textContent = st.maxT!=null? st.maxT.toFixed(1)+' ℃' : '--';
+  $('stMWh').textContent = st.mWh!=null? (st.mWh>=1000?(st.mWh/1000).toFixed(2)+' Wh':st.mWh.toFixed(0)+' mWh') : '--';
+  $('stSpan').textContent = st.span>0? fmtSpan(st.span) : '--';
   // 图表
   const c = $('logChart');
-  if(!c || typeof Chart === 'undefined' || !c.clientWidth) return;
+  if(!c || typeof Chart === 'undefined') return;
+  if(!c.clientWidth){
+    // 刚切入页面时容器尚未布局（宽为 0），等一帧再渲染，避免图表空白/尺寸错乱被裁
+    requestAnimationFrame(()=>renderLog(rows, stats));
+    return;
+  }
   if(!logChart){
     logChart = new Chart(c, {
       type:'line',
@@ -1128,7 +1218,7 @@ function renderLog(rows){
         devicePixelRatio:Math.min(Math.max(window.devicePixelRatio||1,1),4),
         animation:false, spanGaps:true,
         interaction:{mode:'index', intersect:false, axis:'x'},
-        layout:{padding:{top:10, right:14, bottom:2, left:2}},
+        layout:{padding:{top:16, right:14, bottom:2, left:2}},
         scales:{
           x:{grid:{color:pwCssVar('--chart-grid'), drawTicks:false},
              ticks:{color:pwCssVar('--chart-text'), autoSkip:true, maxTicksLimit:6, font:{size:10}}},
@@ -1141,6 +1231,9 @@ function renderLog(rows){
         },
         plugins:{
           legend:{display:false},
+          /* 主页实时曲线全局注册过 ChartDataLabels，此处必须显式关闭，
+             否则每个数据点都会画数值标签、密集叠在曲线上（遮挡曲线） */
+          datalabels:{display:false},
           tooltip:{backgroundColor:pwCssVar('--chart-tooltip-bg'), titleColor:'#fff', bodyColor:'#fff',
             displayColors:true, padding:10, cornerRadius:12,
             position:'nearest', caretSize:6, caretPadding:10,
@@ -1223,7 +1316,7 @@ function go(p){
   if(p==='home'){ refreshHome(); pwStart(); } else { pwStop(); }
   if(p==='modes') loadModes();
   if(p==='gov') loadGov();
-  if(p==='log'){ loadLog(); loadCells(false); }
+  if(p==='log'){ requestAnimationFrame(()=>loadLog()); loadCells(false); }
 }
 
 /* ============ 演示数据 ============ */

@@ -167,11 +167,12 @@ public class GovernorActivity extends ThemedActivity {
         }
     }
 
-    /** 启用核心选择行：8 个可点击芯片。状态=实时 sysfs online，点击即时写 sysfs
-     *  （照搬 Kin-app，不写入调速脚本，切换方案不影响核心开关状态） */
+    /** 启用核心选择行：8 个可点击芯片，按模式独立配置（各模式互不同步）。
+     *  点击即时写 sysfs 生效，并随该模式保存进调速脚本 online 行——
+     *  切换到另一模式时按其脚本核心配置应用（默认全核心启用） */
     private void addCoreSelector(LinearLayout box, int idx) {
         TextView label = new TextView(this);
-        label.setText("启用或关闭核心（即时生效，独立于方案）");
+        label.setText("启用或关闭核心（即时生效，随该模式保存）");
         label.setTextSize(11);
         label.setTextColor(getResources().getColor(R.color.textSecondary));
         label.setPadding(dp(2), dp(4), dp(2), dp(4));
@@ -193,7 +194,7 @@ public class GovernorActivity extends ThemedActivity {
             GradientDrawable bg = new GradientDrawable();
             bg.setCornerRadius(dp(8));
             chip.setBackground(bg);
-            chip.setTag(Boolean.TRUE);   // 初始按在线，refreshCoreChips 按实时状态覆盖
+            chip.setTag(Boolean.TRUE);   // 默认全启用，fillInputs 按各模式配置覆盖
             styleChip(chip, true);
             final int core = c;
             chip.setOnClickListener(v -> {
@@ -202,12 +203,11 @@ public class GovernorActivity extends ThemedActivity {
                     Toast.makeText(this, "CPU0 为主核，系统不允许关闭", Toast.LENGTH_SHORT).show();
                     return;
                 }
+                // 只翻转本模式芯片状态（其他模式不同步），保存时写入该模式脚本 online 行
                 final boolean on = !Boolean.TRUE.equals(chip.getTag());
-                new Thread(() -> {
-                    // 即时写 sysfs（照搬 Kin-app：echo 0/1 > cpuN/online），随后按回读的真实状态刷新全部芯片
-                    CpuCoreManager.setCoreOnline(core, on);
-                    runOnUiThread(this::refreshCoreChips);
-                }).start();
+                chip.setTag(on);
+                styleChip(chip, on);
+                new Thread(() -> CpuCoreManager.setCoreOnline(core, on)).start();
             });
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(30), dp(30));
             clp.rightMargin = dp(6);
@@ -219,22 +219,17 @@ public class GovernorActivity extends ThemedActivity {
         box.addView(row);
     }
 
-    /** 按实时 sysfs online 状态刷新 4 个方案卡片的全部核心芯片（后台读，UI 刷） */
-    private void refreshCoreChips() {
-        new Thread(() -> {
-            final boolean[] live = new boolean[8];
-            for (int c = 0; c < 8; c++) live[c] = CpuCoreManager.coreOnline(c);
-            runOnUiThread(() -> {
-                for (int i = 0; i < 4; i++) {
-                    TextView[] chips = coreChips.get(String.valueOf(i));
-                    if (chips == null) continue;
-                    for (int c = 0; c < 8; c++) {
-                        chips[c].setTag(live[c]);
-                        styleChip(chips[c], live[c]);
-                    }
-                }
-            });
-        }).start();
+    /** 按已加载的各模式核心配置刷新 4 个方案卡片的芯片（模式间独立，互不同步） */
+    private void applyCoreChips() {
+        for (int i = 0; i < 4; i++) {
+            TextView[] chips = coreChips.get(String.valueOf(i));
+            if (chips == null || govs[i] == null) continue;
+            for (int c = 0; c < 8; c++) {
+                boolean on = govs[i].cores[c];
+                chips[c].setTag(on);
+                styleChip(chips[c], on);
+            }
+        }
     }
 
     /** 芯片选中/未选样式 */
@@ -376,8 +371,8 @@ public class GovernorActivity extends ThemedActivity {
     }
 
     private void fillInputs() {
-        // 核心芯片显示实时 sysfs 在线状态（不再读脚本里的 online 行）
-        refreshCoreChips();
+        // 核心芯片按各模式配置显示（online 行解析结果，无记录则默认全启用）
+        applyCoreChips();
         for (int i = 0; i < 4; i++) {
             GovernorConfig.Gov g = govs[i];
             for (int j = 0; j < FIELDS[i].length; j++) {
@@ -564,7 +559,7 @@ public class GovernorActivity extends ThemedActivity {
             String verify = "";
             if (ok) {
                 try { Thread.sleep(800); } catch (InterruptedException ignored) { }
-                int bad = verifySaved(saveDirs);
+                int bad = verifySaved(saveDirs, src);
                 if (bad > 0) verify = " · " + bad + " 个文件回读不符(被外部修改?)";
             }
             final boolean okF = ok;
@@ -792,8 +787,9 @@ public class GovernorActivity extends ThemedActivity {
         return a != null && !a.isEmpty() ? a : b;
     }
 
-    /** 一次 su 批量回读 4 个脚本并比对，返回不一致的文件数 */
-    private int verifySaved(java.util.List<String> dirs) {
+    /** 一次 su 批量回读 4 个脚本并与本次写入的 src 比对，返回不一致的文件数
+     *  （用写入源比对而非内存 govs：恢复默认等场景下两者可能不同，用内存比对会误报） */
+    private int verifySaved(java.util.List<String> dirs, GovernorConfig.Gov[] src) {
         StringBuilder cmd = new StringBuilder();
         for (int d = 0; d < dirs.size(); d++) {
             for (int i = 0; i < 4; i++) {
@@ -816,7 +812,7 @@ public class GovernorActivity extends ThemedActivity {
                 int e = r.out.indexOf("==CF=", from);
                 String content = e < 0 ? r.out.substring(from) : r.out.substring(from, e);
                 GovernorConfig.Gov b = GovernorConfig.parse(content, i == 0);
-                if (b == null || !sameGov(b, govs[i], i)) bad++;
+                if (b == null || !sameGov(b, src[i], i)) bad++;
             }
         }
         return bad;
@@ -839,7 +835,9 @@ public class GovernorActivity extends ThemedActivity {
         if (!eqvF(a.maxFreqL, b.maxFreqL)) return false;
         if (!eqvF(a.minFreqB, b.minFreqB)) return false;
         if (!eqvF(a.maxFreqB, b.maxFreqB)) return false;
-        return java.util.Arrays.equals(a.cores, b.cores);
+        // 核心开关已按模式写入脚本 online 行（切换模式时应用，默认全启用）。
+        // 为兼容旧版无 online 行的脚本（回读默认全开），不参与一致性比较
+        return true;
     }
 
     /** 限频字段等价比较（null/空/"0" 视为不限制） */

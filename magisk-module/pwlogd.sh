@@ -4,18 +4,18 @@
 # 数据目录 /data/adb/colorFC_store/pwlog/（形态切换/重刷模块均保留）
 # 供 WebUI「功耗记录」页绘制历史曲线
 #
-# v1.3.9.6 修复：
-#  1. 电流/电压单位自适应（µA/mA/A、µV/mV/V），修复部分机型
+# v1.3.9.7 修复：
+#  1. 采样间隔 30s → 2s（对齐 WebUI 实时曲线口径）
+#  2. CSV 追加第 6 列：采样电压（已归一化为 V）。写入端不再按电芯模式×2，
+#     统一由 WebUI 查看端按"当前电芯模式 + 每行电压"修正，避免写/看两端重复×2 变 4 倍
+#  3. 电流/电压单位自适应（µA/mA/A、µV/mV/V），修复部分机型
 #     节点报 mA/mV 时功率被缩小 1000 倍（充电显示 0.06W）
-#  2. 温度单位自适应（0.01℃/0.1℃/℃ → ℃），修复记录页 363℃ 异常
-#  3. 支持电芯模式 /data/adb/colorFC_store/cellmode（WebUI 手动切换），
-#     双芯且节点只报单芯数据时功率×2（对齐 APP applyCellMode）
-#  4. 启动时清理旧版本遗留的 pwlogd 进程（旧进程按旧公式持续写坏数据）
+#  4. 温度单位自适应（0.01℃/0.1℃/℃ → ℃），修复记录页 363℃ 异常
+#  5. 启动时清理旧版本遗留的 pwlogd 进程（旧进程按旧公式持续写坏数据）
 # ============================================================
 STORE=/data/adb/colorFC_store/pwlog
 PIDF=/data/adb/colorFC_store/pwlogd.pid
-CELLF=/data/adb/colorFC_store/cellmode   # 电芯模式：0=自动 1=单芯 2=双芯（持久化）
-INTERVAL=30      # 采样间隔（秒），一天约 2880 条
+INTERVAL=2       # 采样间隔（秒），一天约 43200 条
 KEEP_DAYS=7      # 历史保留天数
 
 # 清理旧版/其他路径遗留的 pwlogd 进程（模块升级后旧进程不会自行退出）
@@ -61,13 +61,13 @@ while true; do
         cap=$(cat $B/capacity 2>/dev/null)
         st=$(cat $B/status 2>/dev/null)
         # 功率：电流/电压单位自适应（µA/mA/A、µV/mV/V，对齐 APP 端 PowerMonitor 校准）
-        # 电芯模式=双芯 且 节点只报单芯电压（<5.5V）时功率×2
-        w=$(awk -v c="$cur" -v v="$volt" -v cm="$(cat "$CELLF" 2>/dev/null)" 'BEGIN{
+        # 写入原始功率（不做电芯×2 修正），电芯口径由 WebUI 查看端按当前模式 + 每行电压修正
+        # 第 6 列 = 归一化后的电压 V（判断该行是单芯口径还是串联总压）
+        wv=$(awk -v c="$cur" -v v="$volt" 'BEGIN{
             a = c<0 ? -c : c; A = a>100000 ? c/1e6 : (a>1 ? c/1000 : c);
             b = v<0 ? -v : v; V = b>1000000 ? v/1e6 : (b>2500 ? v/1000 : v);
             w = A*V; if (w<0) w = -w;
-            if (cm==2 && V>0 && V<5.5) w = w*2;
-            printf "%.2f", w;
+            printf "%.2f,%.2f", w, V;
         }')
         # 温度：单位自适应（0.01℃/0.1℃/℃ → ℃），超物理范围写 NA
         tv=NA
@@ -80,8 +80,8 @@ while true; do
             Charging*|Full|Not\ charg*) c=1;;
             *) c=0;;
         esac
-        echo "$now,$w,${tv},${cap:-NA},$c" >> "$STORE/pwlog-$(date +%Y%m%d).csv"
-        # 每 30 分钟滚动清理一次
+        echo "$now,${wv},${tv},${cap:-NA},$c" >> "$STORE/pwlog-$(date +%Y%m%d).csv"
+        # 每 30 分钟滚动清理一次（now%1800 落在采样间隔内即触发）
         [ $((now % 1800)) -lt $INTERVAL ] && cleanup
     }
     sleep $INTERVAL

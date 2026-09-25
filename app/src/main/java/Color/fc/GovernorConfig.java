@@ -226,9 +226,22 @@ public class GovernorConfig {
         }
         String fb = freqLimitBlock(g);
         if (!fb.isEmpty()) sb.append(fb);
+        // 本模式核心配置（按模式独立，切换模式时应用；默认全启用）
+        sb.append(onlineBlock(g));
         if (bVariant) {
             // 与模块出厂 B/conservative.sh 一致：关闭 game_opt 早检测
             sb.append("echo \"0\" > /proc/game_opt/early_detect/ed_enable 2>/dev/null\n");
+        }
+        return sb.toString();
+    }
+
+    /** 核心开关块：cpu1-7 的 online 行（cpu0 恒在线无 online 节点）。
+     *  无条件写入（含全启用），保证从关闭部分核心的模式切换到其他模式时核心恢复 */
+    static String onlineBlock(Gov g) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < 8; i++) {
+            sb.append("echo \"").append(g.cores[i] ? 1 : 0).append("\" > ")
+              .append("/sys/devices/system/cpu/cpu").append(i).append("/online\n");
         }
         return sb.toString();
     }
@@ -252,6 +265,8 @@ public class GovernorConfig {
         }
         String fb = freqLimitBlock(g);
         if (!fb.isEmpty()) sb.append(fb);
+        // 本模式核心配置（按模式独立，切换模式时应用；默认全启用）
+        sb.append(onlineBlock(g));
         // 与模块出厂 scx1/2.sh 尾部一致：启用 hmbird scx 调度与 game_opt 早检测
         sb.append("echo \"1\" > /proc/hmbird_sched/scx_enable 2>/dev/null\n");
         sb.append("echo \"1\" > /proc/game_opt/early_detect/ed_enable 2>/dev/null\n");
@@ -341,6 +356,8 @@ public class GovernorConfig {
         }
         String fb = freqLimitBlock(g);
         if (!fb.isEmpty()) sb.append(fb);
+        // 本模式核心配置（按模式独立，切换模式时应用；默认全启用）
+        sb.append(onlineBlock(g));
         // 与模块出厂 scx3.sh 尾部一致：启用 game_opt 早检测
         sb.append("echo \"1\" > /proc/game_opt/early_detect/ed_enable 2>/dev/null\n");
         return sb.toString();

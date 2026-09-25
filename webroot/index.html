@@ -64,20 +64,16 @@ header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
 .chart-frame{position:relative;height:210px;border-radius:12px;overflow:hidden}
 .chart-frame canvas{width:100%!important;height:100%!important}
 
-/* 形态切换 */
-.form-h{display:flex;align-items:center;justify-content:space-between}
-.form-h .t b{font-size:16px}
-.form-h .t i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:1px}
-.form-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
-.form-icon svg{width:26px;height:26px}
-.form-desc{color:var(--t3);font-size:12px;margin:9px 0 2px;line-height:1.5}
-.swap-btn{width:100%;border:0;color:#fff;font-size:14px;font-weight:700;
-  padding:11px 0;border-radius:20px;cursor:pointer;margin-top:11px;transition:.15s}
-.swap-btn:active{transform:scale(.97);opacity:.9}
-.swap-btn.to-adapt{background:linear-gradient(90deg,#8B2FF7,#C86DD7);box-shadow:0 4px 16px rgba(160,44,240,.35)}
-.swap-btn.to-dispatch{background:linear-gradient(90deg,#00C3F0,#0FA968);box-shadow:0 4px 16px rgba(0,180,224,.35)}
-.swap-btn.confirm{background:linear-gradient(90deg,#E0533D,#D94343);box-shadow:0 4px 16px rgba(217,67,67,.35)}
-.swap-btn[disabled]{opacity:.55;pointer-events:none}
+/* 形态切换（紧凑行） */
+.form-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--card);border:1px solid var(--stroke);border-radius:14px;padding:10px 12px}
+.fb-info b{font-size:15px}
+.fb-info i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:2px}
+.fb-swap{flex:none;min-width:0;white-space:nowrap}
+.fb-swap.to-adapt{border-color:#8B2FF7;color:#8B2FF7}
+.fb-swap.to-dispatch{border-color:#0096C8;color:#0096C8}
+.fb-swap.confirm{border-color:var(--warn);color:var(--warn)}
+.fb-swap[disabled]{opacity:.55;pointer-events:none}
 .swap-log{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.6;display:none;
   background:var(--soft);border-radius:10px;padding:8px 10px;word-break:break-all}
 
@@ -187,15 +183,32 @@ nav button.on{color:var(--ac);font-weight:700}
 <!-- ===== 主页 ===== -->
 <section class="page on" id="pg-home">
 
-  <!-- 模块形态 -->
-  <div class="card" id="formCard">
-    <div class="form-h">
-      <div class="t"><b id="formName">--</b><i id="formSub">--</i></div>
-      <div class="form-icon" id="formIcon"></div>
+  <!-- 模块形态（紧凑行） -->
+  <div class="form-bar" id="formBar">
+    <div class="fb-info">
+      <b id="formName">--</b>
+      <i id="formSub">--</i>
     </div>
-    <div class="form-desc" id="formDesc">--</div>
-    <button class="swap-btn to-adapt" id="swapBtn" onclick="onSwap()">--</button>
-    <div class="swap-log" id="swapLog"></div>
+    <button class="mini-btn fb-swap" id="swapBtn" onclick="onSwap()">--</button>
+  </div>
+  <div class="swap-log" id="swapLog"></div>
+
+  <!-- 实时功耗曲线（图表样式照搬 opbatt 电池工具包） -->
+  <div class="card" id="pwCard">
+    <div class="chart-header">
+      <span class="chart-title">实时功耗曲线</span>
+      <div class="chart-legend">
+        <span class="legend-pill legend-pill--power">功率</span>
+        <span class="legend-pill legend-pill--temp">温度</span>
+        <span class="legend-pill legend-pill--muted">最近 30 条</span>
+      </div>
+    </div>
+    <div class="pw-toprow">
+      <div class="pw-stat"><small>实时功率</small><b id="pwNow">--</b></div>
+      <div class="pw-stat"><small>电池温度</small><b id="pwTemp">--</b></div>
+      <div class="pw-stat"><small>充放状态</small><b id="pwBadge">--</b></div>
+    </div>
+    <div class="chart-frame" id="trendFrame"><canvas id="pwChart"></canvas></div>
   </div>
 
   <!-- 调度：模式快切 -->
@@ -223,40 +236,6 @@ nav button.on{color:var(--ac);font-weight:700}
       <div class="cell"><i>游戏解锁名单</i><b id="gCount">--</b></div>
     </div>
     <div class="hint">常态按百分比锁定 CPU/GPU，检测到 games.txt 内游戏前台时自动放开。修改 powerd.conf 或 games.txt 立即生效（MT管理器 Action 按钮可打开配置）。</div>
-  </div>
-
-  <!-- 系统状态（手动刷新，非监视器） -->
-  <div class="card">
-    <div class="row-between" style="margin-bottom:10px">
-      <span style="font-weight:700">系统状态</span>
-      <button class="mini-btn" onclick="refreshHome()">刷新</button>
-    </div>
-    <div class="grid">
-      <div class="cell"><i>电量</i><b id="vSoc">--</b></div>
-      <div class="cell"><i>电池温度</i><b id="vTemp">--</b></div>
-      <div class="cell"><i>核心数</i><b id="vCpu">--</b></div>
-      <div class="cell"><i>当前调速器</i><b id="vGov">--</b></div>
-      <div class="cell"><i>大核最高频</i><b id="vMax">--</b></div>
-      <div class="cell"><i>可用内存</i><b id="vMem">--</b></div>
-    </div>
-  </div>
-
-  <!-- 实时功耗曲线（图表样式照搬 opbatt 电池工具包） -->
-  <div class="card" id="pwCard">
-    <div class="chart-header">
-      <span class="chart-title">实时功耗曲线</span>
-      <div class="chart-legend">
-        <span class="legend-pill legend-pill--power">功率</span>
-        <span class="legend-pill legend-pill--temp">温度</span>
-        <span class="legend-pill legend-pill--muted">最近 30 条</span>
-      </div>
-    </div>
-    <div class="pw-toprow">
-      <div class="pw-stat"><small>实时功率</small><b id="pwNow">--</b></div>
-      <div class="pw-stat"><small>电池温度</small><b id="pwTemp">--</b></div>
-      <div class="pw-stat"><small>充放状态</small><b id="pwBadge">--</b></div>
-    </div>
-    <div class="chart-frame" id="trendFrame"><canvas id="pwChart"></canvas></div>
   </div>
 
   <!-- 入口（仅调度形态） -->
@@ -427,8 +406,8 @@ async function detectForm(){
   return form;
 }
 
-const FORM_ICON_DISPATCH = '<svg viewBox="0 0 24 24" fill="none" stroke="#0096C8" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>';
-const FORM_ICON_ADAPT = '<svg viewBox="0 0 24 24" fill="none" stroke="#A02CF0" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+const FORM_ICON_DISPATCH = '';
+const FORM_ICON_ADAPT = '';
 
 function renderFormCard(){
   const b = $('formBadge');
@@ -436,19 +415,13 @@ function renderFormCard(){
   b.textContent = form==='adapt' ? '自适应形态' : '调度形态';
   if(form==='adapt'){
     $('formName').textContent = '自适应限频';
-    $('formSub').textContent = 'powerd_freqcap · Ktwo';
-    $('formIcon').innerHTML = FORM_ICON_ADAPT;
-    $('formIcon').style.background = '#F3E8FF';
-    $('formDesc').textContent = '当前模式为自适应限频模式，点击切换到Color调度。';
-    $('swapBtn').className = 'swap-btn to-dispatch';
-    $('swapBtn').textContent = '切换回 Color 调度';
+    $('formSub').textContent = '当前模式为自适应限频模式，点击切换到Color调度';
+    $('swapBtn').className = 'mini-btn fb-swap to-dispatch';
+    $('swapBtn').textContent = '切换到Color调度';
   }else{
     $('formName').textContent = 'Color调度';
-    $('formSub').textContent = '四模式 · 前台动态切换';
-    $('formIcon').innerHTML = FORM_ICON_DISPATCH;
-    $('formIcon').style.background = '#E5F7FD';
-    $('formDesc').textContent = '当前模式为Color调度模式，点击切换到自适应限频。';
-    $('swapBtn').className = 'swap-btn to-adapt';
+    $('formSub').textContent = '当前模式为Color调度模式，点击切换到自适应限频';
+    $('swapBtn').className = 'mini-btn fb-swap to-adapt';
     $('swapBtn').textContent = '切换到自适应限频';
   }
   $('demoBadge').style.display = demoMode?'inline-block':'none';
@@ -468,7 +441,7 @@ async function onSwap(){
   if(demoMode){ toast('演示模式：真机内点击将执行形态切换'); return; }
   if(!swapArmed){
     swapArmed = true; btn.classList.add('confirm');
-    btn.textContent = form==='dispatch' ? '再次点击确认切换（将卸载Color调度）' : '再次点击确认切换（将卸载自适应限频）';
+    btn.textContent = '确认切换？';
     clearTimeout(swapTimer);
     swapTimer = setTimeout(()=>{ swapArmed=false; renderFormCard(); }, 3200);
     return;
@@ -476,7 +449,7 @@ async function onSwap(){
   swapArmed = false; clearTimeout(swapTimer);
   const target = form==='dispatch' ? 'adapt' : 'dispatch';
   btn.disabled = true; btn.classList.remove('confirm');
-  btn.textContent = '切换中…（守护启停约需10秒）';
+  btn.textContent = '切换中…';
   const log = $('swapLog'); log.style.display='block';
   log.textContent = '> sh swap.sh ' + target + '\n> 正在停止守护并搬移文件…';
   const r = await exec(`sh ${MOD}/webroot/swap.sh ${target}`);
@@ -504,18 +477,11 @@ function errnoTag(r){ return (r&&r.errno!=null)?r.errno:'?'; }
 async function refreshHome(){
   await detectSoc();
   if(demoMode){
-    $('vSoc').textContent='66%'; $('vTemp').textContent='31.2℃'; $('vCpu').textContent='8 核';
-    $('vGov').textContent=schemeGovName(); $('vMax').textContent='3.07GHz'; $('vMem').textContent='9.2GB';
     $('curMode').textContent='balance';
     renderHomeChips('balance');
     return;
   }
   const out = await shOut(
-    `echo "SOC=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)";`+
-    `echo "BT=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)";`+
-    `echo "CPU=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | grep -c .)";`+
-    `echo "MAX=$(M=0; for f in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do v=$(cat $f 2>/dev/null); [ -n "$v" ] && [ "$v" -gt "$M" ] && M=$v; done; echo $M)";`+
-    `echo "MEM=$(awk '/MemAvailable/{print int($2/1024)"M"}' /proc/meminfo 2>/dev/null)";`+
     (form==='dispatch'
       ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)"`
       : `echo "PD=$(sh ${MOD}/powerd.sh status 2>/dev/null | tail -1)";`+
@@ -526,12 +492,6 @@ async function refreshHome(){
         `echo "GPU=$(grep -o 'GPU_PCT=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
         `echo "GC=$(sed '/^#/d;/^[[:space:]]*$/d' ${MOD}/games.txt 2>/dev/null | wc -l)"`));
   const g = k => (out.match(new RegExp('^'+k+'=(.*)$','m'))||[])[1]||'--';
-  $('vSoc').textContent = g('SOC')==='--'?'--':g('SOC')+'%';
-  const bt = g('BT'); $('vTemp').textContent = bt==='--'?'--':(bt/10).toFixed(1)+'℃';
-  $('vCpu').textContent = g('CPU')+' 核';
-  $('vGov').textContent = schemeGovName();
-  const mf = g('MAX'); $('vMax').textContent = (mf==='--'||!/^[0-9]+$/.test(mf)||+mf===0)?'--':(mf/1000).toFixed(0)+' MHz';
-  $('vMem').textContent = g('MEM');
   if(form==='dispatch'){
     curMode = g('CUR');
     if(!MODE_KEYS.includes(curMode)) curMode='balance';

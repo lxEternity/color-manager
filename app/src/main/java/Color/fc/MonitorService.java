@@ -95,7 +95,7 @@ public class MonitorService extends Service {
     private Snap lastSnap;
 
     // ===== 进程采样（top 主路径 + /proc 差分回退，照搬 Kin ProcSampler） =====
-    private boolean topUsable = true;
+    private boolean diffUsable = true;   // /proc 差分可用（主路径）；失败自动降级 top
     private long lastTotalJiffies = -1;
     private final Map<Integer, Long> lastProcJiffies = new HashMap<>();
 
@@ -368,12 +368,11 @@ public class MonitorService extends Service {
                 } catch (Exception ignored) {
                 }
             }
-            final List<Proc> procs = needProc ? sampleProcs() : null;
-            final TickData d = new TickData(s, procs);
+            final TickData d = new TickData(s, null);
             lastSnap = s;
             ui.post(() -> {
                 for (int i = 0; i < N_TYPES; i++) {
-                    if (winOpen[i] && wins[i] != null) {
+                    if (winOpen[i] && wins[i] != null && i != T_PROCESS) {
                         try {
                             wins[i].onTick(d);
                         } catch (Exception ignored) {
@@ -381,6 +380,22 @@ public class MonitorService extends Service {
                     }
                 }
             });
+            if (needProc) {
+                // 进程采样独立线程（top 兜底路径耗时可达 3s+），不拖慢 1s 主循环节奏
+                final Snap ps0 = s;
+                new Thread(() -> {
+                    final List<Proc> ps = sampleProcs();
+                    if (ps == null) return;
+                    ui.post(() -> {
+                        if (winOpen[T_PROCESS] && wins[T_PROCESS] != null) {
+                            try {
+                                wins[T_PROCESS].onTick(new TickData(ps0, ps));
+                            } catch (Exception ignored) {
+                            }
+                        }
+                    });
+                }).start();
+            }
             tick++;
             ui.postDelayed(this::sampleLoop, 1000);
         }).start();
@@ -835,39 +850,55 @@ public class MonitorService extends Service {
         return a == null ? b == null : a.equals(b);
     }
 
-    // ==================== 进程采样（照搬 Kin ProcSampler：top 主路径 + /proc 差分回退） ====================
+    // ==================== 进程采样（/proc 差分主路径 + top 兜底） ====================
+    // toybox top -n 1 内部需等一个采样周期（约 3s）才输出差分数据且阻塞采样线程，
+    // 会把整个监视循环拖到 3-4s 一拍 → “不实时”。改为：
+    // 1) 主路径 /proc 差分：~200ms 出瞬时值（2s 窗口均值），CPU/FPS/功耗节奏不受影响
+    // 2) /proc dump 失败（root 掉线/SELinux）时降级 top，并在独立线程执行不拖慢主循环
 
     private List<Proc> sampleProcs() {
-        // top 一次性失败（如偶发超时）后每 20 拍自愈重试，避免永久降级到慢速 /proc 差分
-        if (!topUsable && tick % 20 == 0) topUsable = true;
-        if (topUsable) {
+        if (diffUsable || tick % 20 == 0) {   // 失败后每 20 拍自愈重试差分
             try {
-                RootShell.Result r = RootShell.exec(
-                        "top -b -n 1 -o PID,%CPU,RES,CMDLINE -s 2 2>/dev/null | head -n 400", 10);
-                String out = r.ok() && r.out != null ? r.out : "";
-                List<Proc> rows = new ArrayList<>();
-                for (String line : out.split("\\n")) {
-                    String[] parts = line.trim().split("\\s+", 4);
-                    if (parts.length < 4) continue;
-                    int pid;
-                    float cpu;
-                    try {
-                        pid = Integer.parseInt(parts[0]);
-                        cpu = Float.parseFloat(parts[1]);
-                    } catch (Exception e) {
-                        continue;
-                    }
-                    rows.add(mkProc(pid, parts[3], cpu));
+                List<Proc> ps = procFallback();
+                if (ps != null) {
+                    diffUsable = true;
+                    return ps;
                 }
-                if (rows.size() >= 3) {
-                    rows.sort((a, b) -> Float.compare(b.cpuPct, a.cpuPct));
-                    return rows.size() > 48 ? rows.subList(0, 48) : rows;
-                }
-                topUsable = false;
+                diffUsable = false;
             } catch (Exception ignored) {
+                diffUsable = false;
             }
         }
-        return procFallback();
+        return topProcs();
+    }
+
+    /** top 兜底（差分不可用时；慢路径，仅在独立线程调用） */
+    private List<Proc> topProcs() {
+        try {
+            RootShell.Result r = RootShell.exec(
+                    "top -b -n 1 -o PID,%CPU,RES,CMDLINE -s 2 2>/dev/null | head -n 400", 10);
+            String out = r.ok() && r.out != null ? r.out : "";
+            List<Proc> rows = new ArrayList<>();
+            for (String line : out.split("\\n")) {
+                String[] parts = line.trim().split("\\s+", 4);
+                if (parts.length < 4) continue;
+                int pid;
+                float cpu;
+                try {
+                    pid = Integer.parseInt(parts[0]);
+                    cpu = Float.parseFloat(parts[1]);
+                } catch (Exception e) {
+                    continue;
+                }
+                rows.add(mkProc(pid, parts[3], cpu));
+            }
+            if (rows.size() >= 3) {
+                rows.sort((a, b) -> Float.compare(b.cpuPct, a.cpuPct));
+                return rows.size() > 48 ? rows.subList(0, 48) : rows;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private static Proc mkProc(int pid, String cmd, float cpu) {
@@ -883,7 +914,8 @@ public class MonitorService extends Service {
         return p;
     }
 
-    /** /proc 差分回退（top 不可用） */
+    /** /proc 差分采样（主路径，快且瞬时）。dump 失败返回 null 由调用方降级 top；
+     *  首拍无基线返回空表（第二拍起有数据） */
     private List<Proc> procFallback() {
         int ncpu = Math.max(1, Runtime.getRuntime().availableProcessors());
         String dump = "";
@@ -893,6 +925,7 @@ public class MonitorService extends Service {
             if (r.ok() && r.out != null) dump = r.out;
         } catch (Exception ignored) {
         }
+        if (dump.isEmpty()) return null;   // dump 失败：不动基线，交由 top 兜底
         long total = -1;
         try (BufferedReader br = new BufferedReader(new FileReader("/proc/stat"))) {
             String l = br.readLine();

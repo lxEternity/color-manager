@@ -44,13 +44,18 @@ public class PowerMonitor {
 
     /**
      * 按主页电芯模式修正功耗（显示与记录统一使用）：
-     * 强制双电芯且节点只报单芯电流时 电流×2 重算，其余直接取节点功率
+     * 强制双电芯且节点只报单芯电流时 电流×2 重算，其余直接取节点功率。
+     * 符号由充放电状态决定（照 Kin computeWatt：原始电流/功率符号机型差异大不可信）：
+     * 充电/满电 = 正，放电/未充电 = 负
      */
     public static double applyCellMode(BatteryStat st, int cellMode) {
         int cells = cellMode == 0 ? st.cells : cellMode;
         boolean up = cells >= 2 && st.cells < 2;
         double amps = up ? st.amps * 2 : st.amps;
-        return up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
+        double mag = up ? Math.abs(st.volts * amps) : Math.abs(st.watts);
+        boolean charging = "Charging".equalsIgnoreCase(st.status)
+                || "Full".equalsIgnoreCase(st.status);
+        return charging ? mag : -mag;
     }
 
     private static class Node {

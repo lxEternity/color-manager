@@ -104,8 +104,14 @@ public class OverlayManagerSheet {
         boolean img = ThemeStore.imageBg(ctx) && ThemeStore.bgFile(ctx).exists();
         boolean transp = ThemeStore.transparentBg(ctx) && !img;
         final boolean immersive = img || transp;
-        int textPrimary = ctx.getResources().getColor(R.color.textPrimary);
-        int textSecondary = ctx.getResources().getColor(R.color.textSecondary);
+        // 沉浸配色组：按实际背景明暗自适应（浅色主题+深色壁纸 → 深色弹层），非沉浸跟随日夜资源
+        boolean darkBase = immersive ? ThemeStore.immersiveDarkBase(ctx) : dark;
+        int textPrimary = immersive
+                ? (darkBase ? 0xFFE7EDF9 : 0xFF1B2540)
+                : ctx.getResources().getColor(R.color.textPrimary);
+        int textSecondary = immersive
+                ? (darkBase ? 0xFF9CACCB : 0xFF5A6B8C)
+                : ctx.getResources().getColor(R.color.textSecondary);
 
         Dialog d = new Dialog(ctx);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -117,7 +123,7 @@ public class OverlayManagerSheet {
         // 沉浸时底板半透明（透出主页背景图/桌面），透明度与控件玻璃透明度联动
         GradientDrawable bg = new GradientDrawable();
         if (immersive) {
-            int base = dark ? 0xFF0D1220 : 0xFFF5F7FC;
+            int base = darkBase ? 0xFF0D1220 : 0xFFF5F7FC;
             int a = Math.max(178, Math.round(ThemeStore.glassAlpha(ctx) * 2.05f)); // ≥70% 保证可读
             bg.setColor((base & 0x00FFFFFF) | (a << 24));
         } else {
@@ -179,7 +185,7 @@ public class OverlayManagerSheet {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         for (int t = 0; t < MonitorService.N_TYPES; t++) {
-            list.addView(buildRow(t, dark, immersive, textPrimary, textSecondary));
+            list.addView(buildRow(t, immersive, darkBase, textPrimary, textSecondary));
         }
 
         d.setContentView(root);
@@ -199,8 +205,9 @@ public class OverlayManagerSheet {
     }
 
     /** 单行监视器：图标块 + 标题/描述 + 开关（整行可点，照搬 Kin OverlayRow）
-     *  沉浸时行底应用控件玻璃透明度（与主页 walkGlass 一致）+ 液态玻璃叠加 */
-    private View buildRow(final int type, boolean dark, boolean immersive, int textPrimary, int textSecondary) {
+     *  沉浸时行底应用控件玻璃透明度（与主页 walkGlass 一致）+ 液态玻璃叠加，
+     *  卡片底/描边按沉浸背景明暗自适应（darkBase），非沉浸取日夜资源色 */
+    private View buildRow(final int type, boolean immersive, boolean darkBase, int textPrimary, int textSecondary) {
         int tint = TINTS[type];
 
         LinearLayout row = new LinearLayout(ctx);
@@ -213,9 +220,13 @@ public class OverlayManagerSheet {
         row.setLayoutParams(rlp);
         // 源码行底：surface + 18dp 圆角
         GradientDrawable rbg = new GradientDrawable();
-        rbg.setColor(ctx.getResources().getColor(R.color.bgCard));
+        rbg.setColor(immersive
+                ? (darkBase ? 0xFF161D2F : 0xFFFFFFFF)
+                : ctx.getResources().getColor(R.color.bgCard));
         rbg.setCornerRadius(dp(18));
-        rbg.setStroke(dp(1), ctx.getResources().getColor(R.color.bgCardStroke));
+        rbg.setStroke(dp(1), immersive
+                ? (darkBase ? 0xFF242E47 : 0xFFC9D8EA)
+                : ctx.getResources().getColor(R.color.bgCardStroke));
         if (immersive) {
             // 沉浸玻璃化：行卡片按控件玻璃透明度半透明，透出弹窗底板的背景图
             rbg.setAlpha(Math.round(ThemeStore.glassAlpha(ctx) * 2.55f));
@@ -227,13 +238,13 @@ public class OverlayManagerSheet {
         row.setBackground(rbg);
         Warp.press(row);
 
-        // 图标块：44dp 圆角 13dp（日间浅色容器 / 夜间主色 16%）
+        // 图标块：44dp 圆角 13dp（浅色基底浅色容器 / 深色基底主色 16%）
         LinearLayout iconBox = new LinearLayout(ctx);
         iconBox.setGravity(Gravity.CENTER);
         iconBox.setLayoutParams(new LinearLayout.LayoutParams(dp(44), dp(44)));
         GradientDrawable ibg = new GradientDrawable();
         ibg.setCornerRadius(dp(13));
-        ibg.setColor(dark ? ((tint & 0x00FFFFFF) | 0x29000000) : CONTAINERS[type]);
+        ibg.setColor(darkBase ? ((tint & 0x00FFFFFF) | 0x29000000) : CONTAINERS[type]);
         iconBox.setBackground(ibg);
         ImageView icon = new ImageView(ctx);
         icon.setLayoutParams(new LinearLayout.LayoutParams(dp(24), dp(24)));

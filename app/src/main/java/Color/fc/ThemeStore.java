@@ -203,9 +203,48 @@ public class ThemeStore {
     }
 
     /** 亮度判断：系统栏取浅色还是深色图标 */
-    private static boolean isLightColor(int color) {
+    public static boolean isLightColor(int color) {
         int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
         return (0.299 * r + 0.587 * g + 0.114 * b) > 128;
+    }
+
+    /** 沉浸背景下应采用深色系还是浅色系弹层配色：
+     *  背景图模式按渲染结果底部采样色判断；透壁纸模式采样系统壁纸底部区域；
+     *  均不可用时回退日/夜间开关。弹窗/浮层沉浸配色用它（而非 dark 开关，
+     *  因为浅色主题也可能配深色壁纸/深色背景图，此时浅色弹层会非常突兀） */
+    public static boolean immersiveDarkBase(Context c) {
+        boolean img = imageBg(c) && bgFile(c).exists();
+        if (img) {
+            if (cachedBotBar != 0) return !isLightColor(cachedBotBar);
+            return dark(c);
+        }
+        try {
+            android.app.WallpaperManager wm =
+                    (android.app.WallpaperManager) c.getSystemService(Context.WALLPAPER_SERVICE);
+            if (wm != null) {
+                android.graphics.drawable.Drawable d = wm.getDrawable();
+                if (d instanceof BitmapDrawable) {
+                    Bitmap bm = ((BitmapDrawable) d).getBitmap();
+                    if (bm != null && bm.getWidth() > 0 && bm.getHeight() > 0) {
+                        long sum = 0;
+                        int n = 0;
+                        int stepX = Math.max(1, bm.getWidth() / 24);
+                        int stepY = Math.max(1, bm.getHeight() / 24);
+                        for (int y = (int) (bm.getHeight() * 0.7f); y < bm.getHeight(); y += stepY) {
+                            for (int x = 0; x < bm.getWidth(); x += stepX) {
+                                int p = bm.getPixel(x, y);
+                                sum += Math.round(0.299f * ((p >> 16) & 0xFF)
+                                        + 0.587f * ((p >> 8) & 0xFF) + 0.114f * (p & 0xFF));
+                                n++;
+                            }
+                        }
+                        if (n > 0) return (sum / n) <= 128;   // 底部偏暗 → 深色系
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return dark(c);
     }
 
     /** 记录内容区原始 padding 的 tag key */

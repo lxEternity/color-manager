@@ -45,10 +45,10 @@ public class GovernorActivity extends ThemedActivity {
     private String[] govList = new String[0];
     private boolean loading = true;
 
-    /** Kin-app 限频模式节点（ColorOsTweaks：0=限制生效，1=解除限制；重启恢复） */
-    private static final String CPU_LIMIT_NODE = "/proc/game_opt/disable_cpufreq_limit";
+    /** CPU 频率限制：小核/大核百分比自定义（policy 分簇，最高簇=大核，按各自
+     *  cpuinfo_max_freq 折算写 scaling_max_freq；关闭=恢复满频；重启自动失效） */
     private Switch cpuLimitSw;
-    private TextView cpuLimitDesc;
+    private EditText cpuLimitL, cpuLimitB;
     private boolean cpuLimitApplying = false;
 
     /** 预设调速器列表（本机扫描失败时的回退列表） */
@@ -177,13 +177,10 @@ public class GovernorActivity extends ThemedActivity {
         }
     }
 
-    /** Kin-app 限频模式卡片（照搬 ColorOsTweaks CPU 频率限制）：
-     *  节点 /proc/game_opt/disable_cpufreq_limit，开=限制生效(写 0)，关=解除限制(写 1)，
-     *  可逆、重启恢复系统默认；节点不存在（非 ColorOS/无 game_opt）时整行灰置 */
+    /** CPU 频率限制卡片：标题 + 开关 + 小核/大核百分比输入（即时生效，无提示文案） */
     private void addCpuLimitCard(LinearLayout container) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        card.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(14);
         card.setPadding(pad, dp(13), pad, dp(13));
         card.setBackgroundResource(R.drawable.bg_card);
@@ -192,81 +189,198 @@ public class GovernorActivity extends ThemedActivity {
         clp.bottomMargin = dp(9);
         card.setLayoutParams(clp);
 
-        LinearLayout texts = new LinearLayout(this);
-        texts.setOrientation(LinearLayout.VERTICAL);
+        // 标题行：CPU 频率限制 + 开关
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText("CPU 频率限制（限频模式）");
+        title.setText("CPU 频率限制");
         title.setTextColor(getResources().getColor(R.color.textPrimary));
         title.setTextSize(15);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        texts.addView(title);
-        cpuLimitDesc = new TextView(this);
-        cpuLimitDesc.setText("正在检测本机是否支持…");
-        cpuLimitDesc.setTextColor(getResources().getColor(R.color.textSecondary));
-        cpuLimitDesc.setTextSize(11);
-        android.widget.LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        dlp.topMargin = dp(2);
-        texts.addView(cpuLimitDesc, dlp);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        texts.setLayoutParams(tlp);
-        card.addView(texts);
-
+        head.addView(title, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         cpuLimitSw = new Switch(this);
-        cpuLimitSw.setEnabled(false);   // 状态加载完成后按可用性启用
-        card.addView(cpuLimitSw);
+        cpuLimitSw.setEnabled(false);   // 状态加载完成后启用
+        head.addView(cpuLimitSw);
+        card.addView(head, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        // 百分比输入行：小核 [ ]%  大核 [ ]%
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = dp(8);
+        row.setLayoutParams(rlp);
+        cpuLimitL = new EditText(this);
+        cpuLimitB = new EditText(this);
+        row.addView(pctWrap("小核", cpuLimitL));
+        android.widget.Space sp = new android.widget.Space(this);
+        row.addView(sp, new LinearLayout.LayoutParams(dp(14), 1));
+        row.addView(pctWrap("大核", cpuLimitB));
+        // 回显上次保存的百分比
+        android.content.SharedPreferences pf = getSharedPreferences("colorfc", MODE_PRIVATE);
+        cpuLimitL.setText(String.valueOf(pf.getInt("cpuLimitL", 60)));
+        cpuLimitB.setText(String.valueOf(pf.getInt("cpuLimitB", 60)));
+        card.addView(row, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         container.addView(card);
 
         cpuLimitSw.setOnCheckedChangeListener((b, on) -> {
             if (cpuLimitApplying) return;   // 回显触发的回调不重复落盘
-            setCpuLimit(on);
+            savePcts();
+            applyCpuLimit(on);
         });
+        // 输入确认（焦点离开 / 键盘完成）：开关开着时按新百分比即时重写
+        android.view.View.OnFocusChangeListener fl = (v, has) -> {
+            if (!has && cpuLimitSw != null && cpuLimitSw.isChecked()) {
+                savePcts();
+                applyCpuLimit(true);
+            }
+        };
+        cpuLimitL.setOnFocusChangeListener(fl);
+        cpuLimitB.setOnFocusChangeListener(fl);
     }
 
-    /** 后台读取限频节点状态并回显（可用性 + 开关状态） */
+    /** 百分比输入组：标签 + 数字输入框 + % 后缀 */
+    private android.widget.LinearLayout pctWrap(String label, EditText et) {
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextSize(12);
+        tv.setTextColor(getResources().getColor(R.color.textSecondary));
+        box.addView(tv);
+        et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        et.setTextSize(13);
+        et.setTextColor(getResources().getColor(R.color.textPrimary));
+        et.setGravity(android.view.Gravity.CENTER);
+        et.setMaxLines(1);
+        android.graphics.drawable.GradientDrawable eb = new android.graphics.drawable.GradientDrawable();
+        eb.setCornerRadius(dp(8));
+        eb.setColor(getResources().getColor(R.color.bgInput));
+        eb.setStroke(dp(1), getResources().getColor(R.color.bgInputStroke));
+        et.setBackground(eb);
+        et.setPadding(dp(6), dp(5), dp(6), dp(5));
+        box.addView(et, new LinearLayout.LayoutParams(dp(52), LinearLayout.LayoutParams.WRAP_CONTENT));
+        TextView pct = new TextView(this);
+        pct.setText("%");
+        pct.setTextSize(12);
+        pct.setTextColor(getResources().getColor(R.color.textSecondary));
+        box.addView(pct);
+        return box;
+    }
+
+    /** 读输入框百分比（钳 5..100，空/非法回退上次保存值） */
+    private int pctOf(EditText et, String key, int def) {
+        try {
+            int v = Integer.parseInt(et.getText().toString().trim());
+            if (v >= 5 && v <= 100) {
+                getSharedPreferences("colorfc", MODE_PRIVATE).edit().putInt(key, v).apply();
+                return v;
+            }
+        } catch (Exception ignored) {
+        }
+        return getSharedPreferences("colorfc", MODE_PRIVATE).getInt(key, def);
+    }
+
+    private void savePcts() {
+        pctOf(cpuLimitL, "cpuLimitL", 60);
+        pctOf(cpuLimitB, "cpuLimitB", 60);
+    }
+
+    /** 后台读取当前 policy 限频状态回显（任一簇 max<cpuinfo_max = 处于限频） */
     private void loadCpuLimitState() {
         new Thread(() -> {
-            RootShell.Result probe = RootShell.exec("[ -e " + CPU_LIMIT_NODE + " ]", 4);
-            boolean avail = probe.ok();
-            String val = avail ? RootShell.readFile(CPU_LIMIT_NODE) : null;
-            boolean on = val != null && val.trim().split(",")[0].trim().equals("0");
+            RootShell.Result rr = RootShell.exec(CPU_LIMIT_READ, 6);
+            boolean avail = false, lim = false;
+            if (rr.ok() && rr.out != null && rr.out.contains(" ")) {
+                avail = true;
+                for (String ln : rr.out.split("\\n")) {
+                    String[] t = ln.trim().split("\\s+");
+                    if (t.length != 2) continue;
+                    try {
+                        if (Long.parseLong(t[0]) < Long.parseLong(t[1])) {
+                            lim = true;
+                            break;
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            final boolean a = avail, l = lim;
             runOnUiThread(() -> {
                 if (isFinishing() || cpuLimitSw == null) return;
                 cpuLimitApplying = true;
-                cpuLimitSw.setEnabled(avail);
-                cpuLimitSw.setChecked(avail && on);
+                cpuLimitSw.setEnabled(a);
+                cpuLimitSw.setChecked(a && l);
                 cpuLimitApplying = false;
-                cpuLimitDesc.setText(avail
-                        ? "根据帧率调节 CPU 频率限制；关闭即解除限频（重启恢复）"
-                        : "本机不支持：未找到 game_opt 限频节点");
-                cpuLimitDesc.setTextColor(getResources().getColor(avail
-                        ? R.color.textSecondary : R.color.textDim));
             });
         }).start();
     }
 
-    /** 写限频节点（Kin ColorOsTweaks.setCpuLimit：chmod 666 → echo → chmod 444 复锁），
-     *  写后回读真实状态刷新开关，失败提示 */
-    private void setCpuLimit(boolean on) {
-        final int v = on ? 0 : 1;
+    /** 按小核/大核百分比写 policy 级 scaling_max_freq（on=false 恢复满频）。
+     *  写后回读真实状态刷新开关，全程无提示 */
+    private void applyCpuLimit(final boolean on) {
+        final int pl = pctOf(cpuLimitL, "cpuLimitL", 60);
+        final int pb = pctOf(cpuLimitB, "cpuLimitB", 60);
+        StringBuilder c = new StringBuilder();
+        c.append("gm=0; ");
+        c.append("for p in /sys/devices/system/cpu/cpufreq/policy*; do ");
+        c.append("f=$(cat \"$p/cpuinfo_max_freq\" 2>/dev/null); ");
+        c.append("[ -n \"$f\" ] && [ \"$f\" -gt \"$gm\" ] 2>/dev/null && gm=$f; done; ");
+        c.append("for p in /sys/devices/system/cpu/cpufreq/policy*; do ");
+        c.append("imf=$(cat \"$p/cpuinfo_max_freq\" 2>/dev/null); ");
+        c.append("[ -n \"$imf\" ] || continue; ");
+        c.append("imn=$(cat \"$p/cpuinfo_min_freq\" 2>/dev/null); ");
+        if (on) {
+            c.append("if [ \"$imf\" -lt \"$gm\" ] 2>/dev/null; then pct=").append(pl)
+                    .append("; else pct=").append(pb).append("; fi; ");
+            c.append("v=$((imf * pct / 100)); ");
+            c.append("[ -n \"$imn\" ] && [ \"$v\" -lt \"$imn\" ] 2>/dev/null && v=$imn; ");
+        } else {
+            c.append("v=$imf; ");
+        }
+        c.append("chmod 777 \"$p/scaling_max_freq\" \"$p/scaling_min_freq\" 2>/dev/null; ");
+        c.append("echo \"$imf\" > \"$p/scaling_max_freq\" 2>/dev/null; ");
+        c.append("[ -n \"$imn\" ] && echo \"$imn\" > \"$p/scaling_min_freq\" 2>/dev/null; ");
+        c.append("echo \"$v\" > \"$p/scaling_max_freq\" 2>/dev/null; ");
+        c.append("chmod 444 \"$p/scaling_max_freq\" \"$p/scaling_min_freq\" 2>/dev/null; done");
         new Thread(() -> {
-            RootShell.Result r = RootShell.exec(
-                    "chmod 666 " + CPU_LIMIT_NODE + "; echo " + v + " > " + CPU_LIMIT_NODE
-                            + "; chmod 444 " + CPU_LIMIT_NODE, 6);
-            String val = RootShell.readFile(CPU_LIMIT_NODE);
-            boolean now = val != null && val.trim().split(",")[0].trim().equals("0");
-            final boolean ok = r.ok() && now == on;
+            RootShell.exec(c.toString(), 8);
+            RootShell.Result rr = RootShell.exec(CPU_LIMIT_READ, 6);
+            boolean lim = false;
+            if (rr.ok() && rr.out != null) {
+                for (String ln : rr.out.split("\\n")) {
+                    String[] t = ln.trim().split("\\s+");
+                    if (t.length != 2) continue;
+                    try {
+                        if (Long.parseLong(t[0]) < Long.parseLong(t[1])) {
+                            lim = true;
+                            break;
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            final boolean now = lim;
             runOnUiThread(() -> {
                 if (isFinishing() || cpuLimitSw == null) return;
                 cpuLimitApplying = true;
                 cpuLimitSw.setChecked(now);
                 cpuLimitApplying = false;
-                Toast.makeText(this, ok ? (on ? "限频已生效" : "已解除限频（重启恢复）")
-                        : "限频设置失败", Toast.LENGTH_SHORT).show();
             });
         }).start();
     }
+
+    /** 回读各 policy 当前 max / 硬件上限（kHz） */
+    private static final String CPU_LIMIT_READ =
+            "for p in /sys/devices/system/cpu/cpufreq/policy*; do "
+                    + "echo \"$(cat \"$p/scaling_max_freq\" 2>/dev/null) "
+                    + "$(cat \"$p/cpuinfo_max_freq\" 2>/dev/null)\"; done";
 
     /** 启用核心选择行：8 个可点击芯片。状态=实时 sysfs online，点击即时写 sysfs
      *  （照搬 Kin-app，不写入调速脚本，切换方案不影响核心开关状态） */

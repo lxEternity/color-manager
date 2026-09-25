@@ -103,7 +103,8 @@ public class PowerHistoryManager {
         Sample s = new Sample();
         s.t = now;
         s.level = st.level;
-        s.watts = Math.abs(st.watts);
+        // 保留符号：放电为负、充电为正（applyCellMode 已按状态定号），显示层按符号区分充/放电
+        s.watts = st.watts;
         s.status = status;
         s.tempC = st.tempC;
         data.add(s);
@@ -173,7 +174,7 @@ public class PowerHistoryManager {
                     top.start = cur.t;
                     top.startLevel = cur.level;
                     top.avgW += cur.watts;
-                    top.maxW = Math.max(top.maxW, cur.watts);
+                    top.maxW = Math.max(top.maxW, Math.abs(cur.watts));   // 峰值取幅值
                     top.samples++;
                     continue;
                 }
@@ -183,7 +184,7 @@ public class PowerHistoryManager {
             s.start = s.end = cur.t;
             s.startLevel = s.endLevel = cur.level;
             s.avgW = cur.watts;
-            s.maxW = cur.watts;
+            s.maxW = Math.abs(cur.watts);
             s.samples = 1;
             out.add(s);
         }
@@ -335,13 +336,13 @@ public class PowerHistoryManager {
                 tempN++;
             }
             if (i > 0) {
-                energyWh += (ss.get(i - 1).watts + s.watts) / 2.0
-                        * (s.t - ss.get(i - 1).t) / 3_600_000.0;   // 梯形积分 Wh
+                energyWh += Math.abs((ss.get(i - 1).watts + s.watts) / 2.0)
+                        * (s.t - ss.get(i - 1).t) / 3_600_000.0;   // 梯形积分取幅值 Wh
             }
         }
         avgW = n > 0 ? avgW / n : 0;
         double peakW = 0;
-        for (int i = 0; i < n; i++) peakW = Math.max(peakW, ss.get(i).watts);
+        for (int i = 0; i < n; i++) peakW = Math.max(peakW, Math.abs(ss.get(i).watts));
         long spanMs = n > 1 ? ss.get(n - 1).t - ss.get(0).t : 0;
         int levelNow = live != null && live.level >= 0 ? live.level : (n > 0 ? ss.get(n - 1).level : -1);
         double volts = live != null ? live.volts : 0;
@@ -571,42 +572,44 @@ public class PowerHistoryManager {
             double maxW = 0;
             double maxT = 0;
             for (Sample s : ss) {
-                if (s.watts > maxW) maxW = s.watts;
+                if (Math.abs(s.watts) > maxW) maxW = Math.abs(s.watts);   // 对称尺度取绝对峰值
                 if (s.tempC > maxT) maxT = s.tempC;
             }
             boolean hasTemp = maxT > 0;
 
-            // 功率尺度自适应：跟随曲线峰值上升（5 档网格），窗口高度不变、曲线压缩
+            // 功率尺度自适应（Scene 语义：0 线居中，上半充电+、下半放电-），
+            // 对称 ±2×step 四格网格，窗口高度不变、曲线压缩
             int[] steps = {1, 2, 4, 5, 10, 20, 25, 50};
             int step = 50;
             for (int s : steps) {
-                if (maxW <= s * 5.0) {
+                if (maxW <= s * 4.0) {
                     step = s;
                     break;
                 }
             }
-            float vmax = step * 5f;
+            float vmax = step * 2f;   // 半域（0 线到上/下边界的量程）
             // 温度轴固定 20~70℃（5 档，10℃ 一档），与功率网格线共用
             float tMin = 20f, tMax = 70f;
 
             long t0 = ss.get(0).t;
             long span = Math.max(60_000L, ss.get(n - 1).t - t0);
             Sample last = ss.get(n - 1);
+            float yMid = (top + bottom) / 2f;   // 0 功率基准线
 
             // 顶部信息条（曲线框外）：左半「实时功率」/ 右半「实时温度」，黑色大字与曲线色区分
-            stat(c, "实时功率", String.format(Locale.US, "%.2fW", last.watts),
+            stat(c, "实时功率", String.format(Locale.US, "%+.2fW", last.watts),
                     left + pw * 0.25f);
             stat(c, "实时温度", hasTemp && last.tempC > 0
                             ? String.format(Locale.US, "%.1f℃", last.tempC) : "--",
                     left + pw * 0.75f);
 
-            // 水平网格 + 双 Y 轴刻度：左功率 0~5×step，右温度 20~70℃
-            for (int i = 0; i <= 5; i++) {
-                float gy = bottom - ph * i / 5f;
-                c.drawLine(left, gy, right, gy, pGrid);
-                String lb = (i * step) + "W";
+            // 水平网格 + 双 Y 轴刻度：左功率 -2s..+2s（0 线居中），右温度 20~70℃
+            for (int i = 0; i <= 4; i++) {
+                float gy = bottom - ph * i / 4f;
+                c.drawLine(left, gy, right, gy, i == 2 ? pAxis : pGrid);
+                String lb = ((i - 2) * step) + "W";
                 c.drawText(lb, 2 * dp, gy + 3 * dp, pLab);
-                String tb = ((int) (tMax - (tMax - tMin) * i / 5f)) + "℃";
+                String tb = ((int) (tMax - (tMax - tMin) * i / 4f)) + "℃";
                 float tw = pLab.measureText(tb);
                 c.drawText(tb, w - 3 * dp - tw, gy + 3 * dp, pLab);
             }
@@ -623,40 +626,41 @@ public class PowerHistoryManager {
             // 底部轴线（Scene 样式：下边框加深）
             c.drawLine(left, bottom, right, bottom, pAxis);
 
-            // 功率曲线：充电段绿色 / 放电段主题色，分段渐变填充
+            // 功率曲线：充电段绿色（0 线上方）/ 放电段主题色（0 线下方），分段渐变填充
             int i = 0;
             while (i < n) {
                 boolean ch = ss.get(i).status == 'C';
                 Path line = new Path();
                 Path fill = new Path();
                 float px0 = xOf(ss.get(i).t, t0, span, left, pw);
-                float py0 = yOf(ss.get(i).watts, bottom, ph, vmax);
+                float py0 = yOf(ss.get(i).watts, yMid, ph, vmax);
                 if (i > 0) {   // 与前一段衔接处用本段颜色补画连接线
                     float prx = xOf(ss.get(i - 1).t, t0, span, left, pw);
-                    float pry = yOf(ss.get(i - 1).watts, bottom, ph, vmax);
+                    float pry = yOf(ss.get(i - 1).watts, yMid, ph, vmax);
                     line.moveTo(prx, pry);
-                    fill.moveTo(prx, bottom);
+                    fill.moveTo(prx, yMid);
                     fill.lineTo(prx, pry);
                 } else {
-                    fill.moveTo(px0, bottom);
+                    fill.moveTo(px0, yMid);
                 }
                 line.lineTo(px0, py0);
                 fill.lineTo(px0, py0);
                 int j = i + 1;
                 while (j < n && (ss.get(j).status == 'C') == ch) {
                     line.lineTo(xOf(ss.get(j).t, t0, span, left, pw),
-                            yOf(ss.get(j).watts, bottom, ph, vmax));
+                            yOf(ss.get(j).watts, yMid, ph, vmax));
                     fill.lineTo(xOf(ss.get(j).t, t0, span, left, pw),
-                            yOf(ss.get(j).watts, bottom, ph, vmax));
+                            yOf(ss.get(j).watts, yMid, ph, vmax));
                     j++;
                 }
-                fill.lineTo(xOf(ss.get(j - 1).t, t0, span, left, pw), bottom);
+                fill.lineTo(xOf(ss.get(j - 1).t, t0, span, left, pw), yMid);
                 fill.close();
                 int col = ch ? cGreen : cAccent;
                 pLine.setColor(col);
-                pFill.setShader(new LinearGradient(0, top, 0, bottom,
-                        (col & 0x00FFFFFF) | 0x2E000000, 0x00000000, Shader.TileMode.CLAMP));
-                c.drawPath(fill, pFill);   // 分段渐变面积（上浓下淡）
+                // 渐变锚定本段基准（充电从 0 线向上淡出 / 放电从 0 线向下淡出）
+                pFill.setShader(new LinearGradient(0, yMid, 0, ch ? top : bottom,
+                        0x00000000, (col & 0x00FFFFFF) | 0x2E000000, Shader.TileMode.CLAMP));
+                c.drawPath(fill, pFill);   // 分段渐变面积（近 0 线浓、远端淡）
                 c.drawPath(line, pLine);   // 分段实线曲线
                 i = j;
             }
@@ -684,8 +688,10 @@ public class PowerHistoryManager {
 
             // 功率终点小圆点（无文字，避免与曲线重叠）
             pDot.setColor(last.status == 'C' ? cGreen : cAccent);
+            float lastY = yOf(last.watts, yMid, ph, vmax);
+            lastY = Math.max(Math.min(lastY, bottom - 2 * dp), top + 2 * dp);
             c.drawCircle(Math.min(xOf(last.t, t0, span, left, pw), right - 2 * dp),
-                    Math.max(yOf(last.watts, bottom, ph, vmax), top + 2 * dp), 2 * dp, pDot);
+                    lastY, 2 * dp, pDot);
         }
 
         /** 顶部信息条单项：标签与数值均以 x 为中心对齐 */
@@ -700,8 +706,10 @@ public class PowerHistoryManager {
             return left + pw * (t - t0) / span;
         }
 
-        private float yOf(double watts, float bottom, float ph, float vmax) {
-            return bottom - ph * (float) (Math.max(0, Math.min(vmax, watts)) / vmax);
+        /** 功率 → Y：0 线居中对称映射（正上负下，钳 ±vmax） */
+        private float yOf(double watts, float yMid, float ph, float vmax) {
+            double v = Math.max(-vmax, Math.min(vmax, watts));
+            return yMid - ph / 2f * (float) (v / vmax);
         }
     }
 }

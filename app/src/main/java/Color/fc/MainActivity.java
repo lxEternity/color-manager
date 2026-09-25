@@ -27,6 +27,7 @@ import java.util.Locale;
 
 import Color.fc.view.ChipView;
 import Color.fc.view.SparkView;
+import Color.fc.view.PowerCurveView;
 import Color.fc.view.Warp;
 
 /**
@@ -53,6 +54,7 @@ public class MainActivity extends ThemedActivity {
     private boolean histExpanded = false;
 
     private SparkView histSpark;
+    private PowerCurveView powerCurve;
     private TextView histHint;
     private long lastHistUpd = 0;
 
@@ -104,6 +106,7 @@ public class MainActivity extends ThemedActivity {
 
         // 功耗统计曲线（SOC 卡内）：点击查看 Scene 样式详细记录
         histSpark = findViewById(R.id.histSpark);
+        powerCurve = findViewById(R.id.powerCurve);
         histHint = findViewById(R.id.histHint);
         powerHistBox.setOnClickListener(v -> PowerHistoryManager.openDetail(this));
 
@@ -404,6 +407,15 @@ public class MainActivity extends ThemedActivity {
         if (st.level >= 0) batteryLevel.setText(st.level + "%");
         if (st.tempC > 0) {
             batteryTemp.setText(String.format(Locale.US, "%.1f℃", st.tempC));
+        }
+
+        // 实时功耗曲线（30 点滚动，充放电分色）
+        if (powerCurve != null && w > 0) {
+            boolean chg = "Charging".equalsIgnoreCase(st.status)
+                    || "Full".equalsIgnoreCase(st.status)
+                    || "Not charging".equalsIgnoreCase(st.status);
+            float temp = st.tempC > 0 ? (float) st.tempC : 0f;
+            powerCurve.push((float) w, temp, chg);
         }
     }
 

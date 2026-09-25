@@ -442,6 +442,13 @@
                             android:textStyle="bold" />
                     </LinearLayout>
                 </LinearLayout>
+
+                <!-- 实时功耗曲线（视觉照搬电池工具包 trend 页：双轴 + 充放电分色 + 末点胶囊） -->
+                <Color.fc.view.PowerCurveView
+                    android:id="@+id/powerCurve"
+                    android:layout_width="match_parent"
+                    android:layout_height="190dp"
+                    android:layout_marginTop="8dp" />
             </LinearLayout>
 
             <!-- 帧率录制记录 -->

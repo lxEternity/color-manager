@@ -603,11 +603,10 @@ public class PowerHistoryManager {
             // 温度轴固定 20~70℃（5 档，10℃ 一档），与功率网格线共用
             float tMin = 20f, tMax = 70f;
 
-            // X 轴固定整个 3 小时窗口（now-180min → now）：曲线从左往右延伸，
-            // 最新点贴近右缘，时间刻度与真实时间一一对应
-            long tEnd = System.currentTimeMillis();
-            long t0 = tEnd - 180 * 60_000L;
-            long span = 180 * 60_000L;
+            // X 轴动态范围（首采样 → 最新采样）：曲线占满绘图区宽度，
+            // 起点贴左缘、终点贴右缘（回退固定 3 小时窗口的改法）
+            long t0 = ss.get(0).t;
+            long span = Math.max(60_000L, ss.get(n - 1).t - t0);
             Sample last = ss.get(n - 1);
             float yMid = (top + bottom) / 2f;   // 0 功率基准线
 
@@ -642,6 +641,9 @@ public class PowerHistoryManager {
             c.drawLine(left, bottom, right, bottom, pAxis);
 
             // 功率曲线：充电段绿色（0 线上方）/ 放电段主题色（0 线下方），分段渐变填充
+            // 全部曲线裁剪在网格区内绘制：线宽端点/圆点不会再溢出左右网格线
+            c.save();
+            c.clipRect(left, top, right, bottom);
             int i = 0;
             while (i < n) {
                 boolean ch = ss.get(i).status == 'C';
@@ -665,19 +667,15 @@ public class PowerHistoryManager {
                 Path fill = new Path();
                 float px0 = xOf(ss.get(i).t, t0, span, left, pw);
                 float py0 = yOf(ss.get(i).watts, yMid, ph, vmax);
-                if (i == 0) {
-                    // 曲线起点统一锚定左下角：从角落引出后升/降到首个采样点
-                    line.moveTo(left, bottom);
-                    line.lineTo(px0, py0);
-                } else if (!gapBefore) {   // 与前段衔接：用本段颜色补连接线，曲线保持连续
+                if (!gapBefore) {   // 与前段衔接：用本段颜色补连接线，曲线保持连续
                     line.moveTo(xOf(ss.get(i - 1).t, t0, span, left, pw),
                             yOf(ss.get(i - 1).watts, yMid, ph, vmax));
                     line.lineTo(px0, py0);
                 } else {
                     line.moveTo(px0, py0);
                 }
-                // 渐变填充统一锚定 0 线（左下角起始引线不参与填充，面积保持干净）
-                if (i > 0 && !gapBefore) {
+                // 渐变填充锚定 0 线
+                if (!gapBefore) {
                     fill.moveTo(xOf(ss.get(i - 1).t, t0, span, left, pw), yMid);
                     fill.lineTo(xOf(ss.get(i - 1).t, t0, span, left, pw),
                             yOf(ss.get(i - 1).watts, yMid, ph, vmax));
@@ -726,6 +724,7 @@ public class PowerHistoryManager {
                         bottom - ph * (float) (Math.max(0, Math.min(tMax, last.tempC) - tMin) / (tMax - tMin)),
                         2 * dp, pDot);
             }
+            c.restore();   // 结束网格区裁剪
 
             // 功率终点小圆点（无文字，避免与曲线重叠）
             pDot.setColor(last.status == 'C' ? cGreen : cAccent);

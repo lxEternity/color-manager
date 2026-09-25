@@ -1,3 +1,23 @@
+v1.3.9.9（本仓库同步版，模块内版本号）
+1. A 方案（一代风驰：一加13T/一加13/一加ACE6）调速器与调度参数全模式重调优：
+   - 省电：conservative 93/86/步进2/采样12000µs，上限36%/下限4%，LLCC 300MHz，
+     uclamp 整体下调（touch 7 / top-app 9），极限压低功耗同时保留动态升降频，日常省电流畅
+   - 均衡：scx target_loads 84，上限72%/下限16%，LLCC 720MHz，opt2 28，
+     触控 42 保证跟手；负载 84% 才提频运行于高效区间，120/144 帧游戏不掉帧，
+     功耗对齐官方风驰调度
+   - 性能：scx target_loads 74，上限94%/下限30%，LLCC 1220MHz，opt2 58；
+     负载 74% 提前拉频 + 高保底频率防帧波动，和平精英 165 帧稳帧，功耗同步官方
+   - 极速：walt target_loads 60，上限100%，LLCC 1800MHz，opt2 92，
+     解除 walt 升频速率限制，满血释放性能
+2. 修复 scx3.sh（极速模式）误写 conservative 节点：改写 walt/target_loads；
+   修复 scx2.sh 路径双斜杠笔误（//proc）
+3. A/json_cpu_max_min 升级为分簇限频版：
+   - 兼容 2 参（全簇同上限%，出厂 conf/WebUI 格式）与 4 参（小核%/大核%/下限%/GPU%）
+   - 修复 APP 保存 4 参调度配置时 min/max 语义错位的旧问题
+   - 大小核按 cpuinfo_max_freq 自动分簇，GPU 经 kgsl devfreq 限频
+4. APP/WebUI 默认值同步：AllConfig.defaults、GovernorActivity.DEFAULTS、
+   WebUI 演示数据与新出厂参数一致
+
 v1.3.9.8（本仓库同步版，模块内版本号）
 1. 新增 C 方案（方案3）：适配无风驰(scx)调度器内核机型（骁龙 8 Gen2 / 8+ Gen1 / 8 Gen1 等）
    - 安装时检测 walt 调速器 → 自动加载 config/c.all.sh（C 方案四模式参数）

@@ -1,21 +1,50 @@
 #!/system/bin/sh
-mx="$1"; mn="$2"
+# 用法:
+#   json_cpu_max_min <上限%> <下限%>                    全簇同上限（出厂 conf/WebUI 2参格式）
+#   json_cpu_max_min <小核上限%> <大核上限%> <下限%> <GPU上限%>   分簇限频（APP 保存 4参格式，GPU 0/100=不限）
+# 大小核按各 policy 的 cpuinfo_max_freq 自动分簇（最高簇=大核，其余=小核）
 BASE=/sys/devices/system/cpu/cpufreq
-if [ -n "$mx" ]; then
-  for p in $BASE/policy*; do
-    [ -f "$p/cpuinfo_max_freq" ] || continue
-    imf=$(cat "$p/cpuinfo_max_freq" 2>/dev/null)
-    imn=$(cat "$p/cpuinfo_min_freq" 2>/dev/null)
-    [ -n "$imf" ] || continue
-    [ -n "$mn" ] || mn=0
-    vmax=$((imf * mx / 100))
-    vmin=$((imf * mn / 100))
-    chmod 777 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
-    echo "$imf" > "$p/scaling_max_freq" 2>/dev/null
-    echo "$imn" > "$p/scaling_min_freq" 2>/dev/null
-    echo "$vmax" > "$p/scaling_max_freq" 2>/dev/null
-    echo "$vmin" > "$p/scaling_min_freq" 2>/dev/null
-    chmod 444 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
-  done
-fi
+case $# in
+  4) mL="$1"; mB="$2"; mn="$3"; gpu="$4";;
+  2) mL="$1"; mB="$1"; mn="$2"; gpu=0;;
+  *) exit 0;;
+esac
+
+# 找出全机最高簇频率（=大核簇）
+gm=0
+for p in $BASE/policy*; do
+  [ -f "$p/cpuinfo_max_freq" ] || continue
+  f=$(cat "$p/cpuinfo_max_freq" 2>/dev/null)
+  [ -n "$f" ] && [ "$f" -gt "$gm" ] 2>/dev/null && gm=$f
+done
+
+for p in $BASE/policy*; do
+  [ -f "$p/cpuinfo_max_freq" ] || continue
+  imf=$(cat "$p/cpuinfo_max_freq" 2>/dev/null)
+  [ -n "$imf" ] || continue
+  imn=$(cat "$p/cpuinfo_min_freq" 2>/dev/null)
+  pct=$mL
+  [ "$gm" -gt 0 ] 2>/dev/null && [ "$imf" -eq "$gm" ] 2>/dev/null && pct=$mB
+  [ -n "$mn" ] || mn=0
+  vmax=$((imf * pct / 100))
+  vmin=$((imf * mn / 100))
+  [ -n "$imn" ] && [ "$vmin" -lt "$imn" ] 2>/dev/null && vmin=$imn
+  chmod 777 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
+  echo "$imf" > "$p/scaling_max_freq" 2>/dev/null
+  [ -n "$imn" ] && echo "$imn" > "$p/scaling_min_freq" 2>/dev/null
+  echo "$vmax" > "$p/scaling_max_freq" 2>/dev/null
+  echo "$vmin" > "$p/scaling_min_freq" 2>/dev/null
+  chmod 444 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
+done
+
+# GPU 限频（kgsl devfreq；0/100=解除到硬件最高档）
+for d in /sys/class/kgsl/kgsl-3d0/devfreq /sys/class/devfreq/*kgsl* /sys/class/devfreq/*gpu*; do
+  [ -f "$d/available_frequencies" ] || continue
+  hw=$(cat "$d/available_frequencies" 2>/dev/null | tr ' ' '\n' | sort -n | tail -1)
+  [ -n "$hw" ] || continue
+  v=$hw
+  [ "$gpu" -gt 0 ] 2>/dev/null && [ "$gpu" -lt 100 ] 2>/dev/null && v=$((hw * gpu / 100))
+  echo "$hw" > "$d/max_freq" 2>/dev/null
+  echo "$v" > "$d/max_freq" 2>/dev/null
+done
 exit 0

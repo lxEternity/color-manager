@@ -81,12 +81,12 @@ public class GovernorActivity extends ThemedActivity {
             {"governor", "targetLoads", "targetLoadsBig"},
             {"governor", "targetLoads", "targetLoadsBig"}
     };
-    /** 出厂默认（与模块 A/ 出厂脚本一致：conservative.sh 95/90/1/8000、scx1=90、scx2=85、scx3=walt） */
+    /** A 方案出厂默认（与模块 A/ 出厂脚本一致）：省电 conservative / 均衡 scx 84 / 性能 scx 74 / 极速 walt 60 */
     private static final String[][] DEFAULTS = {
-            {"conservative", "95", "90", "1", "8000"},
-            {"scx", "90"},
-            {"scx", "85"},
-            {"walt", "70"}
+            {"conservative", "93", "86", "2", "12000"},
+            {"scx", "84"},
+            {"scx", "74"},
+            {"walt", "60"}
     };
     /** 方案3（C 方案）出厂默认（与模块 C/ 出厂脚本一致，小核/大核分组） */
     private static final String[][] DEFAULTS_C = {

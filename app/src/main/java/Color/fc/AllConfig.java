@@ -41,23 +41,24 @@ public class AllConfig {
             "fast · 极限性能，全力释放"
     };
 
-    /** 默认参数（a/b 初始一致）。GPU 上限照搬 Kin FSM 内置曲线：省电40/均衡60/性能85/极速100 */
+    /** A 方案出厂默认（与 conf/config/a.all.sh 一致）；B 方案解析 b.all.sh 时的兜底种子 */
     public static AllConfig defaults() {
         AllConfig c = new AllConfig();
+        // 与出厂 conf/config/a.all.sh（2参 json：全簇同上限，GPU 不限）保持一致
         Mode ps = new Mode();
-        ps.opt2 = "0"; ps.cpuMaxL = "42"; ps.cpuMaxB = "42"; ps.cpuMin = "5"; ps.gpuMax = "40"; ps.llcc = "350000";
-        ps.uclampDisplay = "6"; ps.uclampSsfg = "5"; ps.uclampTouch = "8";
-        ps.uclampMm = "6"; ps.uclampRt = "3"; ps.uclampTopApp = "10";
+        ps.opt2 = "0"; ps.cpuMaxL = "36"; ps.cpuMaxB = "36"; ps.cpuMin = "4"; ps.gpuMax = "0"; ps.llcc = "300000";
+        ps.uclampDisplay = "5"; ps.uclampSsfg = "4"; ps.uclampTouch = "7";
+        ps.uclampMm = "5"; ps.uclampRt = "2"; ps.uclampTopApp = "9";
         Mode bl = new Mode();
-        bl.opt2 = "26"; bl.cpuMaxL = "64"; bl.cpuMaxB = "64"; bl.cpuMin = "20"; bl.gpuMax = "60"; bl.llcc = "680000";
-        bl.uclampDisplay = "30"; bl.uclampSsfg = "28"; bl.uclampTouch = "40";
-        bl.uclampMm = "32"; bl.uclampRt = "40"; bl.uclampTopApp = "26";
+        bl.opt2 = "28"; bl.cpuMaxL = "72"; bl.cpuMaxB = "72"; bl.cpuMin = "16"; bl.gpuMax = "0"; bl.llcc = "720000";
+        bl.uclampDisplay = "32"; bl.uclampSsfg = "30"; bl.uclampTouch = "42";
+        bl.uclampMm = "34"; bl.uclampRt = "42"; bl.uclampTopApp = "28";
         Mode pf = new Mode();
-        pf.opt2 = "52"; pf.cpuMaxL = "90"; pf.cpuMaxB = "90"; pf.cpuMin = "35"; pf.gpuMax = "85"; pf.llcc = "1220000";
+        pf.opt2 = "58"; pf.cpuMaxL = "94"; pf.cpuMaxB = "94"; pf.cpuMin = "30"; pf.gpuMax = "0"; pf.llcc = "1220000";
         pf.uclampDisplay = "78"; pf.uclampSsfg = "76"; pf.uclampTouch = "92";
-        pf.uclampMm = "80"; pf.uclampRt = "92"; pf.uclampTopApp = "74";
+        pf.uclampMm = "82"; pf.uclampRt = "92"; pf.uclampTopApp = "74";
         Mode fa = new Mode();
-        fa.opt2 = "88"; fa.cpuMaxL = "100"; fa.cpuMaxB = "100"; fa.cpuMin = "42"; fa.gpuMax = "100"; fa.llcc = "1800000";
+        fa.opt2 = "92"; fa.cpuMaxL = "100"; fa.cpuMaxB = "100"; fa.cpuMin = "42"; fa.gpuMax = "0"; fa.llcc = "1800000";
         fa.uclampDisplay = "82"; fa.uclampSsfg = "80"; fa.uclampTouch = "94";
         fa.uclampMm = "84"; fa.uclampRt = "94"; fa.uclampTopApp = "78";
         fa.walt1 = "0"; fa.walt2 = "1500";

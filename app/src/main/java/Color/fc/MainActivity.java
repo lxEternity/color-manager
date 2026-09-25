@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -57,6 +58,20 @@ public class MainActivity extends ThemedActivity {
     private TextView histHint;
     private long lastHistUpd = 0;
 
+    // ===== CPU 核心状态 + 管理（逻辑照搬 Kin-app SysfsReader）=====
+    private TextView cpuSummary, cpuManageBtn;
+    private LinearLayout cpuDots, cpuCoreList;
+    private boolean cpuExpanded = false;
+    /** 已构建的核心行（点阵方块 / 列表行），索引即核心号 */
+    private View[] cpuDotViews;
+    private TextView[] cpuRowNames;
+    private TextView[] cpuRowBoxes;
+    private int cpuCoreCount = 0;
+    private volatile boolean cpuSwitching = false;
+    private long lastCpuUpd = 0;
+    /** 簇拓扑缓存（policy → 核心范围），首次快照时取一次 */
+    private List<int[]> cpuTopo;
+
     static SocInfo cachedSoc;
 
     @Override
@@ -85,6 +100,7 @@ public class MainActivity extends ThemedActivity {
         detectSoc();
         detectRoot();
         startPowerLoop();
+        startCpuLoop();
         AppLimitService.ensure(this);   // 已配置单应用负载限制则确保执行服务在跑
 
         // 迷你悬浮窗文字显隐悬浮窗（无开关）
@@ -108,6 +124,13 @@ public class MainActivity extends ThemedActivity {
 
         cellMode = getSharedPreferences("colorfc", MODE_PRIVATE).getInt("cellMode", 0);
         cellBadge.setOnClickListener(v -> showCellDialog());
+
+        // CPU 核心：管理按钮展开/收起各核开关列表
+        cpuSummary = findViewById(R.id.cpuSummary);
+        cpuManageBtn = findViewById(R.id.cpuManageBtn);
+        cpuDots = findViewById(R.id.cpuDots);
+        cpuCoreList = findViewById(R.id.cpuCoreList);
+        cpuManageBtn.setOnClickListener(v -> toggleCpuList());
 
         // 兜底：每次到前台重读持久化的电芯模式，防止意外丢失
         updateCellModeFromPrefs();
@@ -216,6 +239,226 @@ public class MainActivity extends ThemedActivity {
             }
         }
         syncMonitorUi();
+    }
+
+    // ==================== CPU 核心状态与管理（照搬 Kin-app 逻辑）====================
+
+    /** CPU 核心状态循环：3s 快照一次（online + 频率），驱动点阵/列表/摘要刷新 */
+    private void startCpuLoop() {
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                new Thread(() -> {
+                    final CpuCoreManager.Snapshot sp = refreshCpuSnapshot();
+                    runOnUiThread(() -> {
+                        if (sp != null) updateCpuUi(sp);
+                        handler.postDelayed(this, 3000);
+                    });
+                }).start();
+            }
+        }, 500);
+    }
+
+    /** 取核心快照；首次/核心数变化时在 UI 线程构建点阵与开关行 */
+    private CpuCoreManager.Snapshot refreshCpuSnapshot() {
+        try {
+            int n = cpuCoreCount > 0 ? cpuCoreCount : CpuCoreManager.coreCount();
+            if (n <= 0) return null;
+            CpuCoreManager.Snapshot sp = CpuCoreManager.snapshot(n);
+            if (cpuDotViews == null || cpuDotViews.length != n) {
+                if (cpuTopo == null) cpuTopo = CpuCoreManager.policyTopology();
+                final int cnt = n;
+                final CpuCoreManager.Snapshot s0 = sp;
+                runOnUiThread(() -> buildCpuViews(cnt, s0));
+            }
+            return sp;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 构建核心状态点阵 + 展开列表的每核行（一次性，核心数变化时重建） */
+    private void buildCpuViews(int n, CpuCoreManager.Snapshot first) {
+        cpuCoreCount = n;
+        cpuDots.removeAllViews();
+        cpuCoreList.removeAllViews();
+        cpuDotViews = new View[n];
+        cpuRowNames = new TextView[n];
+        cpuRowBoxes = new TextView[n];
+
+        for (int i = 0; i < n; i++) {
+            // ---- 点阵方块（在线实心主题色 / 离线空心）----
+            View dot = new View(this);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(14), dp(14));
+            dlp.setMarginEnd(dp(6));
+            dot.setLayoutParams(dlp);
+            dot.setBackground(makeDotShape(true));
+            cpuDots.addView(dot);
+            cpuDotViews[i] = dot;
+
+            // ---- 列表行：CPU0 · 簇名 · 频率    [开关方格] ----
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rlp.topMargin = dp(4);
+            row.setLayoutParams(rlp);
+
+            TextView name = new TextView(this);
+            name.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+            name.setTextColor(getResources().getColor(R.color.textPrimary));
+            name.setTextSize(12);
+            cpuRowNames[i] = name;
+            row.addView(name);
+
+            TextView box = new TextView(this);
+            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(22), dp(22));
+            box.setLayoutParams(blp);
+            box.setGravity(android.view.Gravity.CENTER);
+            box.setTextSize(12);
+            box.setTypeface(null, Typeface.BOLD);
+            box.setTextColor(0xFFFFFFFF);
+            box.setBackground(makeBoxShape(true));
+            Warp.press(box);
+            cpuRowBoxes[i] = box;
+            row.addView(box);
+
+            cpuCoreList.addView(row);
+        }
+        if (first != null) updateCpuUi(first);
+    }
+
+    /** 方格开关背景：选中实心主题色 / 未选中描边（GradientDrawable，主题沉浸时随全局玻璃化） */
+    private android.graphics.drawable.GradientDrawable makeBoxShape(boolean on) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        g.setCornerRadius(dp(6));
+        if (on) {
+            g.setColor(getResources().getColor(R.color.accent));
+        } else {
+            g.setColor(0x00000000);
+            g.setStroke(dp(2), getResources().getColor(R.color.textDim));
+        }
+        return g;
+    }
+
+    /** 点阵方块背景 */
+    private android.graphics.drawable.GradientDrawable makeDotShape(boolean on) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        g.setCornerRadius(dp(4));
+        if (on) {
+            g.setColor(getResources().getColor(R.color.accent));
+        } else {
+            g.setColor(0x00000000);
+            g.setStroke(dp(2), getResources().getColor(R.color.bgCardStroke));
+        }
+        return g;
+    }
+
+    /** 点方格：即时开关对应核心（Kin 方式直接写 sysfs，cpu0 恒在线不可关） */
+    private void onCpuBoxClick(final int cpu) {
+        if (cpuSwitching) return;
+        if (cpu == 0) {
+            Toast.makeText(this, "CPU0 为主核，系统不允许关闭", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final boolean target = cpuRowBoxes[cpu] != null
+                && cpuRowBoxes[cpu].getText().toString().contains("✓");
+        final boolean on = !target;
+        cpuSwitching = true;
+        Toast.makeText(this, "正在" + (on ? "启用" : "停用") + " CPU" + cpu + " …", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final boolean ok = CpuCoreManager.setCoreOnline(cpu, on);
+            runOnUiThread(() -> {
+                cpuSwitching = false;
+                if (!ok) Toast.makeText(this, "切换失败：需要 ROOT 或内核不支持热插拔", Toast.LENGTH_SHORT).show();
+                // 立即刷新一次快照回读真实状态（内核可能拒绝离线最后一个大核等）
+                new Thread(() -> {
+                    final CpuCoreManager.Snapshot sp = refreshCpuSnapshot();
+                    runOnUiThread(() -> { if (sp != null) updateCpuUi(sp); });
+                }).start();
+            });
+        }).start();
+    }
+
+    /** 刷新点阵/列表/摘要显示 */
+    private void updateCpuUi(CpuCoreManager.Snapshot sp) {
+        if (cpuDotViews == null || sp == null || sp.cores != cpuDotViews.length) return;
+        List<int[]> topo = cpuTopo;
+        for (int i = 0; i < sp.cores; i++) {
+            boolean on = sp.online[i];
+            // 点阵
+            View dot = cpuDotViews[i];
+            if (dot != null) dot.setBackground(makeDotShape(on));
+            // 列表行文字：CPU0 · 小核 1804MHz（离线显示"已停用"）
+            TextView name = cpuRowNames[i];
+            if (name != null) {
+                StringBuilder sb = new StringBuilder("CPU").append(i);
+                String cluster = clusterLabel(i, topo);
+                if (cluster != null) sb.append(" · ").append(cluster);
+                if (on) {
+                    sb.append(sp.freqMhz[i] > 0
+                            ? String.format(Locale.US, " · %d MHz", sp.freqMhz[i]) : "");
+                } else {
+                    sb.append(" · 已停用");
+                }
+                name.setText(sb);
+                name.setTextColor(getResources().getColor(on ? R.color.textPrimary : R.color.textDim));
+            }
+            // 开关方格（cpu0 显示"主"不可关；其余 ✓/空）
+            TextView box = cpuRowBoxes[i];
+            if (box != null) {
+                if (i == 0) {
+                    box.setText("主");
+                    box.setTextSize(9);
+                    box.setTextColor(getResources().getColor(R.color.textSecondary));
+                    box.setBackground(makeBoxShape(true));
+                    box.setOnClickListener(null);
+                } else {
+                    box.setText(on ? "✓" : "");
+                    box.setTextSize(12);
+                    box.setTextColor(0xFFFFFFFF);
+                    box.setBackground(makeBoxShape(on));
+                    final int cpu = i;
+                    box.setOnClickListener(v -> onCpuBoxClick(cpu));
+                }
+            }
+        }
+        cpuSummary.setText(String.format(Locale.US, "%d核 · %d在线", sp.cores, sp.onlineCount()));
+    }
+
+    /** 核心所在簇名：小核/中核/大核（按 policy 的 related_cpus 覆盖范围判断） */
+    private String clusterLabel(int cpu, List<int[]> topo) {
+        if (topo == null || topo.isEmpty()) return null;
+        int idx = -1;
+        for (int i = 0; i < topo.size(); i++) {
+            int[] t = topo.get(i);
+            if (t[1] >= 0 && cpu >= t[1] && cpu <= t[2]) { idx = i; break; }
+        }
+        if (idx < 0) return null;
+        switch (topo.size()) {
+            case 1: return "全核";
+            case 2: return idx == 0 ? "小核" : "大核";
+            default: return idx == 0 ? "小核" : (idx == topo.size() - 1 ? "大核" : "中核");
+        }
+    }
+
+    /** 展开/收起各核开关列表 */
+    private void toggleCpuList() {
+        cpuExpanded = !cpuExpanded;
+        cpuCoreList.setVisibility(cpuExpanded ? View.VISIBLE : View.GONE);
+        cpuManageBtn.setText(cpuExpanded ? "管理 ▴" : "管理 ▾");
+        cpuManageBtn.setTextColor(cpuExpanded
+                ? getResources().getColor(R.color.accent)
+                : getResources().getColor(R.color.textSecondary));
+        if (cpuExpanded) {   // 展开时立即刷新一次，避免旧数据
+            new Thread(() -> {
+                final CpuCoreManager.Snapshot sp = refreshCpuSnapshot();
+                runOnUiThread(() -> { if (sp != null) updateCpuUi(sp); });
+            }).start();
+        }
     }
 
     /** 点击"功耗统计"展开/收起近 3 小时曲线 */

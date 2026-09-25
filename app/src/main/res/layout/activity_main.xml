@@ -353,6 +353,71 @@
                 </LinearLayout>
             </LinearLayout>
 
+            <!-- CPU 核心：状态点阵 + 管理（展开各核开关） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="CPU 核心"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/cpuSummary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--"
+                        android:textColor="@color/accent"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/cpuManageBtn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_tab"
+                        android:paddingStart="9dp"
+                        android:paddingEnd="9dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
+                        android:text="管理 ▾"
+                        android:textColor="@color/textSecondary"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <!-- 核心状态点阵：在线实心主题色 / 离线空心暗色 -->
+                <LinearLayout
+                    android:id="@+id/cpuDots"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal" />
+
+                <!-- 展开的各核开关列表（代码构建，主题沉浸自动玻璃化） -->
+                <LinearLayout
+                    android:id="@+id/cpuCoreList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical"
+                    android:visibility="gone" />
+            </LinearLayout>
+
             <!-- 帧率录制记录 -->
             <LinearLayout
                 android:id="@+id/menuFrameRecords"

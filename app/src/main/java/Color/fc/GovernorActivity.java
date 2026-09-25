@@ -200,11 +200,18 @@ public class GovernorActivity extends ThemedActivity {
             chip.setBackground(bg);
             chip.setTag(Boolean.TRUE);   // 默认启用，fillInputs 按脚本覆盖
             styleChip(chip, true);
+            final int core = c;
             chip.setOnClickListener(v -> {
                 if (loading) return;
                 boolean on = !Boolean.TRUE.equals(chip.getTag());
+                if (core == 0) {
+                    Toast.makeText(this, "CPU0 为主核，系统不允许关闭", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 chip.setTag(on);
                 styleChip(chip, on);
+                // 即时生效（照搬 Kin-app：直接写 sysfs online 节点，不等脚本/重启）
+                new Thread(() -> CpuCoreManager.setCoreOnline(core, on)).start();
             });
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(30), dp(30));
             clp.rightMargin = dp(6);

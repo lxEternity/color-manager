@@ -119,6 +119,7 @@ public class MonitorService extends Service {
     private volatile double cBusy = -1;    // CPU 总占用 %
     private volatile double cCpuM = 0;      // CPU 最高频 MHz
     private volatile double cGpuM = 0;      // GPU 频率 MHz
+    private volatile int coreOnline = -1, coreTotal = -1;   // 在线核心数/总核心数（照搬 Kin coreOnline 语义）
     private volatile double cCpuT = 0, cSocT = 0, cBatT = 0;
     private volatile float cHz = 0;         // 实时帧率
     private volatile float batPct = -1;     // 电量 %
@@ -201,6 +202,9 @@ public class MonitorService extends Service {
                     + "echo \"Q:$(cat $q/scaling_cur_freq 2>/dev/null)\"; done;"
                     + "r=\"\"; for q in /sys/devices/system/cpu/cpufreq/policy*; do "
                     + "r=\"$r$(cat $q/related_cpu 2>/dev/null);\"; done; echo \"R:$r\";"
+                    + "n=\"\"; for c in /sys/devices/system/cpu/cpu[0-9]*; do "
+                    + "o=$(cat $c/online 2>/dev/null); [ -z \"$o\" ] && o=1; "
+                    + "n=\"$n $o\"; done; echo \"N:$n\";"
                     + "for z in /sys/class/thermal/thermal_zone*; do "
                     + "[ -f \"$z/temp\" ] || continue; "
                     + "echo \"T:$(cat \"$z/type\" 2>/dev/null):$(cat \"$z/temp\" 2>/dev/null)\"; done";
@@ -935,8 +939,9 @@ public class MonitorService extends Service {
                 ensureClusterRows();
                 setRow(rowRam, "#RAM", ramPct >= 0
                         ? String.format(Locale.US, "%.0f%% · %.1fG", ramPct, ramUsedG) : "--", COL_VALUE);
-                setRow(rowCpu, "#CPU", cCpuT > 0
-                        ? String.format(Locale.US, "%.1f℃", cCpuT) : "--", tColor(cCpuT));
+                setRow(rowCpu, "#CPU", (coreTotal > 0
+                        ? String.format(Locale.US, "%d/%d核 · ", coreOnline, coreTotal) : "")
+                        + (cCpuT > 0 ? String.format(Locale.US, "%.1f℃", cCpuT) : "--"), tColor(cCpuT));
                 TextView[] rows = clusterRows();
                 for (int i = 0; i < nCluster && i < rows.length; i++) {
                     setRow(rows[i], "#" + clLbl[i],
@@ -1120,6 +1125,18 @@ public class MonitorService extends Service {
                         q++;
                     } else if (line.startsWith("R:") && clMap == null) {
                         buildClusterMap(line.substring(2));
+                    } else if (line.startsWith("N:")) {
+                        // 核心在线状态（照搬 Kin-app：cpuN 无 online 节点按在线算）
+                        int total = 0, on = 0;
+                        for (String t : line.substring(2).trim().split("\\s+")) {
+                            if (t.isEmpty()) continue;
+                            total++;
+                            if (!"0".equals(t)) on++;
+                        }
+                        if (total > 0) {
+                            coreOnline = on;
+                            coreTotal = total;
+                        }
                     }
                 }
                 if (nCluster <= 0) nCluster = Math.min(MAX_CL, Math.max(1, q));

@@ -81,6 +81,23 @@ public class RootShell {
         return r.ok() && r.out.contains("uid=0");
     }
 
+    /** 是否存在 su 二进制（普通 shell 检测，不触发 Root 授权弹窗）。
+     *  用于首次启动判断：无 su 的设备直接跳过授权申请流程 */
+    public static boolean hasSuBinary() {
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c",
+                    "command -v su || which su"
+                            + " || ls /system/bin/su /system/xbin/su /sbin/su /vendor/bin/su 2>/dev/null"});
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line = r.readLine();
+            r.close();
+            p.waitFor();
+            return line != null && !line.trim().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** 读取 root 文件内容，失败返回 null */
     public static String readFile(String path) {
         Result r = exec("cat '" + path + "'");

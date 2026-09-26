@@ -123,7 +123,7 @@ public class MainActivity extends ThemedActivity {
                 startActivity(new Intent(this, ThemeActivity.class)));
 
         detectSoc();
-        detectRoot();
+        maybeRequestRoot();
         buildChips();
         refreshMode();
         startPowerLoop();
@@ -185,6 +185,68 @@ public class MainActivity extends ThemedActivity {
                 GradientDrawable bg = (GradientDrawable) rootBadge.getBackground().mutate();
                 bg.setColor(rooted ? 0x2610B981 : 0x26EF4444);
                 rootBadge.setTextColor(rooted ? 0xFF10B981 : 0xFFEF4444);
+            });
+        }).start();
+    }
+
+    /** 首次启动主动申请 Root 授权：
+     *  未授权时 su 调用会弹系统授权窗，但 detectRoot 的 6 秒超时等不到用户点允许
+     *  → 误判"无 ROOT"，此后实时功耗/模式切换/应用策略全部静默失败。
+     *  首次启动改为说明弹窗引导 + 最长 60 秒等待用户在系统弹窗中确认。 */
+    private void maybeRequestRoot() {
+        final SharedPreferences sp = getSharedPreferences("colorfc", MODE_PRIVATE);
+        if (sp.getBoolean("rootReqDone", false)) {
+            detectRoot();   // 非首次：常规检测（已授权时秒回）
+            return;
+        }
+        sp.edit().putBoolean("rootReqDone", true).apply();
+        // 无 su 二进制（未刷 Root 的设备）：无需申请，直接走"无 ROOT"常规检测
+        if (!RootShell.hasSuBinary()) {
+            detectRoot();
+            return;
+        }
+        // 徽章先置"待授权"：不先跑 detectRoot，其 su 调用会抢先弹出无上下文的授权窗
+        rootBadge.setText("ROOT 待授权");
+        GradientDrawable bg = (GradientDrawable) rootBadge.getBackground().mutate();
+        bg.setColor(0x26E8A33D);
+        rootBadge.setTextColor(0xFFE8A33D);
+
+        AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
+                .setTitle("申请 Root 授权")
+                .setMessage("实时功耗、模式切换、调度参数、应用策略等核心功能均需要 Root 权限。\n\n"
+                        + "点击「立即授权」后，请在系统弹出的授权窗口中选择允许。")
+                .setPositiveButton("立即授权", (d, w) -> doRootRequest())
+                .setNegativeButton("暂不", (d, w) -> {
+                    rootBadge.setText("ROOT 未授权");
+                    GradientDrawable b2 = (GradientDrawable) rootBadge.getBackground().mutate();
+                    b2.setColor(0x26EF4444);
+                    rootBadge.setTextColor(0xFFEF4444);
+                })
+                .setCancelable(false)
+                .show();
+        ThemeStore.styleDialog(this, dlg);
+    }
+
+    /** 触发一次 Root 授权请求：su 调用弹出系统授权窗，最长等 60 秒用户确认 */
+    private void doRootRequest() {
+        new Thread(() -> {
+            RootShell.Result r = RootShell.exec("id", 60);
+            final boolean ok = r.ok() && r.out.contains("uid=0");
+            runOnUiThread(() -> {
+                if (ok) {
+                    Toast.makeText(this, "Root 授权成功", Toast.LENGTH_SHORT).show();
+                    refreshMode();   // 授权后立即回读当前模式（此前读取必然失败）
+                } else {
+                    AlertDialog dlg = new AlertDialog.Builder(ThemeStore.dialogCtx(this))
+                            .setTitle("未获得 Root 授权")
+                            .setMessage("核心功能（实时功耗/模式切换/应用策略）将不可用。\n\n"
+                                    + "可在 Root 管理器（Magisk/KernelSU）中授予本应用权限后重试。")
+                            .setPositiveButton("重试", (d, w) -> doRootRequest())
+                            .setNegativeButton("取消", null)
+                            .show();
+                    ThemeStore.styleDialog(this, dlg);
+                }
+                detectRoot();   // 按最新授权状态刷新徽章（成败都刷）
             });
         }).start();
     }

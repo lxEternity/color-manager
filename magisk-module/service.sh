@@ -15,7 +15,6 @@ sleep 1
 if [ -f $MODULE_PATH/script/fz ]; then
 sleep 20
 else
-cp -af $MODULE_PATH/script/vtools_powercfg.sh /data/powercfg.sh
 cp -af $MODULE_PATH/config/powercfg.json /data/powercfg.json
 sleep 10
 fi
@@ -38,28 +37,42 @@ chmod 777 $MODULE_PATH/script/*
 chmod 777 $MODULE_PATH/A/*
 chmod 777 $MODULE_PATH/B/*
 chmod 777 $MODULE_PATH/C/*
+chmod 777 $MODULE_PATH/bin/* 2>/dev/null
 chmod 777 $MODULE_PATH/config/*
 chmod 777 $MODULE_PATH/*
 
 
 
 sleep 1
-#开始对调控文件data/powercfg.sh的设置
-peiz1="$MODULE_PATH/files/peiz"
-
-clq=$(cat $peiz1)
-
-if ! cat /data/powercfg.sh | grep -q "外部控制（比如scene）"; then
-    
-echo "if [[ \$kzlx != 1 ]]; then
-#外部控制（比如scene）
-ms=\$1
-touch $mokml/stop
-fi" >> /data/powercfg.sh
-
-echo "sh $MODULE_PATH/script/main.sh \"\$ms\" \"$mosdz\" \"$clq\"" >> /data/powercfg.sh
-
+#生成统一调度入口（Scene 兼容）：APP / WebUI / Scene / 动态监视(qtbh/qingtd) 全走此接口，
+#所有端的改动天然同步（单一入口 + 单一状态文件 cur_powermode.txt），无权限抢夺
+cat > /data/powercfg.sh <<'PCEOF'
+#!/system/bin/sh
+# ColorFC 统一调度入口（Scene 兼容，开机由 service.sh 重新生成）
+# 用法一（直接执行）: powercfg.sh <powersave|balance|performance|fast> [manual]
+#   无第二参 = 外部调用（Scene/终端）：暂停前台动态切换后应用（外部接管语义）
+#   manual  = APP/WebUI 手动：应用并同步为默认模式(moren)，动态切换继续
+# 用法二（内部 source）: 调用方先设置 ms=<模式> kzlx=1 再 . /data/powercfg.sh
+#   （qtbh/qingtd 动态监视；此时不覆盖调用方预设的 ms/kzlx，仅应用）
+MODULE_PATH="__MODPATH__"
+if [ "$kzlx" != "1" ]; then
+    ms="$1"
+    kzlx="${2:-0}"
+    if [ "$kzlx" = "manual" ]; then
+        # 手动选择同步为默认模式（moren）：前台监视后续切回的就是手动选的模式
+        for f in /sdcard/Android/qingtd/*.conf; do
+            [ -f "$f" ] || continue
+            grep -q '^moren=' "$f" && sed -i 's/^moren=.*/moren='"$ms"'/' "$f" || echo "moren=$ms" >> "$f"
+        done 2>/dev/null
+    elif [ "$kzlx" != "1" ]; then
+        # 外部控制（Scene 等）：暂停动态切换，防止被切回
+        touch /sdcard/Android/qingtd/stop 2>/dev/null
+    fi
 fi
+sh "$MODULE_PATH/script/main.sh" "$ms" "$MODULE_PATH/files" "$(cat "$MODULE_PATH/files/peiz" 2>/dev/null)"
+PCEOF
+sed -i "s|__MODPATH__|$MODULE_PATH|g" /data/powercfg.sh
+chmod 777 /data/powercfg.sh
 
 #判断修改文件是否可以访问，防止错误判断
 until [ -d /sys/devices/system/cpu/cpufreq/ ]; do
@@ -73,6 +86,12 @@ sleep 1
 #创建文件夹
 mkdir $dir
 sleep 1
+#备份上次模式（跨重启持久）：重启后由 qingtd.sh 恢复，
+#替代旧的"开机强制极速"逻辑（会导致重启变极速且手动切换被拉回）
+lm=$(cat $filePath 2>/dev/null)
+case "$lm" in
+    powersave|balance|performance|fast) echo "$lm" > $MODULE_PATH/files/lastmode;;
+esac
 #创建切换模式判断文件
 touch $filePath
 echo "powersave" > $filePath
@@ -103,11 +122,14 @@ echo 1 > $mosdz/baom
 
 
 sleep 1
-#将调速器改walt
+#开机初始调速器按方案检测（与 main.sh / install.sh 同一 fangan.sh 规则）：
+#scx→A(scx) / hmbird→B(hmbird) / sugov_next→A(sugov_next) / 都没有→C(walt)
+. $MODULE_PATH/script/fangan.sh
+fangan_detect
 for file in /sys/devices/system/cpu/cpufreq/policy*
 do
 chmod 777 $file/scaling_governor
-echo 'conservative' > $file/scaling_governor
+echo "$FANGAN_GOV" > $file/scaling_governor
 done
 
 
@@ -124,7 +146,7 @@ do
         else
         
         
-          if [ $(cat $mosdz) -le 0 ]; then
+          if [ $(cat $mosdz1) -le 0 ]; then
              echo 0 > $mosdz1
           
           else

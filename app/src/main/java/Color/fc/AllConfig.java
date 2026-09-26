@@ -178,6 +178,61 @@ public class AllConfig {
         }
     }
 
+    /** 深拷贝（保存时三方合并的快照用） */
+    public static AllConfig copy(AllConfig src) {
+        AllConfig c = new AllConfig();
+        if (src == null) return c;
+        for (Map.Entry<String, Mode> e : src.modes.entrySet()) {
+            Mode s = e.getValue();
+            if (s == null) continue;
+            Mode m = new Mode();
+            m.opt2 = s.opt2; m.cpuMaxL = s.cpuMaxL; m.cpuMaxB = s.cpuMaxB;
+            m.cpuMin = s.cpuMin; m.gpuMax = s.gpuMax; m.llcc = s.llcc;
+            m.uclampDisplay = s.uclampDisplay; m.uclampSsfg = s.uclampSsfg;
+            m.uclampTouch = s.uclampTouch; m.uclampMm = s.uclampMm;
+            m.uclampRt = s.uclampRt; m.uclampTopApp = s.uclampTopApp;
+            m.walt1 = s.walt1; m.walt2 = s.walt2;
+            c.modes.put(e.getKey(), m);
+        }
+        return c;
+    }
+
+    /** 字段级三方合并（防 APP/WebUI 互相覆盖的根因修复）：
+     *  fresh=磁盘最新内容（保留另一端刚写入的改动）；edited=当前界面值（含用户编辑）；
+     *  initial=打开页面时的快照。仅用户真正动过的字段（edited!=initial）用界面值，其余以磁盘为准 */
+    public static AllConfig merge(AllConfig fresh, AllConfig edited, AllConfig initial) {
+        AllConfig out = new AllConfig();
+        for (String key : MODE_KEYS) {
+            Mode f = (fresh   != null) ? fresh.modes.get(key)   : null;
+            Mode e = (edited  != null) ? edited.modes.get(key)  : null;
+            Mode i = (initial != null) ? initial.modes.get(key) : null;
+            if (e == null) { if (f != null) out.modes.put(key, f); continue; }
+            Mode m = new Mode();
+            m.opt2 = pick(f == null ? null : f.opt2, e.opt2, i == null ? null : i.opt2);
+            m.cpuMaxL = pick(f == null ? null : f.cpuMaxL, e.cpuMaxL, i == null ? null : i.cpuMaxL);
+            m.cpuMaxB = pick(f == null ? null : f.cpuMaxB, e.cpuMaxB, i == null ? null : i.cpuMaxB);
+            m.cpuMin = pick(f == null ? null : f.cpuMin, e.cpuMin, i == null ? null : i.cpuMin);
+            m.gpuMax = pick(f == null ? null : f.gpuMax, e.gpuMax, i == null ? null : i.gpuMax);
+            m.llcc = pick(f == null ? null : f.llcc, e.llcc, i == null ? null : i.llcc);
+            m.uclampDisplay = pick(f == null ? null : f.uclampDisplay, e.uclampDisplay, i == null ? null : i.uclampDisplay);
+            m.uclampSsfg = pick(f == null ? null : f.uclampSsfg, e.uclampSsfg, i == null ? null : i.uclampSsfg);
+            m.uclampTouch = pick(f == null ? null : f.uclampTouch, e.uclampTouch, i == null ? null : i.uclampTouch);
+            m.uclampMm = pick(f == null ? null : f.uclampMm, e.uclampMm, i == null ? null : i.uclampMm);
+            m.uclampRt = pick(f == null ? null : f.uclampRt, e.uclampRt, i == null ? null : i.uclampRt);
+            m.uclampTopApp = pick(f == null ? null : f.uclampTopApp, e.uclampTopApp, i == null ? null : i.uclampTopApp);
+            m.walt1 = pick(f == null ? null : f.walt1, e.walt1, i == null ? null : i.walt1);
+            m.walt2 = pick(f == null ? null : f.walt2, e.walt2, i == null ? null : i.walt2);
+            out.modes.put(key, m);
+        }
+        return out;
+    }
+
+    /** 用户动过（界面值 != 快照）→ 界面值；未动 → 磁盘最新值，磁盘缺失回退界面值 */
+    private static String pick(String fv, String ev, String iv) {
+        if (iv == null || !ev.equals(iv)) return ev;
+        return fv != null ? fv : ev;
+    }
+
     /** 生成脚本内容 */
     public static String generate(AllConfig cfg) {
         Mode ps = cfg.modes.get("powersave");

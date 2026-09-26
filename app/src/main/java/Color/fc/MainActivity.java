@@ -280,9 +280,10 @@ public class MainActivity extends ThemedActivity {
         }).start();
     }
 
-    /** 应用模式：单条原子命令（先写 moren= 再 main.sh，与 WebUI 完全一致）。
-     *  先写 moren：间隙内前台监视(qtbh.sh)即便被 cpuset 任务迁移触发，读到的也是新 moren，
-     *  不会按旧默认值把刚切的模式强制改回去（WebUI/APP 跨端互相覆盖的根因） */
+    /** 应用模式：统一调度接口 /data/powercfg.sh（与 WebUI / Scene / 动态监视同一入口）。
+     *  manual 语义 = 脚本内先写 moren= 再 main.sh 应用（顺序执行无间隙，原子），
+     *  动态切换继续运行。单一入口 + 单一状态文件，所有端改动天然同步，无权限抢夺。
+     *  powercfg.sh 不存在时（开机早期/异常）回退旧命令 */
     private void applyMode(String mode) {
         if (applying) return;
         if (rootChecked && !rooted) {
@@ -294,16 +295,18 @@ public class MainActivity extends ThemedActivity {
         applying = true;
         Toast.makeText(this, "正在应用 " + MODE_NAMES[idx] + " …", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            // 方案配置（peiz）：与 WebUI 一致，缺省 all
+            // 方案配置（peiz）：旧接口 fallback 用
             String peiz = RootShell.readFile(MOD + "/files/peiz");
             if (peiz == null || peiz.trim().isEmpty()) peiz = "all";
-            // 原子命令：写 moren= + main.sh 切换（只 glob ASCII 定位 conf，规避中文文件名兼容问题）
-            RootShell.Result r = RootShell.exec("cd " + MOKML + " 2>/dev/null && for f in *.conf; do "
+            // 优先统一接口；不存在时回退（写 moren= + main.sh，单条原子命令，glob ASCII 定位 conf）
+            RootShell.Result r = RootShell.exec("if [ -f /data/powercfg.sh ]; then "
+                    + "sh /data/powercfg.sh " + mode + " manual; "
+                    + "else cd " + MOKML + " 2>/dev/null && for f in *.conf; do "
                     + "[ -f \"$f\" ] || continue; "
                     + "grep -q '^moren=' \"$f\" && sed -i 's/^moren=.*/moren=" + mode + "/' \"$f\" "
                     + "|| echo \"moren=" + mode + "\" >> \"$f\"; done; "
                     + "sh " + MOD + "/script/main.sh " + mode + " " + MOD + "/files " + peiz.trim()
-                    + "; true", 25);
+                    + "; fi; true", 25);
             final boolean ok = r.ok();
             runOnUiThread(() -> {
                 applying = false;

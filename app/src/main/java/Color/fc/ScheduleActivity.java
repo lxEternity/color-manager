@@ -34,6 +34,10 @@ import java.util.Map;
 public class ScheduleActivity extends ThemedActivity {
 
     private AllConfig cfgA, cfgB, cfgC;
+    /** 打开页面时的快照（保存时三方合并，防 APP/WebUI 互相覆盖） */
+    private AllConfig cfgA0, cfgB0, cfgC0;
+    /** 运行时实际配置文件（平台专属优先，与 main.sh 加载规则一致；null=尚未加载） */
+    private String fileA, fileB, fileC;
     private String tab = "a";
     private boolean dirty = false;
     private boolean loading = true;
@@ -66,9 +70,6 @@ public class ScheduleActivity extends ThemedActivity {
         soc = MainActivity.cachedSoc;
         if (soc == null) soc = SocInfo.autoDetect();
 
-        String fileA = RootShell.CONFIG_DIR + "/a.all.sh";
-        String fileB = RootShell.CONFIG_DIR + "/b.all.sh";
-        String fileC = RootShell.CONFIG_DIR + "/c.all.sh";
         socTip.setText(soc.known
                 ? String.format(Locale.US, "当前 SOC：%s（%s）→ 加载方案 %s", soc.code, soc.marketing,
                         "a".equals(soc.config) ? "1" : "b".equals(soc.config) ? "2" : "3")
@@ -88,6 +89,13 @@ public class ScheduleActivity extends ThemedActivity {
 
         // 后台加载三份配置
         new Thread(() -> {
+            // 运行时配置文件与 main.sh 一致：平台专属（a.<peiz>.sh）优先，缺失回退 all
+            String peiz = RootShell.readFile("/data/adb/modules/colorFC/files/peiz");
+            if (peiz == null || peiz.trim().isEmpty()) peiz = "all";
+            peiz = peiz.trim();
+            fileA = cfgFileFor("a", peiz);
+            fileB = cfgFileFor("b", peiz);
+            fileC = cfgFileFor("c", peiz);
             String a = RootShell.readFile(fileA);
             String b = RootShell.readFile(fileB);
             String c = RootShell.readFile(fileC);
@@ -97,12 +105,27 @@ public class ScheduleActivity extends ThemedActivity {
             if (cfgA == null) cfgA = AllConfig.defaults();
             if (cfgB == null) cfgB = AllConfig.defaults();
             if (cfgC == null) cfgC = AllConfig.defaultsC();
+            cfgA0 = AllConfig.copy(cfgA);
+            cfgB0 = AllConfig.copy(cfgB);
+            cfgC0 = AllConfig.copy(cfgC);
             runOnUiThread(() -> {
                 loading = false;
                 applyTabStyle();
                 fillInputs();
             });
         }).start();
+    }
+
+    /** 运行时配置文件路径：平台专属存在则用之（与 main.sh 一致），否则回退 all */
+    private String cfgFileFor(String scheme, String peiz) {
+        String p = RootShell.CONFIG_DIR + "/" + scheme + "." + peiz + ".sh";
+        if (!"all".equals(peiz)) {
+            RootShell.Result r = RootShell.exec("test -f '" + p + "' && echo 1 || echo 0", 10);
+            if (!(r.ok() && r.out != null && r.out.trim().equals("1"))) {
+                p = RootShell.CONFIG_DIR + "/" + scheme + ".all.sh";
+            }
+        }
+        return p;
     }
 
     /** 构建 4 个模式卡片（收起状态，点击展开参数） */
@@ -386,20 +409,52 @@ public class ScheduleActivity extends ThemedActivity {
             return;
         }
         collectCurrent();
-        String path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
-        // C 方案（方案3）conf 用 C/ 脚本目录且 json 保持 2 参，与出厂 c.all.sh/WebUI 格式一致；
-        // 方案2 的 conf 引用 B/ 脚本目录（调速器参数可按方案分别保存）
-        String content = "c".equals(tab) ? AllConfig.generateC(currentCfg())
-                : AllConfig.generate(currentCfg());
-        if ("b".equals(tab)) content = content.replace("$mokzdz/A/", "$mokzdz/B/");
-        final String out = content;
+        // 写运行时实际加载的文件（平台专属优先，与 main.sh 一致；原来固定写 .all.sh，
+        // 平台专属配置存在时保存不生效）
+        String path = "a".equals(tab) ? fileA : "b".equals(tab) ? fileB : fileC;
+        if (path == null) path = RootShell.CONFIG_DIR + "/" + tab + ".all.sh";
+        final AllConfig initial = "a".equals(tab) ? cfgA0 : "b".equals(tab) ? cfgB0 : cfgC0;
+        final String finalPath = path;
+        final String finalTab = tab;
 
         new Thread(() -> {
-            RootShell.Result r = RootShell.writeFile(getCacheDir(), out, path);
+            // 保存前重读磁盘最新内容并三方合并：仅用户动过的字段用界面值，
+            // 其余以磁盘为准（保留 WebUI/另一端刚写入的改动，防止互相覆盖）
+            AllConfig fresh = AllConfig.parse(RootShell.readFile(finalPath));
+            AllConfig edited = currentCfg();
+            final AllConfig merged = AllConfig.merge(fresh, edited, initial);
+            // C 方案（方案3）conf 用 C/ 脚本目录；方案2 的 conf 引用 B/ 脚本目录
+            String content = "c".equals(finalTab) ? AllConfig.generateC(merged)
+                    : AllConfig.generate(merged);
+            if ("b".equals(finalTab)) content = content.replace("$mokzdz/A/", "$mokzdz/B/");
+            final String out = content;
+            RootShell.Result r = RootShell.writeFile(getCacheDir(), out, finalPath);
+            // 保存的方案与当前运行方案一致时，重新应用当前运行模式（对齐 WebUI"已实时应用"）
+            String applied = null;
+            if (r.ok()) {
+                String cur = RootShell.readFile("/sdcard/Android/qingtd/cur_powermode.txt");
+                if (cur != null) cur = cur.trim();
+                if ("powersave".equals(cur) || "balance".equals(cur)
+                        || "performance".equals(cur) || "fast".equals(cur)) {
+                    RootShell.Result fr = RootShell.exec(
+                            "sh /data/adb/modules/colorFC/script/fangan.sh 2>/dev/null", 10);
+                    if (fr.ok() && fr.out != null && fr.out.trim().startsWith(finalTab)) {
+                        RootShell.exec("sh /data/powercfg.sh " + cur + " 1; true", 20);
+                        applied = cur;
+                    }
+                }
+            }
+            final String appliedF = applied;
             runOnUiThread(() -> {
                 if (r.ok()) {
+                    // 内存与快照同步为合并结果（后续保存以新状态为基线）
+                    if ("a".equals(finalTab)) { cfgA = merged; cfgA0 = AllConfig.copy(merged); }
+                    else if ("b".equals(finalTab)) { cfgB = merged; cfgB0 = AllConfig.copy(merged); }
+                    else { cfgC = merged; cfgC0 = AllConfig.copy(merged); }
                     dirty = false;
-                    Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show();
+                    fillInputs();
+                    Toast.makeText(this, appliedF != null ? "已保存并实时应用" : "保存成功",
+                            Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(this, "写入失败：" + r.err, Toast.LENGTH_LONG).show();
                 }
@@ -427,11 +482,15 @@ public class ScheduleActivity extends ThemedActivity {
         ThemeStore.styleDialog(this, dlg);
     }
 
-    /** w: 0=方案1  1=方案2  2=方案3  3=全部。内存替换 + 立即写对应 a/b/c.all.sh */
+    /** w: 0=方案1  1=方案2  2=方案3  3=全部。内存替换 + 立即写运行时配置文件（平台专属优先） */
     private void doResetDefaults(int w) {
         if (w != 1) cfgA = AllConfig.defaults();
         if (w != 0 && w != 2) cfgB = AllConfig.defaults();
         if (w == 2 || w == 3) cfgC = AllConfig.defaultsC();
+        // 快照同步：恢复默认后即为新基线（后续保存的三方合并以此为参照）
+        if (w != 1) cfgA0 = AllConfig.copy(cfgA);
+        if (w != 0 && w != 2) cfgB0 = AllConfig.copy(cfgB);
+        if (w == 2 || w == 3) cfgC0 = AllConfig.copy(cfgC);
         boolean cur = (w == 3) || (w == 0 && "a".equals(tab))
                 || (w == 1 && "b".equals(tab)) || (w == 2 && "c".equals(tab));
         if (cur) {
@@ -441,13 +500,13 @@ public class ScheduleActivity extends ThemedActivity {
         final String label = w == 0 ? "方案1" : w == 1 ? "方案2" : w == 2 ? "方案3" : "方案1+方案2+方案3";
         new Thread(() -> {
             boolean ok = true;
-            if (w != 1) ok = RootShell.writeFile(getCacheDir(), AllConfig.generate(cfgA),
-                    RootShell.CONFIG_DIR + "/a.all.sh").ok() && ok;
+            String pa = (fileA != null) ? fileA : RootShell.CONFIG_DIR + "/a.all.sh";
+            String pb = (fileB != null) ? fileB : RootShell.CONFIG_DIR + "/b.all.sh";
+            String pc = (fileC != null) ? fileC : RootShell.CONFIG_DIR + "/c.all.sh";
+            if (w != 1) ok = RootShell.writeFile(getCacheDir(), AllConfig.generate(cfgA), pa).ok() && ok;
             if (w != 0 && w != 2) ok = RootShell.writeFile(getCacheDir(),
-                    AllConfig.generate(cfgB).replace("$mokzdz/A/", "$mokzdz/B/"),
-                    RootShell.CONFIG_DIR + "/b.all.sh").ok() && ok;
-            if (w == 2 || w == 3) ok = RootShell.writeFile(getCacheDir(), AllConfig.generateC(cfgC),
-                    RootShell.CONFIG_DIR + "/c.all.sh").ok() && ok;
+                    AllConfig.generate(cfgB).replace("$mokzdz/A/", "$mokzdz/B/"), pb).ok() && ok;
+            if (w == 2 || w == 3) ok = RootShell.writeFile(getCacheDir(), AllConfig.generateC(cfgC), pc).ok() && ok;
             final boolean okF = ok;
             runOnUiThread(() -> Toast.makeText(this, okF
                     ? "已恢复默认值并保存（" + label + "）"

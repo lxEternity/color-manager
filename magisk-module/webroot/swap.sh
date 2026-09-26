@@ -107,13 +107,17 @@ start_adapt() {
 
 start_dispatch() {
     nohup /system/bin/sh "$MODROOT/script/qingtd.sh" >/dev/null 2>&1 &
-    # 立即按上次模式重新应用一次
+    # 立即按上次模式重新应用一次（统一调度接口，kzlx=1 仅应用）
     sleep 1
     cur=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)
     [ -z "$cur" ] && cur="balance"
-    peiz=$(cat "$MODROOT/files/peiz" 2>/dev/null)
-    [ -z "$peiz" ] && peiz="all"
-    /system/bin/sh "$MODROOT/script/main.sh" "$cur" "$MODROOT/files" "$peiz" >/dev/null 2>&1
+    if [ -f /data/powercfg.sh ]; then
+        /system/bin/sh /data/powercfg.sh "$cur" 1 >/dev/null 2>&1
+    else
+        peiz=$(cat "$MODROOT/files/peiz" 2>/dev/null)
+        [ -z "$peiz" ] && peiz="all"
+        /system/bin/sh "$MODROOT/script/main.sh" "$cur" "$MODROOT/files" "$peiz" >/dev/null 2>&1
+    fi
     log "调度守护已启动，已应用模式: $cur"
 }
 

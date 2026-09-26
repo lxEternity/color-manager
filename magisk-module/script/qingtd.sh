@@ -2,90 +2,35 @@
 
 BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
-shij="[$(date '+%T')]"
+shij="[$(date '%T')]"
 echo "$shij 动态切换模式启动成功" > $rizhidz
 cpudiz=/sys/devices/system/cpu/cpufreq/policy0
-echo "$shij 检测到刚开机自动fast模式。" >> $rizhidz
 
+# 恢复上次模式（service.sh 已把重启前的模式备份到 files/lastmode）。
+# 旧逻辑为"开机 while 循环每 10 秒强制 fast 直到 max!=min"，存在三个问题：
+#   1. 重启后模式总是被强制成极速（不管用户之前选的是什么）
+#   2. 循环期间用户手动切换，10 秒内又被拉回 fast（表现为"无法切换"）
+#   3. 循环内 cpus() 每 10 秒强制全核在线 + core_ctl 禁用（省电模式超大核永远活跃）
+# 现统一走 powercfg.sh 接口（kzlx=1 内部调用：仅应用，不动 moren、不停动态）
+lm=$(cat $BASEDIR/../files/lastmode 2>/dev/null)
+case "$lm" in
+    powersave|balance|performance|fast)
+        ms="$lm"
+        kzlx=1
+        . /data/powercfg.sh
+        echo "$shij 检测到刚开机，恢复上次模式: $lm" >> $rizhidz
+        ;;
+    *)
+        echo "$shij 无上次模式记录，跳过恢复（等待前台监视按 moren 切换）" >> $rizhidz
+        ;;
+esac
 
-
-
-
-cpus() {
-    for file in /sys/devices/system/cpu/cpu[0-9]/core_ctl/
-    do
-        for line in $file/enable
-        do
-            chmod 666 $line
-            echo "0" > $line
-            chmod 444 $line
-        done
-
-        sz=$(cat /sys/devices/system/cpu/cpu$(echo "$file" | grep -o '[0-9]')/topology/package_cpus_list)
-
-
-        # 判断sz是否包含"-"，以决定是计算范围内的整数个数还是单个数字
-        if [[ "$sz" == *-* ]]; then
-            num_count=$(echo $sz | awk -F'-' '{start=$1;end=$2} END{print end-start+1}')
-        else
-            # sz是一个单个数字
-            num_count=1
-        fi
-
-        for line in $file/not_preferred
-        do
-            chmod 666 $line
-            if [ "$num_count" -eq 1 ]; then
-                echo "0 " > $line
-            elif [ "$num_count" -eq 2 ]; then
-                echo "0 0 " > $line
-            elif [ "$num_count" -eq 3 ]; then
-                echo "0 0 0 " > $line
-            elif [ "$num_count" -eq 4 ]; then
-                echo "0 0 0 0 " > $line
-            else
-                echo "null"
-            fi
-            chmod 444 $line
-        done
-
-        for line in $file/max_cpus
-        do
-            chmod 666 $line
-            echo $num_count > $line
-            chmod 444 $line
-        done
-
-        for line in $file/min_cpus
-        do
-            chmod 666 $line
-            echo $num_count > $line
-            chmod 444 $line
-        done
-    done
-}
-
-
-while true; do
-    #开机优化
-    wj_zr "0" "/sys/module/migt/parameters/*cluster"
-	wj_zr "0" "/sys/module/perfmgr/parameters/perfmgr_enable"
-	wj_zr "1" "/sys/module/migt/parameters/glk_disable"
-	wj_zr "0" "/sys/module/migt/parameters/boost_policy"
-    cpus
-    wj_zr "0" "/sys/module/cpufreq_bouncing/parameters/enable"
-
-    ms="fast"
-    kzlx=1
-    . /data/powercfg.sh
-    sleep 10
-    if [[ $(cat $cpudiz/scaling_max_freq) != $(cat $cpudiz/scaling_min_freq) ]]; then
-        shij="[$(date '+%T')]"
-        echo "$shij 检测到最大'值和最小值不相等，退出fast" >> $rizhidz
-        break
-    fi
-done
-
+# 开机全局优化参数（与模式无关，执行一次即可）
+wj_zr "0" "/sys/module/migt/parameters/*cluster"
+wj_zr "0" "/sys/module/perfmgr/parameters/perfmgr_enable"
+wj_zr "1" "/sys/module/migt/parameters/glk_disable"
+wj_zr "0" "/sys/module/migt/parameters/boost_policy"
+wj_zr "0" "/sys/module/cpufreq_bouncing/parameters/enable"
 
 
 directories=(

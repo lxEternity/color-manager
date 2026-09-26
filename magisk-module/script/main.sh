@@ -1,6 +1,8 @@
+#!/system/bin/sh
 
 BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
+. $BASEDIR/fangan.sh
 
 action=$1
 mosdz=$2
@@ -18,77 +20,92 @@ if [ "$(cat $mosdz/qhz 2>/dev/null)" != "1" ]; then
 	fi
 fi
 
+# core_ctl 按模式控制（超大核"一直活跃"的根因修复）：
+# 非省电：enable=0 + min/max_cpus=全核 —— 强制全核在线（原 qingtd.sh cpus() 行为）
+# 省电  ：enable=1 + min_cpus=1        —— 交还系统热插拔，空闲核心（含超大核）自动下线休闲
+corectl_off(){
+    for d in /sys/devices/system/cpu/cpu*/core_ctl; do
+        [ -d "$d" ] || continue
+        n=$(basename "${d%/core_ctl}"); n=${n#cpu}
+        sz=$(cat /sys/devices/system/cpu/cpu$n/topology/package_cpus_list 2>/dev/null)
+        case "$sz" in
+            *-*) num=$(echo "$sz" | awk -F'-' '{print $2-$1+1}');;
+            "")  num=1;;
+            *)   num=1;;
+        esac
+        chmod 666 "$d/enable" 2>/dev/null;      echo 0 > "$d/enable" 2>/dev/null;      chmod 444 "$d/enable" 2>/dev/null
+        chmod 666 "$d/min_cpus" 2>/dev/null;    echo "$num" > "$d/min_cpus" 2>/dev/null;    chmod 444 "$d/min_cpus" 2>/dev/null
+        chmod 666 "$d/max_cpus" 2>/dev/null;    echo "$num" > "$d/max_cpus" 2>/dev/null;    chmod 444 "$d/max_cpus" 2>/dev/null
+        chmod 666 "$d/not_preferred" 2>/dev/null
+        i=0; np=""
+        while [ $i -lt "$num" ]; do np="$np 0"; i=$((i+1)); done
+        echo "$np" > "$d/not_preferred" 2>/dev/null
+        chmod 444 "$d/not_preferred" 2>/dev/null
+    done
+}
+corectl_on(){
+    for d in /sys/devices/system/cpu/cpu*/core_ctl; do
+        [ -d "$d" ] || continue
+        chmod 666 "$d/enable" 2>/dev/null;      echo 1 > "$d/enable" 2>/dev/null;      chmod 444 "$d/enable" 2>/dev/null
+        chmod 666 "$d/min_cpus" 2>/dev/null;    echo 1 > "$d/min_cpus" 2>/dev/null;    chmod 444 "$d/min_cpus" 2>/dev/null
+        chmod 666 "$d/max_cpus" 2>/dev/null
+        sz=$(cat /sys/devices/system/cpu/$(basename "${d%/core_ctl}")/topology/package_cpus_list 2>/dev/null)
+        case "$sz" in
+            *-*) echo "$sz" | awk -F'-' '{print $2-$1+1}' > "$d/max_cpus";;
+            *)   echo 1 > "$d/max_cpus";;
+        esac
+        chmod 444 "$d/max_cpus" 2>/dev/null
+        chmod 666 "$d/not_preferred" 2>/dev/null
+        echo "1" > "$d/not_preferred" 2>/dev/null
+        chmod 444 "$d/not_preferred" 2>/dev/null
+    done
+}
+
 if test $(cat $mosdz/qhz) -eq 1 ; then
 	#无堵塞
 
 	#切换中
 	echo "0" > $mosdz/qhz
 
-
-
 	mokzdz="${mosdz%\/files}"
-	szwja=$mokzdz/config/a.$cpuxh.sh
-	szwjb=$mokzdz/config/b.$cpuxh.sh
-	szwjc=$mokzdz/config/c.$cpuxh.sh
 
+	# 方案选择统一走 fangan.sh（与 install.sh / WebUI 同一实现）：
+	# scx→A / hmbird→B / sugov_next→A(调速器改sugov_next) / 都没有→C
+	fangan_detect
 
-
-
-	pan=$(cat $pan1)
-
-
-
-
-	if cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors | grep -q "scx"; then
-		#首选walt调速器
-		echo "a方案walt可以使用"
-
-		if test ! -f $szwja ;then
-			#不存在可修改
-
-
-			#对b进行判断是否存在
-			if test ! -f $szwjb ;then
-				echo "没有配置文件"
-			else
-				. $mokzdz/script/b.main.sh
-				. $mokzdz/config/b.$cpuxh.sh
-				echo "用b方案schedutil调速器"
-			fi
-
-		else
-			#存在可修改
-			. $mokzdz/script/a.main.sh
-			. $mokzdz/config/a.$cpuxh.sh
-			echo "用a方案walt调速器"
-		fi
-
-
-	else
-		#无scx（无风驰内核，如骁龙8gen2/8+等）：优先walt调速器的C方案
-		if cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors | grep -q "walt"; then
-			if test ! -f $szwjc ;then
-				echo "c方案配置文件不存在"
-			else
-				. $mokzdz/script/c.main.sh
-				. $mokzdz/config/c.$cpuxh.sh
-				echo "用c方案walt调速器"
-			fi
-		elif cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors | grep -q "conservative"; then
-			echo "只有b方案schedutil可用"
-			. $mokzdz/script/b.main.sh
-			. $mokzdz/config/b.$cpuxh.sh
-		else
-			echo "无walt和schedutil调速器"
-		fi
+	szwj="$mokzdz/config/$FANGAN.$cpuxh.sh"
+	# 平台专属配置缺失时回退 all 配置（保留用户按平台自定义能力）
+	if [ ! -f "$szwj" ]; then
+		szwj="$mokzdz/config/$FANGAN.all.sh"
 	fi
 
+	if [ -f "$szwj" ]; then
+		case "$FANGAN" in
+			a) . $mokzdz/script/a.main.sh 2>/dev/null;;
+			b) . $mokzdz/script/b.main.sh 2>/dev/null;;
+			c) . $mokzdz/script/c.main.sh 2>/dev/null;;
+		esac
+		. "$szwj"
+	else
+		echo "方案 $FANGAN 的配置文件不存在（$cpuxh / all 均缺失）"
+	fi
 
+	# core_ctl 按模式（在配置应用后执行：省电交还热插拔，其他模式全核在线）
+	if [ "$action" = "powersave" ]; then
+		corectl_on
+	else
+		corectl_off
+	fi
 
+	# sugov_next 内核：把调速器统一设为 sugov_next（用户规则：检测到 sugov_next 启用 A 配置并把调速器改为 sugov_next）
+	if [ "$FANGAN_GOV" = "sugov_next" ]; then
+		for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+			chmod 777 "$g" 2>/dev/null
+			echo sugov_next > "$g" 2>/dev/null
+		done
+	fi
 
 	#切换结束
 	echo "1" > $mosdz/qhz
 
 fi
-
-

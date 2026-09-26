@@ -1,3 +1,35 @@
+v1.3.9.16（本仓库同步版，模块内版本号）
+1. 调度接口全面统一为 Scene 兼容接口（/data/powercfg.sh）：
+   - APP / WebUI / Scene / 动态监视(qtbh/qingtd) 全部走同一入口，改动天然同步，
+     不再有"WebUI 权限高覆盖 APP 配置"的抢夺问题
+   - manual = 手动（应用并设为默认模式 moren）；无参 = 外部接管（Scene，暂停动态切换）；
+     内部 kzlx=1 = 仅应用
+   - 修复内部 source 调用被 $1 覆盖为空的问题；外部带 "1" 参不再误停动态切换
+2. 双端保存改"重读合并"：保存前重读磁盘最新内容，仅覆盖用户真正改过的字段，
+   另一端刚保存的其余改动完整保留（调度页/调速器页/APP 三方案页同机制）
+3. 方案检测统一为 script/fangan.sh 唯一实现（install/main/WebUI 三处共用）：
+   scx→A / hmbird→B / sugov_next→A（调速器改 sugov_next）/ 三者都无→C（walt），
+   与 SOC 检测正交（SOC 决定配置后缀 peiz，方案决定前缀，互不冲突）
+4. 修复 APP 重启变极速且无法切换方案：
+   - 根因：qingtd.sh 开机 while 循环每 10 秒强制 fast，用户切换 10 秒内被拉回
+   - 改为 lastmode 持久化（service.sh 开机备份上次模式），开机恢复上次模式
+5. 修复省电模式超大核一直活跃：
+   - qingtd.sh 每 10 秒强制全核在线 + 禁用 core_ctl 的循环删除，
+     core_ctl 按模式在 main.sh 执行：省电交还系统热插拔（空闲核自动下线），
+     其他模式全核在线
+6. 修复 APP 单应用限频时灵时不灵：
+   - 前台包识别改众数选包（top-app 里任务数最多的包），过滤 systemui/gms 噪音——
+     旧 tail -1 恰好选中系统进程时限制打到错误包上
+   - 新增开机自启（BOOT_COMPLETED 拉起执行服务）——重启后限制不再失效
+   - 前台检测连续失败 3 秒按"已离开"恢复（防限制卡死）；写入前 chmod 777 对齐模块
+7. json_cpu_max_min 由 shell 脚本改为 C 静态二进制（bin/json_cpu_max_min，
+   A/B/C 保留同名入口包装，conf 调用不变）：逻辑与 shell 版 1:1 对齐（分簇/钳位/GPU），
+   64 项等价性测试全过；qemu-aarch64 冒烟验证通过
+8. WebUI 调速器下拉只显示本机可用调速器（读 scaling_available_governors 过滤）
+9. install.sh：方案检测按统一规则落地执行（sugov_next 顺手改调速器）并立即生成
+   /data/powercfg.sh（升级不重启也可用新接口）；service.sh 修复 $mosdz1 笔误
+10. 内嵌 APP 升级至 v1.71
+
 v1.3.9.15（本仓库同步版，模块内版本号）
 1. 修复省电模式超大核总是满载（让超大核真正休闲）：
    - conservative 调速器参数过激（93%即升频/86%才降频/2%大步长/12ms 采样，

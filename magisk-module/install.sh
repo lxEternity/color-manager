@@ -149,15 +149,36 @@ on_install() {
     fi
 
     echo "---------------------------"
-    if cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors | grep -q "scx"; then
-        echo "识别到scx调速器，启用默认配置刷入"
-    elif cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors | grep -q "walt"; then
-        echo "未检测到风驰(scx)调速器，启用C方案(walt)配置刷入"
-    elif cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors | grep -q "hmbird"; then
-        echo "识别到hmbird调速器，启用加强版配置模式刷入"
-    else
-        echo "进入使用说明提示！加载中.."
-    fi
+    # 方案检测统一走 script/fangan.sh（与 main.sh / WebUI 同一实现）
+    # 规则：scx→A / hmbird→B / sugov_next→A(调速器改sugov_next) / 都没有→C
+    # 与 SOC 检测（ro.board.platform→files/peiz 配置后缀）正交，两者同时生效互不冲突
+    FA_OUT=$(sh $MODPATH/script/fangan.sh 2>/dev/null)
+    FA=$(echo "$FA_OUT" | head -1 | awk '{print $1}')
+    FA_GOV=$(echo "$FA_OUT" | head -1 | awk '{print $2}')
+    echo "$FA" > "$MODPATH/files/fangan"
+    case "$FA" in
+        a)
+            if [ "$FA_GOV" = "sugov_next" ]; then
+                echo "识别到sugov_next调速器，启用A配置刷入，并把调速器改为sugov_next"
+                for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+                    chmod 777 "$g" 2>/dev/null
+                    echo sugov_next > "$g" 2>/dev/null
+                done
+            else
+                echo "识别到scx调速器，启用A配置刷入"
+            fi
+            ;;
+        b)
+            echo "识别到hmbird调速器，启用B加强版配置刷入"
+            ;;
+        c)
+            echo "未检测到scx/hmbird/sugov_next，启用C配置刷入"
+            ;;
+        *)
+            echo "方案检测失败（调速器节点不可读），默认启用C配置刷入"
+            echo "c" > "$MODPATH/files/fangan"
+            ;;
+    esac
 
     echo "加载成功！"
     echo "使用说明:"
@@ -307,6 +328,38 @@ EOF
         fi
     elif [ $app_sel -eq 2 ];then
         ui_print "已选择跳过Color调度管理器APP安装"
+    fi
+
+    # install 阶段即生成统一调度入口（升级模块不重启时，APP/WebUI/Scene 立即可用新接口；
+    # 开机 service.sh 会按同格式重新生成，幂等）
+    if [ -d /data ] && touch /data/.colorfc_wtest 2>/dev/null; then
+        rm -f /data/.colorfc_wtest
+        cat > /data/powercfg.sh <<'PCEOF'
+#!/system/bin/sh
+# ColorFC 统一调度入口（Scene 兼容）
+# 用法一（直接执行）: powercfg.sh <powersave|balance|performance|fast> [manual]
+#   无第二参 = 外部调用（Scene/终端）：暂停前台动态切换后应用（外部接管语义）
+#   manual  = APP/WebUI 手动：应用并同步为默认模式(moren)，动态切换继续
+# 用法二（内部 source）: 调用方先设置 ms=<模式> kzlx=1 再 . /data/powercfg.sh
+#   （qtbh/qingtd 动态监视；此时不覆盖调用方预设的 ms/kzlx，仅应用）
+MODULE_PATH="__MODPATH__"
+if [ "$kzlx" != "1" ]; then
+    ms="$1"
+    kzlx="${2:-0}"
+    if [ "$kzlx" = "manual" ]; then
+        for f in /sdcard/Android/qingtd/*.conf; do
+            [ -f "$f" ] || continue
+            grep -q '^moren=' "$f" && sed -i 's/^moren=.*/moren='"$ms"'/' "$f" || echo "moren=$ms" >> "$f"
+        done 2>/dev/null
+    elif [ "$kzlx" != "1" ]; then
+        touch /sdcard/Android/qingtd/stop 2>/dev/null
+    fi
+fi
+sh "$MODULE_PATH/script/main.sh" "$ms" "$MODULE_PATH/files" "$(cat "$MODULE_PATH/files/peiz" 2>/dev/null)"
+PCEOF
+        sed -i "s|__MODPATH__|$MODPATH|g" /data/powercfg.sh
+        chmod 777 /data/powercfg.sh 2>/dev/null
+        cp -af "$MODPATH/config/powercfg.json" /data/powercfg.json 2>/dev/null
     fi
 
     ui_print "配置已写入完毕

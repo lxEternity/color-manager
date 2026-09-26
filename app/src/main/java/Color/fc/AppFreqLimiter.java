@@ -31,6 +31,8 @@ public class AppFreqLimiter {
     private static long nextLoad = 0;
     /** 上次写入的目标频率（变更→强制全量写；未变→巡逻纠偏，只在漂移时写） */
     private static long lastMn = -1, lastMx = -1;
+    /** 前台检测连续失败计数（超阈值按“已离开受限应用”恢复，防限制卡死） */
+    private static int fgNull = 0;
     /** 进程内一次性标记：首个 tick 先清扫上次会话可能残留的限制（服务被杀时来不及恢复） */
     private static boolean swept = false;
 
@@ -51,7 +53,19 @@ public class AppFreqLimiter {
                 return;
             }
             String fg = fgPkg();
-            if (fg == null) return;
+            if (fg == null) {
+                // 检测连续失败：视为已离开受限应用，按缓存恢复。
+                // 否则限制会永久卡在系统上（表现为"切走了还在被限频/限频失效难恢复"）
+                if (applied != null && ++fgNull >= 3) {
+                    RootShell.exec(freqRestoreScript(), 10);
+                    applied = null;
+                    lastMn = -1;
+                    lastMx = -1;
+                    fgNull = 0;
+                }
+                return;
+            }
+            fgNull = 0;
             long[] v = limits.get(fg);
             boolean needFreq = v != null && (v[0] > 0 || v[1] > 0);
             // 频率限制：切走应用、或该应用的负载限制被关闭/清空 → 立即按缓存恢复（否则限制会卡在系统上降不下去）
@@ -123,8 +137,11 @@ public class AppFreqLimiter {
         }
     }
 
-    /** 前台包名（Kin 关键源码三级链，进程态优先——零 dumpsys）：
-     *  1) cpuset top-app 任务表直读 /proc/<pid>/cmdline（最省电；只取含包名特征的进程，剥离 :子进程后缀）
+    /** 前台包名（Kin 三级链，进程态优先——零 dumpsys）：
+     *  1) cpuset top-app 任务表直读 /proc/<pid>/cmdline（最省电；只取含包名特征的进程，剥离 :子进程后缀）。
+     *     选包用众数（top-app 里任务数最多的包=前台应用本体）而非"最后一个 TID"——
+     *     ColorOS 上 top-app 会混入 systemui/gms 等常驻进程，tail -1 恰好选中它们时
+     *     限制会被打到错误的包上（单应用限频"失效"的根因之一）；并列时取后出现者
      *  2) dumpsys window（mCurrentFocus/mFocusedApp）
      *  3) dumpsys activity ResumedActivity（部分 ROM 窗口焦点行缺失） */
     private static String fgPkg() {
@@ -132,7 +149,9 @@ public class AppFreqLimiter {
                 "p=$(for t in $(cat /dev/cpuset/top-app/tasks 2>/dev/null); do "
                         + "c=$(tr '\\0' ' ' < /proc/$t/cmdline 2>/dev/null | awk '{print $1}'); "
                         + "case \"$c\" in *.*) echo \"${c%%:*}\";; esac; "
-                        + "done | tail -1); "
+                        + "done | grep -vE '^(com\\.android\\.systemui|com\\.google\\.android\\.gms)$' "
+                        + "| awk '{n[$1]++; idx[$1]=NR} END{b=\"\";bn=-1;bi=-1; "
+                        + "for(k in n){if(n[k]>bn||(n[k]==bn&&idx[k]>bi)){bn=n[k];bi=idx[k];b=k}} print b}'); "
                         + "[ -n \"$p\" ] || { f=$(dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus|mFocusedApp');"
                         + "p=$(echo \"$f\" | grep -oE '[a-zA-Z][a-zA-Z0-9._]+/' | head -1); }; "
                         + "[ -n \"${p%/}\" ] || { f=$(dumpsys activity activities 2>/dev/null"
@@ -192,7 +211,7 @@ public class AppFreqLimiter {
                         + "if [ \"$RM\" = 1 ]; then "
                         + "w=$mn; [ -n \"$w\" ] && [ \"$w\" -gt 0 ] 2>/dev/null "
                         + "|| w=$(cat $d/cpuinfo_min_freq 2>/dev/null); "
-                        + "chmod 644 $d/scaling_min_freq 2>/dev/null; "
+                        + "chmod 777 $d/scaling_min_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_min_freq 2>/dev/null; "
                         + "fi; "
                         + "if [ \"$RX\" = 1 ]; then "
@@ -201,16 +220,16 @@ public class AppFreqLimiter {
                         + "cmn=$(cat $d/scaling_min_freq 2>/dev/null); "
                         + "[ -n \"$cmn\" ] && [ \"$w\" -lt \"$cmn\" ] 2>/dev/null "
                         + "&& echo \"$(cat $d/cpuinfo_min_freq 2>/dev/null)\" > $d/scaling_min_freq 2>/dev/null; "
-                        + "chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                        + "chmod 777 $d/scaling_max_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_max_freq 2>/dev/null; "
                         + "fi; "
                         + "done < '" + CACHE + "'; "
                         + "else "
                         + "for d in /sys/devices/system/cpu/cpufreq/policy*; do "
                         + "[ -d \"$d\" ] || continue; "
-                        + "[ \"$RM\" = 1 ] && { chmod 644 $d/scaling_min_freq 2>/dev/null; "
+                        + "[ \"$RM\" = 1 ] && { chmod 777 $d/scaling_min_freq 2>/dev/null; "
                         + "echo \"$(cat $d/cpuinfo_min_freq 2>/dev/null)\" > $d/scaling_min_freq 2>/dev/null; }; "
-                        + "[ \"$RX\" = 1 ] && { chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                        + "[ \"$RX\" = 1 ] && { chmod 777 $d/scaling_max_freq 2>/dev/null; "
                         + "echo \"$(cat $d/cpuinfo_max_freq 2>/dev/null)\" > $d/scaling_max_freq 2>/dev/null; }; "
                         + "done; "
                         + "fi; fi; "
@@ -229,7 +248,7 @@ public class AppFreqLimiter {
                         + "cmn=$(cat $d/scaling_min_freq 2>/dev/null); "
                         + "[ -n \"$cmn\" ] && [ \"$cmn\" -gt \"$w\" ] 2>/dev/null "
                         + "&& echo \"$(cat $d/cpuinfo_min_freq 2>/dev/null)\" > $d/scaling_min_freq 2>/dev/null; "
-                        + "chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                        + "chmod 777 $d/scaling_max_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_max_freq 2>/dev/null; "
                         // 校验：回读被压低（≤目标）视为成功，超过目标才算写失败
                         + "got=$(cat $d/scaling_max_freq 2>/dev/null); "
@@ -245,9 +264,9 @@ public class AppFreqLimiter {
                         + "if [ \"$F\" = 1 ] || [ -z \"$cur\" ] || [ \"$cur\" -lt \"$w\" ] 2>/dev/null; then "
                         + "cmx=$(cat $d/scaling_max_freq 2>/dev/null); "
                         + "[ -n \"$cmx\" ] && [ \"$w\" -gt \"$cmx\" ] 2>/dev/null "
-                        + "&& { chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                        + "&& { chmod 777 $d/scaling_max_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_max_freq 2>/dev/null; }; "
-                        + "chmod 644 $d/scaling_min_freq 2>/dev/null; "
+                        + "chmod 777 $d/scaling_min_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_min_freq 2>/dev/null; "
                         + "got=$(cat $d/scaling_min_freq 2>/dev/null); "
                         + "[ -z \"$got\" ] || [ \"$got\" -ge \"$w\" ] 2>/dev/null || "
@@ -288,7 +307,7 @@ public class AppFreqLimiter {
                         + "cmn=$(cat $d/scaling_min_freq 2>/dev/null); "
                         + "[ -n \"$cmn\" ] && [ \"$cmn\" -gt \"$w\" ] 2>/dev/null "
                         + "&& echo \"$(cat $d/cpuinfo_min_freq 2>/dev/null)\" > $d/scaling_min_freq 2>/dev/null; "
-                        + "chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                        + "chmod 777 $d/scaling_max_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_max_freq 2>/dev/null; "
                         // 校验：回读被压低（≤目标）视为成功，超过目标才算写失败
                         + "got=$(cat $d/scaling_max_freq 2>/dev/null); "
@@ -300,7 +319,7 @@ public class AppFreqLimiter {
                         + "c0=$(cat $d/related_cpus 2>/dev/null | awk '{print $1}'); "
                         + "w=$(awk -v c=\"/sys/devices/system/cpu/cpu$c0/cpufreq\" '$1==c{print $3}' '" + CACHE + "' 2>/dev/null); "
                         + "[ -n \"$w\" ] && [ \"$w\" -gt 0 ] 2>/dev/null || w=$imf; "
-                        + "chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                        + "chmod 777 $d/scaling_max_freq 2>/dev/null; "
                         + "echo \"$w\" > $d/scaling_max_freq 2>/dev/null; "
                         + "fi; "
                         + "done";
@@ -323,22 +342,22 @@ public class AppFreqLimiter {
                 + "imn=$(cat $d/cpuinfo_min_freq 2>/dev/null); "
                 + "cmn=$(cat $d/scaling_min_freq 2>/dev/null); "
                 + "[ -n \"$cmn\" ] && [ \"$mx\" -lt \"$cmn\" ] 2>/dev/null "
-                + "&& { chmod 644 $d/scaling_min_freq 2>/dev/null; "
+                + "&& { chmod 777 $d/scaling_min_freq 2>/dev/null; "
                 + "echo \"$imn\" > $d/scaling_min_freq 2>/dev/null; }; "
-                + "chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                + "chmod 777 $d/scaling_max_freq 2>/dev/null; "
                 + "echo \"$mx\" > $d/scaling_max_freq 2>/dev/null; "
                 + "got=$(cat $d/scaling_max_freq 2>/dev/null); "
                 + "if [ -n \"$got\" ] && [ \"$got\" != \"$mx\" ] 2>/dev/null; then "
-                + "chmod 644 $d/scaling_max_freq 2>/dev/null; "
+                + "chmod 777 $d/scaling_max_freq 2>/dev/null; "
                 + "echo \"$mx\" > $d/scaling_max_freq 2>/dev/null; "
                 + "got=$(cat $d/scaling_max_freq 2>/dev/null); fi; "
                 + "[ -z \"$got\" ] && fail=1; "
                 + "[ -n \"$got\" ] && [ \"$got\" != \"$mx\" ] && fail=1; "
-                + "chmod 644 $d/scaling_min_freq 2>/dev/null; "
+                + "chmod 777 $d/scaling_min_freq 2>/dev/null; "
                 + "echo \"$mn\" > $d/scaling_min_freq 2>/dev/null; "
                 + "got=$(cat $d/scaling_min_freq 2>/dev/null); "
                 + "if [ -n \"$got\" ] && [ \"$got\" != \"$mn\" ] 2>/dev/null; then "
-                + "chmod 644 $d/scaling_min_freq 2>/dev/null; "
+                + "chmod 777 $d/scaling_min_freq 2>/dev/null; "
                 + "echo \"$mn\" > $d/scaling_min_freq 2>/dev/null; "
                 + "got=$(cat $d/scaling_min_freq 2>/dev/null); fi; "
                 + "[ -z \"$got\" ] && fail=1; "

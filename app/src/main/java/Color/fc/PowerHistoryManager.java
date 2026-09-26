@@ -97,13 +97,17 @@ public class PowerHistoryManager {
         load(ctx);
         long now = System.currentTimeMillis();
         if (now - lastT < SAMPLE_MS) return;
-        lastT = now;
 
         char status;
         if ("Charging".equalsIgnoreCase(st.status)) status = 'C';
         else if ("Full".equalsIgnoreCase(st.status)) status = 'F';
         else if (st.status != null && !st.status.isEmpty()) status = 'D';
         else status = st.amps < 0 ? 'C' : 'D';
+
+        // 放电时功率≈0 是 sysfs 瞬断的假读数（真实放电至少几百毫瓦），记入会成为
+        // 假 0 锚点把曲线起点拉平；丢弃且不占用 1 分钟节流槽位（下一秒循环自动重试）
+        if (status == 'D' && Math.abs(st.watts) < 0.01) return;
+        lastT = now;
 
         Sample s = new Sample();
         s.t = now;
@@ -607,6 +611,14 @@ public class PowerHistoryManager {
             // 起点贴左缘、终点贴右缘（回退固定 3 小时窗口的改法）
             long t0 = ss.get(0).t;
             long span = Math.max(60_000L, ss.get(n - 1).t - t0);
+            // 断线阈值按数据自身节奏自适应（中位采样间隔×6，下限 3 分钟）：
+            // 采样随 APP 冻结而暂停（熄屏/后台），恢复后 4~5 分钟的空洞超过
+            // 固定 3 分钟阈值就会把曲线从中间断开；自适应后只有远超正常节奏的
+            // 真空洞才断线，节奏稀疏（间隔远大于 1 分钟）的数据也不会全断
+            long[] iv = new long[n - 1];
+            for (int k = 1; k < n; k++) iv[k - 1] = Math.max(0, ss.get(k).t - ss.get(k - 1).t);
+            java.util.Arrays.sort(iv);
+            long gapDraw = Math.max(GAP_DRAW, iv[(n - 1) / 2] * 6);
             Sample last = ss.get(n - 1);
             float yMid = (top + bottom) / 2f;   // 0 功率基准线
 
@@ -647,14 +659,14 @@ public class PowerHistoryManager {
             int i = 0;
             while (i < n) {
                 boolean ch = ss.get(i).status == 'C';
-                // 段尾：充放电状态切换 或 采样断流(>3min) 处断开
+                // 段尾：充放电状态切换 或 采样断流(>自适应阈值) 处断开
                 int j = i + 1;
                 while (j < n && (ss.get(j).status == 'C') == ch
-                        && ss.get(j).t - ss.get(j - 1).t <= GAP_DRAW) {
+                        && ss.get(j).t - ss.get(j - 1).t <= gapDraw) {
                     j++;
                 }
                 int col = ch ? cGreen : cAccent;
-                boolean gapBefore = i == 0 || ss.get(i).t - ss.get(i - 1).t > GAP_DRAW;
+                boolean gapBefore = i == 0 || ss.get(i).t - ss.get(i - 1).t > gapDraw;
                 if (j - i == 1 && gapBefore && i > 0) {
                     // 中段孤立采样点（两侧均断流）：只画圆点不画线，避免长斜线误连
                     pDot.setColor(col);
@@ -711,7 +723,7 @@ public class PowerHistoryManager {
                     if (!started) {
                         tp.moveTo(x, y);
                         started = true;
-                    } else if (s.t - prevT > GAP_DRAW) {
+                    } else if (s.t - prevT > gapDraw) {
                         tp.moveTo(x, y);   // 断流：抬笔重落，不画跨间隔斜线
                     } else {
                         tp.lineTo(x, y);

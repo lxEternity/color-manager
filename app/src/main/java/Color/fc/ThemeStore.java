@@ -331,6 +331,16 @@ public class ThemeStore {
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
                 decor.setSystemUiVisibility(vis);
             }
+            // 挖孔屏全屏：内容延伸到摄像头开孔区域（Android 15+ 强制 edge-to-edge 时
+            // 若不声明，横屏挖孔侧会留系统色黑边；SHORT_EDGES 竖屏状态栏区域同放行）。
+            // 关闭时恢复系统默认，避免非沉浸页面内容钻进挖孔区
+            if (api >= 27) {
+                WindowManager.LayoutParams lp = w.getAttributes();
+                lp.layoutInDisplayCutoutMode = on
+                        ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                        : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                w.setAttributes(lp);
+            }
             if (content.getTag(TAG_BASE_PADDING) == null) {
                 content.setTag(TAG_BASE_PADDING, new int[]{
                         content.getPaddingLeft(), content.getPaddingTop(),
@@ -365,6 +375,13 @@ public class ThemeStore {
                         & ~(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
                 decor.setSystemUiVisibility(vis);
+            }
+            // 恢复系统默认挖孔处理（内容避开挖孔区）
+            if (api >= 27) {
+                WindowManager.LayoutParams lp = w.getAttributes();
+                lp.layoutInDisplayCutoutMode =
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                w.setAttributes(lp);
             }
             content.setOnApplyWindowInsetsListener(null);
             int[] base = (int[]) content.getTag(TAG_BASE_PADDING);

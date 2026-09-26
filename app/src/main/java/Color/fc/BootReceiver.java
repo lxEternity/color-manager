@@ -14,7 +14,13 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
         if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            AppLimitService.ensure(ctx);
+            // 防御：Android 15+（targetSdk 35+）部分场景会拒绝从开机广播启动
+            // 前台服务（ForegroundServiceStartNotAllowedException）——
+            // 拉起失败只是限频延后（用户打开 APP 时会重新 ensure），绝不能让进程崩溃
+            try {
+                AppLimitService.ensure(ctx);
+            } catch (Throwable ignored) {
+            }
         }
     }
 }

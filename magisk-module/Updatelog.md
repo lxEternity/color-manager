@@ -1,3 +1,19 @@
+v1.3.9.17（本仓库同步版，模块内版本号）
+1. 修复 APP 无法全屏（升级 v1.3.9.16 后出现）：
+   - 根因：v1.3.9.16 的 APK 手动构建链漏注入 uses-sdk（旧版 targetSdk 34，
+     新版完全缺失）→ 系统按远古应用（targetSdk<4）兼容运行：
+     Android 15+ 强制 letterbox 黑边（无法全屏），且隐式多申请
+     WRITE_EXTERNAL_STORAGE / READ_PHONE_STATE 两个权限
+   - 修复：构建注入 minSdk 26 / targetSdk 37，恢复并升级目标版本
+2. 兼容性最高支持 Android 17（targetSdk 37）：
+   - Android 15+ 强制 edge-to-edge：现有沉浸式基础设施（setDecorFitsSystemWindows
+     + insets 监听双路径）天然兼容，内容正确避开状态栏/导航栏/输入法
+   - 挖孔屏全屏：沉浸模式声明 layoutInDisplayCutoutMode=SHORT_EDGES——
+     横屏时内容不再被摄像头开孔侧的系统黑边截断；关闭沉浸时恢复默认
+   - 开机自启前台服务加异常防御：系统拒绝启动时不再崩溃（限频延后到
+     用户打开 APP 时重新拉起）
+3. 内嵌 APP 升级至 v1.72
+
 v1.3.9.16（本仓库同步版，模块内版本号）
 1. 调度接口全面统一为 Scene 兼容接口（/data/powercfg.sh）：
    - APP / WebUI / Scene / 动态监视(qtbh/qingtd) 全部走同一入口，改动天然同步，

@@ -331,25 +331,8 @@ public class ThemeStore {
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
                 decor.setSystemUiVisibility(vis);
             }
-            // 沉浸真隐藏状态栏（修复：此前仅做透明，状态栏图标仍占据顶部，
-            // 背景图上缘被时间/电池图标压着，"沉浸"名不副实）。
-            // 隐藏后从屏幕顶部下滑可临时唤出（不挤压内容，自动再隐藏）。
-            if (api >= 30) {
-                try {
-                    android.view.WindowInsetsController ic = w.getInsetsController();
-                    if (ic != null) {
-                        ic.setSystemBarsBehavior(android.view.WindowInsetsController
-                                .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                        ic.hide(android.view.WindowInsets.Type.statusBars());
-                    }
-                } catch (Throwable ignored) {
-                }
-            } else {
-                // Android 8-10：FULLSCREEN 真隐藏 + IMMERSIVE_STICKY 滑动临时唤出
-                decor.setSystemUiVisibility(decor.getSystemUiVisibility()
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
-            }
+            // 沉浸布局定式（用户确认）：状态栏保持显示、UI 内容整体低于状态栏，
+            // 背景延伸到状态栏后面透出沉浸感；不再隐藏状态栏（hide 方案已废弃）
             // 挖孔屏全屏：内容延伸到摄像头开孔区域（Android 15+ 强制 edge-to-edge 时
             // 若不声明，横屏挖孔侧会留系统色黑边；SHORT_EDGES 竖屏状态栏区域同放行）。
             // 关闭时恢复系统默认，避免非沉浸页面内容钻进挖孔区
@@ -370,10 +353,14 @@ public class ThemeStore {
                 int l, t, r, b;
                 if (api >= 30) {
                     android.graphics.Insets sys = ins.getInsets(android.view.WindowInsets.Type.systemBars());
+                    android.graphics.Insets cut = ins.getInsets(android.view.WindowInsets.Type.displayCutout());
                     android.graphics.Insets ime = ins.getInsets(android.view.WindowInsets.Type.ime());
-                    l = sys.left;
-                    t = sys.top;
-                    r = sys.right;
+                    // 挖孔计入：状态栏显示时 statusBars 已含其高度；若系统把挖孔区
+                    // 单独报给 displayCutout（中央挖孔摄像头圆点），取两者较大值，
+                    // 确保标题等内容绝不被摄像头物理挡字
+                    l = Math.max(sys.left, cut.left);
+                    t = Math.max(sys.top, cut.top);
+                    r = Math.max(sys.right, cut.right);
                     b = Math.max(sys.bottom, ime.bottom);
                 } else {
                     // 旧系统：系统栏+键盘都包含在 SystemWindowInsets（adjustResize）
@@ -381,20 +368,23 @@ public class ThemeStore {
                     t = ins.getSystemWindowInsetTop();
                     r = ins.getSystemWindowInsetRight();
                     b = ins.getSystemWindowInsetBottom();
+                    // API 28-29：挖孔同样计入（getDisplayCutout 自 28 起提供）
+                    if (api >= 28) {
+                        android.view.DisplayCutout dc = ins.getDisplayCutout();
+                        if (dc != null) {
+                            l = Math.max(l, dc.getSafeInsetLeft());
+                            t = Math.max(t, dc.getSafeInsetTop());
+                            r = Math.max(r, dc.getSafeInsetRight());
+                        }
+                    }
                 }
-                // 内容避开状态栏/导航栏/输入法
+                // 内容避开状态栏/导航栏/输入法/挖孔
                 v.setPadding(base[0] + l, base[1] + t, base[2] + r, base[3] + b);
                 return ins;
             });
         } else {
             if (api >= 30) {
                 w.setDecorFitsSystemWindows(true);
-                // 恢复状态栏显示（关闭沉浸时不再隐藏）
-                try {
-                    android.view.WindowInsetsController ic = w.getInsetsController();
-                    if (ic != null) ic.show(android.view.WindowInsets.Type.statusBars());
-                } catch (Throwable ignored) {
-                }
             } else {
                 int vis = decor.getSystemUiVisibility()
                         & ~(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN

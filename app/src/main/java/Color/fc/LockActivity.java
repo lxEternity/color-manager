@@ -17,8 +17,13 @@ import android.widget.Toast;
  */
 public class LockActivity extends ThemedActivity {
 
-    /** 访问密码 */
-    static final String ACCESS_PASSWORD = "bjs5120";
+    /** 密码盐值：参与摘要计算。代码中不存在明文密码——即使脱壳 dump
+     *  内存也只能拿到摘要，无法逆推原密码 */
+    private static final String PWD_SALT = "18dbe989d96ff5eb";
+
+    /** 盐化摘要 SHA-256(PWD_SALT + 访问密码)，验证时对输入同样加盐求摘要比对 */
+    private static final String PWD_DIGEST =
+            "ce0c7af1fd7cc4fc99d08a73bcbc41115ca02a6a605fa74a06e8403d2244620d";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,7 +44,7 @@ public class LockActivity extends ThemedActivity {
 
         Runnable tryUnlock = () -> {
             String pwd = input.getText().toString();
-            if (ACCESS_PASSWORD.equals(pwd)) {
+            if (PWD_DIGEST.equals(sha256Hex(PWD_SALT + pwd))) {
                 sp.edit().putBoolean("unlocked", true).apply();
                 startActivity(new Intent(this, MainActivity.class));
                 finish();
@@ -63,5 +68,18 @@ public class LockActivity extends ThemedActivity {
         anim.setRepeatCount(4);
         anim.setRepeatMode(Animation.REVERSE);
         v.startAnimation(anim);
+    }
+
+    private static String sha256Hex(String s) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            StringBuilder hex = new StringBuilder();
+            for (byte b : md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (Throwable t) {
+            return "";
+        }
     }
 }

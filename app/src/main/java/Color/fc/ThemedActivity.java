@@ -40,14 +40,6 @@ public class ThemedActivity extends Activity {
         ThemeStore.applyBackground(this);
     }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        // 沉浸状态栏隐藏重申：切换动画/系统弹窗后部分系统会把状态栏 show 回来；
-        // 焦点回调发生在窗口 attach 之后，InsetsController 调用必达（幂等无副作用）
-        if (hasFocus) ThemeStore.assertImmersiveHidden(this);
-    }
-
     /**
      * 底部导航栏：与 WEBUI 一致的样式。
      * 绑定四个入口（主页/调度参数/调速器/应用策略），并高亮当前页面。

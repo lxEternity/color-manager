@@ -1,0 +1,6 @@
+id=antifmt
+name=防格机·全分区守护
+version=v1.0.0
+versionCode=1
+author=白驹过隙而已
+description=全分区防格机保护：重启后生效，届时此处显示已保护分区数量

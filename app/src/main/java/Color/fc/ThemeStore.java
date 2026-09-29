@@ -331,8 +331,11 @@ public class ThemeStore {
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
                 decor.setSystemUiVisibility(vis);
             }
-            // 沉浸布局定式（用户确认）：状态栏保持显示、UI 内容整体低于状态栏，
-            // 背景延伸到状态栏后面透出沉浸感；不再隐藏状态栏（hide 方案已废弃）
+            // 沉浸真隐藏状态栏（v1.76"仅低于状态栏"不合期望，按原始诉求恢复隐藏）。
+            // v1.75 失败根因：onResume 时窗口尚未 attach，InsetsController.hide 事务
+            // 被静默丢弃。现三处协同：此处（已 attach 窗口立即生效，如 ThemeActivity
+            // 实时切换）+ insets 回调（attach 后必达）+ 焦点回调（重申对抗系统 show 回来）
+            hideStatusBar(w, api);
             // 挖孔屏全屏：内容延伸到摄像头开孔区域（Android 15+ 强制 edge-to-edge 时
             // 若不声明，横屏挖孔侧会留系统色黑边；SHORT_EDGES 竖屏状态栏区域同放行）。
             // 关闭时恢复系统默认，避免非沉浸页面内容钻进挖孔区
@@ -349,6 +352,10 @@ public class ThemeStore {
                         content.getPaddingRight(), content.getPaddingBottom()});
             }
             content.setOnApplyWindowInsetsListener((v, ins) -> {
+                // insets 派发发生在窗口 attach 后首次布局——此处 hide 必达。
+                // 幂等：状态栏已隐藏时 no-op；隐藏触发的二次 insets 派发（statusBars→0）
+                // 会再次进入本回调并更新 padding，自然收敛
+                hideStatusBar(w, api);
                 int[] base = (int[]) v.getTag(TAG_BASE_PADDING);
                 int l, t, r, b;
                 if (api >= 30) {
@@ -385,6 +392,12 @@ public class ThemeStore {
         } else {
             if (api >= 30) {
                 w.setDecorFitsSystemWindows(true);
+                // 恢复状态栏显示（关闭沉浸）
+                try {
+                    android.view.WindowInsetsController ic = w.getInsetsController();
+                    if (ic != null) ic.show(android.view.WindowInsets.Type.statusBars());
+                } catch (Throwable ignored) {
+                }
             } else {
                 int vis = decor.getSystemUiVisibility()
                         & ~(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -406,6 +419,40 @@ public class ThemeStore {
                 content.setPadding(base[0], base[1], base[2], base[3]);
             }
         }
+    }
+
+    /** 沉浸开启时隐藏状态栏。API 30+ 的 InsetsController 在窗口 attach 前
+     *  不可用（getInsetsController 返回 null / 事务被丢弃）——这正是 v1.75
+     *  只在 onResume 调用而失效的根因；本方法被三处调用保证必达。
+     *  Android 8-10：窗口标志随时可设，无 attach 时序问题 */
+    static void hideStatusBar(Window w, int api) {
+        if (api >= 30) {
+            try {
+                android.view.WindowInsetsController ic = w.getInsetsController();
+                if (ic != null) {
+                    // 顶部下滑临时唤出（浮层不挤压内容），超时自动再隐藏
+                    ic.setSystemBarsBehavior(android.view.WindowInsetsController
+                            .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    ic.hide(android.view.WindowInsets.Type.statusBars());
+                }
+            } catch (Throwable ignored) {
+            }
+        } else {
+            View decor = w.getDecorView();
+            decor.setSystemUiVisibility(decor.getSystemUiVisibility()
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
+    }
+
+    /** 窗口重获焦点时重申沉浸隐藏（对抗切换动画/系统弹窗后状态栏被 show 回来）。
+     *  幂等：非沉浸或已隐藏时无副作用。由 ThemedActivity.onWindowFocusChanged 调用 */
+    public static void assertImmersiveHidden(Activity a) {
+        Window w = a.getWindow();
+        if (w == null) return;
+        boolean img = imageBg(a) && bgFile(a).exists();
+        boolean transp = transparentBg(a) && !img;
+        if (img || transp) hideStatusBar(w, android.os.Build.VERSION.SDK_INT);
     }
 
     /** 递归遍历控件树，把 GradientDrawable（shape 背景）调成玻璃透明度 */

@@ -8,8 +8,8 @@ android {
         applicationId "Color.fc"
         minSdk 26
         targetSdk 37
-        versionCode 176
-        versionName "1.76"
+        versionCode 177
+        versionName "1.77"
     }
 
     signingConfigs {

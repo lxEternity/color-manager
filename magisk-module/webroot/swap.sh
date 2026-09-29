@@ -9,7 +9,7 @@ mode=$1
 # 调度形态的专属文件
 DISPATCH_ITEMS="script A B C config qingtd files install.sh post-fs-data.sh uninstall.sh service.sh module.prop META-INF README.md Updatelog.md json_cpu_max_min.c Color调度管理器_1.3.8.apk"
 
-ADAPT_ITEMS="service.sh post-fs-data.sh action.sh powerd.sh powerd.conf proc_monitor.sh games.txt system updatelog.txt module.prop state pause status.json powerd.log"
+ADAPT_ITEMS="service.sh post-fs-data.sh action.sh powerd.sh powerd.conf games.txt system updatelog.txt module.prop state pause status.json powerd.log"
 
 log() { echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$DLOG" 2>/dev/null; }
 
@@ -84,17 +84,36 @@ move_out_adapt() {
 }
 
 move_in_adapt() {
-    
+
     src="$MODROOT/adapt"
     [ -f "$STORE/adapt/powerd.sh" ] && src="$STORE/adapt"
-    for f in service.sh post-fs-data.sh action.sh powerd.sh powerd.conf proc_monitor.sh games.txt system updatelog.txt; do
-        if [ -e "$src/$f" ]; then
+    # 版本感知：备份引擎版本 ≠ 内置版本（模块升级后首次切换）时，
+    # 引擎与 powerd.conf 取内置新版（否则老备份会永远压住新版引擎，
+    # 用户更新模块后切不进新版本），games.txt 仍取备份保留用户游戏清单
+    store_ver=$(grep -o '^version=.*' "$STORE/adapt/module.prop" 2>/dev/null | head -1)
+    bundled_ver=$(grep -o '^version=.*' "$MODROOT/adapt/module.prop" 2>/dev/null | head -1)
+    if [ "$src" = "$STORE/adapt" ] && [ -n "$store_ver" ] && [ "$store_ver" != "$bundled_ver" ]; then
+        log "备份引擎 $store_ver ≠ 内置 $bundled_ver：部署新版引擎，保留用户 games.txt"
+        for f in service.sh post-fs-data.sh action.sh powerd.sh powerd.conf system updatelog.txt; do
+            [ -e "$MODROOT/adapt/$f" ] || continue
             rm -rf "${MODROOT:?}/$f" 2>/dev/null
-            cp -af "$src/$f" "$MODROOT/" 2>/dev/null
-        fi
-    done
+            cp -af "$MODROOT/adapt/$f" "$MODROOT/" 2>/dev/null
+        done
+        for f in games.txt; do
+            [ -e "$STORE/adapt/$f" ] || continue
+            rm -rf "${MODROOT:?}/$f" 2>/dev/null
+            cp -af "$STORE/adapt/$f" "$MODROOT/" 2>/dev/null
+        done
+    else
+        for f in service.sh post-fs-data.sh action.sh powerd.sh powerd.conf games.txt system updatelog.txt; do
+            if [ -e "$src/$f" ]; then
+                rm -rf "${MODROOT:?}/$f" 2>/dev/null
+                cp -af "$src/$f" "$MODROOT/" 2>/dev/null
+            fi
+        done
+    fi
     cp -af "$MODROOT/adapt/module.prop" "$MODROOT/module.prop" 2>/dev/null
-    chmod 0755 "$MODROOT/powerd.sh" "$MODROOT/service.sh" "$MODROOT/proc_monitor.sh" "$MODROOT/post-fs-data.sh" "$MODROOT/action.sh" 2>/dev/null
+    chmod 0755 "$MODROOT/powerd.sh" "$MODROOT/service.sh" "$MODROOT/post-fs-data.sh" "$MODROOT/action.sh" 2>/dev/null
     chmod 0755 "$MODROOT/system/bin/chkfreq.sh" "$MODROOT/system/bin/cpu_gpu_probe.sh" 2>/dev/null
     log "自适应文件已全新释放到模块目录 (源: $src)"
 }

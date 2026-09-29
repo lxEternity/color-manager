@@ -314,10 +314,13 @@ nav button.on{color:var(--ac);font-weight:700}
   <div class="card" style="margin-top:10px">
     <div class="chart-header">
       <span class="chart-title">功耗记录曲线</span>
-      <div class="chart-legend">
-        <span class="legend-pill legend-pill--power">放电</span>
-        <span class="legend-pill legend-pill--chg">充电</span>
-        <span class="legend-pill legend-pill--temp">温度</span>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="chart-legend">
+          <span class="legend-pill legend-pill--power">放电</span>
+          <span class="legend-pill legend-pill--chg">充电</span>
+          <span class="legend-pill legend-pill--temp">温度</span>
+        </div>
+        <button class="mini-btn" id="btnClearLog" onclick="clearLog(this)">清除日志</button>
       </div>
     </div>
     <div class="chips" id="logRange" style="margin-bottom:8px">
@@ -1242,6 +1245,24 @@ window.addEventListener('resize', ()=>{ if(pwChart) pwChart.resize(); if(logChar
 
 /* ============ 功耗记录（历史曲线 + 电芯检测） ============ */
 let logChart = null, logRangeH = 24, logBusy = false;
+/* 清除日志：两次点击确认（WebUI 环境不依赖 confirm 弹窗），
+   首次点击按钮变"确认清除?"，3 秒内再点执行、超时自动复原 */
+let clearLogArmed = 0;
+async function clearLog(btn){
+  if(demoMode){ toast('演示模式：无可清除的记录'); return; }
+  if(Date.now() - clearLogArmed > 3000){
+    clearLogArmed = Date.now();
+    btn.textContent = '确认清除?';
+    setTimeout(()=>{ btn.textContent = '清除日志'; }, 3000);
+    return;
+  }
+  clearLogArmed = 0;
+  btn.textContent = '清除日志';
+  const r = await exec('rm -f /data/adb/colorFC_store/pwlog/*.csv');
+  if(r.errno){ toast('清除失败 (errno='+r.errno+')'); return; }
+  toast('功耗记录日志已清除');
+  loadLog();
+}
 function setLogRange(btn){
   [...$('logRange').children].forEach(c=>c.classList.remove('on'));
   btn.classList.add('on');

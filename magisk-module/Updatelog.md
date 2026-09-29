@@ -1,3 +1,22 @@
+v1.3.9.20（本仓库同步版，模块内版本号）
+APP 升级至 v1.75 + 模块更新：
+1. 修复 APP 全局沉浸不隐藏状态栏：
+   - 根因：此前沉浸仅做系统栏透明，状态栏图标仍占据屏幕顶部
+   - 沉浸开启（背景图/透壁纸）即真隐藏状态栏：Android 11+ 用
+     InsetsController.hide + 滑动临时唤出（TRANSIENT 不挤压内容），
+     Android 8-10 用 SYSTEM_UI_FLAG_FULLSCREEN + IMMERSIVE_STICKY；
+     关闭沉浸恢复显示，所有页面（ThemedActivity 统一路径）生效
+2. WebUI 功耗记录页新增"清除日志"按钮：
+   - 清空 /data/adb/colorFC_store/pwlog 全部功耗记录 CSV 并即时刷新曲线
+   - 两次点击确认（首次点按钮变"确认清除?"，3 秒内再点执行），不依赖弹窗
+3. 模块内置自适应限频升级 v1.0.8 → v1.1.0（上游 Ktwo）：
+   - 优化进程开销：移除独立 proc_monitor.sh 进程，游戏前台检测并入 powerd.sh 主循环
+   - 适配更多 MTK 设备（MT6933/MT6989/MT6991/MT6993），新增天玑9400+ 等频率表
+   - 限频配置优化：CPU_PCT_BIG 44→45、GPU_PCT 35→38、GPU_BOOST_CONTROL 0→1
+   - swap.sh 版本感知部署：老备份引擎（v1.0.8）不再压住新版引擎，
+     升级后首次切换即部署 v1.1.0，用户 games.txt 游戏清单保留
+   - ColorFC 定制保留：LOG_FILE 指向 colorFC 目录、service.sh 常驻功耗记录守护
+
 v1.3.9.19（本仓库同步版，模块内版本号）
 【仅 APP 更新，模块与 v1.3.9.18 相同】APP 升级至 v1.74：
 1. 新增首次启动主动申请 Root 授权：

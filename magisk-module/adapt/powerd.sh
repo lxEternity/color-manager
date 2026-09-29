@@ -25,8 +25,7 @@ STATE_FILE="$MODDIR/state"
 LOCK_DIR="$MODDIR/powerd.lock"
 GAME_LIST="$MODDIR/games.txt"
 GAME_LIST_HEAVY="$MODDIR/games_heavy.txt"
-RUN_DIR="$MODDIR/run"            # 事件缓存目录（proc_monitor 写 / 主循环读）
-GAME_PROC="$RUN_DIR/game_proc"   # 缓存只作线索，每次使用均复核进程
+RUN_DIR="$MODDIR/run"            # 状态快照与 GPU 恢复记录
 GPU_JOURNAL="$RUN_DIR/gpu.saved"
 STATUS_FILE="$RUN_DIR/status"
 PAUSE_FILE="$MODDIR/pause"
@@ -42,15 +41,15 @@ GPU_PCT="${GPU_PCT:-60}"
 
 INTERVAL="${INTERVAL:-5}"
 # ---- 游戏态变量（移植自 g750-boost）----
-GAME_PKG=""            # 当前游戏主包名
-GAME_PID=""            # 当前游戏主进程 pid
+APPLIED_GAME_PKG=""
+GAME_REENTER=0
+GAME_PKG=""            # 当前前台游戏包名
 GAME_TYPE=""           # heavy / normal（保留本模块原有的分级）
-GAME_PKGS=""           # games.txt 包名集合（一次读出，供 pidof 多参数快筛）
-GAME_CACHE_TICK=0      # 事件缓存 cmdline 抽检计数
+GAME_PKGS=""           # games.txt 包名集合，每次判定重新加载
 GAME_MISSING_SINCE=""
 GAME_LAST_SEEN=0       # 最后一次判定为游戏态的 $SECONDS
 NOW_SEC=0              # 本轮 $SECONDS（单调秒）
-# 游戏退出迟滞（秒）：进程态检测暂失后保持解锁的时长，超时才复位
+# 游戏退出迟滞（秒）：前台检测暂失后保持解锁的时长，超时才复位
 GAME_EXIT_GRACE_SEC="${GAME_EXIT_GRACE_SEC:-30}"
 
 CPU_CAPS=""
@@ -65,11 +64,16 @@ ORIG_GOVS=""
 ORIG_GOVS_READY=0
 
 trim_log() {
+  local size
   [ -f "$LOG_FILE" ] || return 0
   size=$(wc -c < "$LOG_FILE" 2>/dev/null)
   case "$size" in ''|*[!0-9]*) return 0 ;; esac
   [ "$size" -le "$LOG_MAX_BYTES" ] && return 0
-  tail -c "$((LOG_MAX_BYTES / 2))" "$LOG_FILE" > "$LOG_FILE.tmp.$$" 2>/dev/null && mv "$LOG_FILE.tmp.$$" "$LOG_FILE"
+  # Drop the potentially partial first line; stderr must follow the new inode.
+  if tail -c "$((LOG_MAX_BYTES / 2))" "$LOG_FILE" 2>/dev/null | \
+     LC_ALL=C awk 'NR > 1' > "$LOG_FILE.tmp.$$" && mv "$LOG_FILE.tmp.$$" "$LOG_FILE"; then
+    exec 2>>"$LOG_FILE"
+  fi
 }
 
 log() {
@@ -140,14 +144,23 @@ validate_hw_gpu_max() {
 }
 
 filter_hw_caps() {
-  local item pol freq filtered=""
+  local item pol freq actual filtered=""
   for item in $HW_CAPS; do
     pol=${item%:*}; freq=${item##*:}
     [ -e "$CPUFREQ/$pol/cpuinfo_max_freq" ] || {
       log "WARN: 配置 policy $pol 不存在，跳过"
       continue
     }
-    case "$freq" in ''|*[!0-9]*) continue ;; esac
+    case "$freq" in ''|0|*[!0-9]*) continue ;; esac
+    actual=$(cat "$CPUFREQ/$pol/cpuinfo_max_freq" 2>/dev/null)
+    case "$actual" in ''|0|*[!0-9]*)
+      log "WARN: $pol 硬件最高频不可用，跳过配置覆盖"
+      continue ;;
+    esac
+    if [ "$freq" -ne "$actual" ]; then
+      log "WARN: $pol 配置最高频=$freq 与实机=$actual 不符，改用实机值"
+      continue
+    fi
     filtered="$filtered $pol:$freq"
   done
   HW_CAPS="${filtered# }"
@@ -723,7 +736,7 @@ apply_normal() {
         case "$GPU" in
           */gpu_max_clock|*/max_clock_mhz|*/custom_boost_gpu_freq|*/custom_upbound_gpu_freq) cur_gpu=$(( cur_gpu * 1000000 )) ;;
         esac
-        [ "$cur_gpu" -ne "$GPU_NORMAL" ] && write_gpu "$GPU_NORMAL"
+        [ "$cur_gpu" -gt "$GPU_NORMAL" ] && write_gpu "$GPU_NORMAL"
       ;; esac
       if [ "${GPU_BOOST_CONTROL:-0}" = "1" ] && [ -n "$GPU_MIN" ] && [ -e "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ]; then
         local cur_gpumin gpumin_want
@@ -744,7 +757,13 @@ apply_normal() {
 }
 
 apply_game() {
-  [ "$(cat "$STATE_FILE" 2>/dev/null)" = "game" ] && return
+  if [ "$(cat "$STATE_FILE" 2>/dev/null)" = "game" ] &&
+     [ "$APPLIED_GAME_PKG" = "$GAME_PKG" ] && [ "$GAME_REENTER" = "0" ]; then
+    return 0
+  fi
+  APPLIED_GAME_PKG=$GAME_PKG
+  GAME_REENTER=0
+  log "  游戏前台进入: $GAME_PKG"
   log "→ 游戏 (${GAME_TYPE:-?}) 解锁到硬件最高频率 GPU_MAX=${GPU_MAX_HZ:-?}Hz GPU_MIN=${GPU_MIN_HZ:-?}Hz"
 
   unlock_cpu_game
@@ -778,43 +797,9 @@ apply_game() {
   fi
 }
 
-# ============ 游戏判定（移植自 g750-boost：进程态，替代 dumpsys 前台窗口）============
-# 为什么换掉 dumpsys 前台窗口：
-#   1) 小窗 / 分屏 / 悬浮球 / 输入法顶起时 mCurrentFocus 会变成别的包 → 游戏态被误判丢失
-#   2) 每次判定要起 dumpsys（timeout 2s）+ 多次 grep/sed，每轮 3+ 次 fork
-#   3) 进程态判定：游戏主进程存在即游戏态，与窗口层无关
-# 判定链（优先级从高到低）：
-#   a) 事件缓存 $GAME_PROC（proc_monitor 由 am_proc_start/died 写/删）—— 0 fork
-#   b) 兜底扫描 check_game_running（pidof 一次多参数快筛 + cmdline 精确校验）
-
-# 目标进程校验：cmdline 精确匹配主包名 + 排除僵尸态；命中则落事件缓存
-check_game_pid() {
-  _pkg=$1
-  _pid=$2
-  [ -n "$_pkg" ] && [ -n "$_pid" ] || return 1
-  [ -d "/proc/$_pid" ] || return 1
-
-  # /proc/<pid>/cmdline 第一字段以 NUL 结束；read -d '' 是内建（0 fork）
-  _cmd=""
-  IFS= read -r -d '' _cmd < "/proc/$_pid/cmdline" 2>/dev/null
-  [ "$_cmd" = "$_pkg" ] || return 1
-
-  # /proc/<pid>/stat：从最后一个 ") " 之后取第 3 字段（进程状态），排除 Z
-  _stat=""
-  read -r _stat < "/proc/$_pid/stat" 2>/dev/null
-  _stat=${_stat##*) }
-  case "${_stat%% *}" in
-    ''|Z|z) return 1 ;;
-  esac
-
-  if [ "$GAME_PID" != "$_pid" ] || [ "$GAME_PKG" != "$_pkg" ]; then
-    GAME_PID=$_pid
-    GAME_PKG=$_pkg
-    [ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR" 2>/dev/null
-    printf '%s %s\n' "$_pkg" "$_pid" > "$GAME_PROC" 2>/dev/null
-  fi
-  return 0
-}
+# ============ 游戏判定：前台窗口 + 退出宽限 ============
+# 每次判定执行一次 timeout 2 dumpsys window，由 awk 解析焦点。
+# 游戏进程留在后台不作为命中依据；窗口暂失由退出宽限处理。
 
 # games.txt -> GAME_PKGS（去注释 / 空行 / 重复）
 load_game_pkgs() {
@@ -840,31 +825,6 @@ game_type_of() {
   fi
 }
 
-# 兜底扫描：pidof 一次多参数快筛（1 次 fork），命中后再逐个 cmdline 精确校验
-check_game_running() {
-  [ -n "$GAME_PKGS" ] || return 1
-  _hits=$(pidof $GAME_PKGS 2>/dev/null)
-  [ -n "$_hits" ] || return 1
-  for _pid in $_hits; do
-    _c=""
-    IFS= read -r -d '' _c < "/proc/$_pid/cmdline" 2>/dev/null
-    [ -n "$_c" ] || continue
-    case " $GAME_PKGS " in
-      *" $_c "*) check_game_pid "$_c" "$_pid" && return 0 ;;
-    esac
-  done
-  return 1
-}
-
-# 启动时游戏已在跑（不会有 am_proc_start 事件）-> 直接落事件缓存
-discover_existing_games() {
-  if check_game_running; then
-    game_type_of "$GAME_PKG"
-    log "启动时检测到游戏已在运行: $GAME_PKG ($GAME_PID) type=${GAME_TYPE}"
-  fi
-  return 0
-}
-
 game_exit_due() {
   if [ -z "$GAME_MISSING_SINCE" ]; then
     GAME_MISSING_SINCE=$NOW_SEC
@@ -877,60 +837,61 @@ publish_status() {
   local tmp="$STATUS_FILE.tmp.$$"
   {
     printf 'state=%s\n' "$(cat "$STATE_FILE" 2>/dev/null || echo unknown)"
-    printf 'game_proc=%s\n' "$(cat "$GAME_PROC" 2>/dev/null || echo none)"
+    # Preserve legacy status keys without reporting stale process evidence.
+    printf 'game_proc=none\n'
     printf 'game_pkg=%s\n' "${GAME_PKG:-}"
-    printf 'game_pid=%s\n' "${GAME_PID:-}"
+    printf 'game_pid=\n'
     printf 'game_type=%s\n' "${GAME_TYPE:-}"
     printf 'last_seen=%s\n' "${GAME_LAST_SEEN:-}"
     printf 'gpu_result=%s\n' "${GPU_RESULT:-unknown}"
   } > "$tmp" 2>/dev/null && mv -f "$tmp" "$STATUS_FILE" 2>/dev/null
 }
 
+collect_foreground_apps() {
+  # One streaming parser; preserve first-focus and overlay precedence.
+  FOREGROUND_APPS=$({ timeout 2 dumpsys window 2>/dev/null || :; } | awk '
+    function package_of(line) {
+      if (!match(line, / u[0-9]+ [a-zA-Z0-9._]+\//)) return ""
+      line = substr(line, RSTART, RLENGTH)
+      sub(/^ u[0-9]+ /, "", line)
+      sub(/\/$/, "", line)
+      return line
+    }
+    /mCurrentFocus=/ && !have_focus { focus = package_of($0); have_focus = 1 }
+    /mFocusedApp=/ && !have_app { app = package_of($0); have_app = 1 }
+    /mTopFullscreenOpaqueWindowState=/ && !have_top { top = package_of($0); have_top = 1 }
+    END {
+      result = have_focus ? focus : app
+      if (result ~ /^(com\.omarea\.vtools|bin\.mt\.plus|bin\.mt\.plus\.canary)$/ && top != "") result = top
+      print result
+    }
+  ')
+}
+
 is_game() {
+  local app previous="$GAME_PKG"
   GAME_TYPE=""
-
-  # games.txt 改动立即生效（纯 shell 内建，0 fork）
-  load_game_pkgs
-
-  # a) 事件缓存优先（proc_monitor 写，0 fork）
-  if [ -f "$GAME_PROC" ]; then
-    _cpkg=""
-    _cpid=""
-    read -r _cpkg _cpid < "$GAME_PROC" 2>/dev/null
-    # 白名单复核：包被移出 games.txt 时缓存立即作废
-    _onlist=0
-    case " $GAME_PKGS " in
-      *" $_cpkg "*) _onlist=1 ;;
-    esac
-    if [ "$_onlist" = "1" ] && [ -n "$_cpid" ] && [ -d "/proc/$_cpid" ]; then
-      # 每 5 轮抽检一次 cmdline（防 pid 复用，仍 0 fork）
-      GAME_CACHE_TICK=$((GAME_CACHE_TICK + 1))
-      if [ $((GAME_CACHE_TICK % 5)) -eq 0 ]; then
-        _c=""
-        IFS= read -r -d '' _c < "/proc/$_cpid/cmdline" 2>/dev/null
-        [ "$_c" = "$_cpkg" ] || _cpid=""
-      fi
-    else
-      _cpid=""
-    fi
-    if [ -n "$_cpid" ]; then
-      GAME_PKG=$_cpkg
-      GAME_PID=$_cpid
-      GAME_MISSING_SINCE=""
-      game_type_of "$GAME_PKG"
-      return 0
-    fi
-    rm -f "$GAME_PROC" 2>/dev/null
-  fi
-
-  # b) 兜底扫描
-  if check_game_running; then
-    game_type_of "$GAME_PKG"
-    return 0
-  fi
-
   GAME_PKG=""
-  GAME_PID=""
+  load_game_pkgs
+  collect_foreground_apps
+  for app in $FOREGROUND_APPS; do
+    case " $GAME_PKGS " in
+      *" $app "*) GAME_PKG=$app ;;
+    esac
+    if [ -z "$GAME_PKG" ] && [ -f "$GAME_LIST_HEAVY" ] &&
+       grep -q -F -x -- "$app" "$GAME_LIST_HEAVY" 2>/dev/null; then
+      GAME_PKG=$app
+    fi
+    [ -n "$GAME_PKG" ] || continue
+    game_type_of "$GAME_PKG"
+    GAME_MISSING_SINCE=""
+    return 0
+  done
+  # Record the observation here, including the delayed governor recheck.
+  NOW_SEC=$SECONDS
+  [ -n "$GAME_MISSING_SINCE" ] || GAME_MISSING_SINCE=$NOW_SEC
+  [ -z "$previous" ] || log "  游戏离开前台: $previous，开始退出宽限"
+  GAME_REENTER=1
   return 1
 }
 
@@ -969,11 +930,10 @@ main() {
   # Recover interrupted GPU writes before taking the new baseline snapshot.
   restore_gpu_nodes || log "WARN: 启动时 GPU 快照恢复失败，继续但保留恢复日志"
 
-  # ---- 游戏判定初始化（进程态，移植自 g750-boost）----
+  # Foreground windows control mode; no process-event monitor is started.
   mkdir -p "$RUN_DIR" 2>/dev/null
   load_game_pkgs
-  log "游戏判定: 进程态(pidof+cmdline校验) 白名单=$(printf '%s' "$GAME_PKGS" | wc -w) 个包 迟滞=${GAME_EXIT_GRACE_SEC}s 事件源=$GAME_PROC"
-  discover_existing_games
+  log "游戏判定: 前台窗口 白名单=$(printf '%s' "$GAME_PKGS" | wc -w) 个包 迟滞=${GAME_EXIT_GRACE_SEC}s"
 
   snapshot_governors
   snapshot_limits
@@ -989,18 +949,23 @@ main() {
       GAME_LAST_SEEN=$NOW_SEC
       apply_game
       [ "$(cat "$STATE_FILE" 2>/dev/null)" = "game" ] && patrol_gpu_min
-      sleep $(( INTERVAL * 2 ))
+      publish_status
+      if [ -n "$GAME_MISSING_SINCE" ]; then
+        sleep "$INTERVAL"
+      else
+        sleep $(( INTERVAL * 2 ))
+      fi
     else
       if [ "$(cat "$STATE_FILE" 2>/dev/null)" = "game" ]; then
         # 精确迟滞:$SECONDS 单调秒,0 fork
         if ! game_exit_due; then
           elapsed=$(( NOW_SEC - GAME_MISSING_SINCE ))
-          log "  游戏进程态暂失，宽限 ${elapsed}/${GAME_EXIT_GRACE_SEC}s，保持解锁"
+          log "  游戏离开前台，宽限 ${elapsed}/${GAME_EXIT_GRACE_SEC}s，保持解锁"
           sleep "$INTERVAL"
           continue
         fi
         GAME_LAST_SEEN=0
-        log "  游戏已退出（首次检测丢失后 $((NOW_SEC - GAME_MISSING_SINCE))s），复位"
+        log "  游戏已离开前台（首次检测丢失后 $((NOW_SEC - GAME_MISSING_SINCE))s），复位"
         apply_normal
       else
         apply_normal
@@ -1008,7 +973,6 @@ main() {
       publish_status
       sleep "$INTERVAL"
     fi
-    publish_status
   done
 }
 
@@ -1036,7 +1000,7 @@ case "${1:-start}" in
       cat "$STATUS_FILE"
     else
       printf 'state=%s\n' "$(cat "$STATE_FILE" 2>/dev/null || echo unknown)"
-      printf 'game_proc=%s\n' "$(cat "$GAME_PROC" 2>/dev/null || echo none)"
+      printf 'game_proc=none\n'
       printf 'game_pkg=\n'
       printf 'game_pid=\n'
       printf 'game_type=\n'
@@ -1068,6 +1032,7 @@ case "${1:-start}" in
     ;;
   gpu-probe)
     echo "=== MTK / Mali GPU 节点探测 ==="
+    echo "=== boost / FPS controls are diagnostic only; units and semantics unverified ==="
     for p in \
       /sys/class/devfreq/13000000.mali/available_frequencies \
       /sys/class/devfreq/13000000.mali/max_freq \
@@ -1085,6 +1050,9 @@ case "${1:-start}" in
       /proc/gpufreqv2/gpu_working_opp_table \
       /proc/gpufreqv2/fix_target_opp_index \
       /proc/gpufreqv2/stack_opp_table \
+      /proc/gpufreqv2/fix_fps_cap \
+      /proc/gpufreqv2/gpu_boost \
+      /proc/gpufreq/gpufreq_boost \
       /proc/gpufreq/gpufreq_opp_freq \
       /proc/gpufreq/gpufreq_opp_dump \
       /sys/class/kgsl/kgsl-3d0/freq_table_mhz \

@@ -331,6 +331,25 @@ public class ThemeStore {
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
                 decor.setSystemUiVisibility(vis);
             }
+            // 沉浸真隐藏状态栏（修复：此前仅做透明，状态栏图标仍占据顶部，
+            // 背景图上缘被时间/电池图标压着，"沉浸"名不副实）。
+            // 隐藏后从屏幕顶部下滑可临时唤出（不挤压内容，自动再隐藏）。
+            if (api >= 30) {
+                try {
+                    android.view.WindowInsetsController ic = w.getInsetsController();
+                    if (ic != null) {
+                        ic.setSystemBarsBehavior(android.view.WindowInsetsController
+                                .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                        ic.hide(android.view.WindowInsets.Type.statusBars());
+                    }
+                } catch (Throwable ignored) {
+                }
+            } else {
+                // Android 8-10：FULLSCREEN 真隐藏 + IMMERSIVE_STICKY 滑动临时唤出
+                decor.setSystemUiVisibility(decor.getSystemUiVisibility()
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            }
             // 挖孔屏全屏：内容延伸到摄像头开孔区域（Android 15+ 强制 edge-to-edge 时
             // 若不声明，横屏挖孔侧会留系统色黑边；SHORT_EDGES 竖屏状态栏区域同放行）。
             // 关闭时恢复系统默认，避免非沉浸页面内容钻进挖孔区
@@ -370,10 +389,18 @@ public class ThemeStore {
         } else {
             if (api >= 30) {
                 w.setDecorFitsSystemWindows(true);
+                // 恢复状态栏显示（关闭沉浸时不再隐藏）
+                try {
+                    android.view.WindowInsetsController ic = w.getInsetsController();
+                    if (ic != null) ic.show(android.view.WindowInsets.Type.statusBars());
+                } catch (Throwable ignored) {
+                }
             } else {
                 int vis = decor.getSystemUiVisibility()
                         & ~(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
                 decor.setSystemUiVisibility(vis);
             }
             // 恢复系统默认挖孔处理（内容避开挖孔区）

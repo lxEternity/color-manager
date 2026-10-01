@@ -64,7 +64,7 @@ public class PowerHistoryManager {
     private static boolean loaded = false;
     private static long lastTrim = 0;
 
-    private static synchronized File file(Context ctx) {
+    public static synchronized File file(Context ctx) {
         return new File(ctx.getFilesDir(), "power_samples.csv");
     }
 

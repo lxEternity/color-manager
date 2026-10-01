@@ -8,3 +8,7 @@ __pycache__/
 captures/
 build-manual/
 *.idsig
+
+# Vue 工程
+webapp/node_modules/
+webapp/dist/

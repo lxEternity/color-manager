@@ -1,0 +1,178 @@
+/* ===== 设计令牌（浅色对齐 WebUI，深色对齐 APP 主题） ===== */
+:root{
+  --bg:#F5F7FC; --page-bg:#F5F7FC; --card:#FFFFFF; --stroke:#E4EBF4;
+  --card-bg:#FFFFFF; --nav-bg:rgba(255,255,255,.92);
+  --t1:#1B2540; --t2:#5D6B85; --t3:#9AA7BD;
+  --ac:#0096C8; --ac2:#A02CF0; --orange:#E08A00;
+  --mc0:#00B5A3; --mc1:#0096C8; --mc2:#E08A00; --mc3:#A02CF0;
+  --soft:#E5F7FD; --ok:#0FA968; --warn:#D94343;
+  --liquid:0;
+  --chart-power-line:#67d98a; --chart-temp-line:#ff8086;
+  --chart-grid:rgba(45,140,255,.055); --chart-text:#7f8896;
+}
+.dark{
+  --bg:#0D1220; --card:#161D2F; --stroke:#2A3550;
+  --soft:#1A2338; --t1:#E7ECF5; --t2:#9AA7BD; --t3:#5D6B85;
+  --chart-grid:rgba(140,170,255,.07); --chart-text:#7f8896;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{background:transparent}
+body{background:var(--page-bg);color:var(--t1);
+  font:14px/1.45 -apple-system,"HarmonyOS Sans SC","MiSans",Roboto,sans-serif;
+  padding-bottom:76px;min-height:100vh}
+.wrap{max-width:520px;margin:0 auto;padding:0 14px}
+
+/* 顶栏 */
+header{display:flex;align-items:center;gap:10px;padding:14px 0 10px}
+header h1{font-size:17px;font-weight:700}
+header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
+
+/* 卡片（玻璃透明度由 --card-bg 承载） */
+.card{background:var(--card-bg);border:1px solid var(--stroke);border-radius:16px;
+  padding:14px;margin-bottom:11px;box-shadow:0 1px 3px rgba(27,37,64,.04);position:relative}
+.liquid-glass{position:relative}
+.liquid-glass::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,0) 34%);
+  border-top:1px solid rgba(255,255,255,.55)}
+
+/* 数据网格 */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cell{background:var(--soft);border-radius:12px;padding:9px 6px;text-align:center}
+.cell i{font-style:normal;display:block;color:var(--t3);font-size:10px}
+.cell b{font-size:13px}
+.cell b em{font-style:normal;font-size:10px;color:var(--t2);font-weight:400}
+
+/* 图表 */
+.chart-header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.chart-title{font-weight:700;font-size:15px}
+.chart-legend{display:flex;gap:5px;flex-wrap:wrap}
+.legend-pill{border:1px solid var(--stroke);color:var(--t2);background:var(--card-bg);
+  border-radius:999px;align-items:center;gap:5px;padding:4px 9px;font-size:11px;font-weight:650;display:inline-flex}
+button.legend-pill{font:inherit;cursor:pointer}
+.chart-frame{position:relative;height:210px;border-radius:12px;overflow:hidden}
+.chart-frame canvas{width:100%!important;height:100%!important;touch-action:pan-y}
+
+/* chips */
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+.soc-row{color:var(--ac);font-size:12px;font-weight:600;margin:-4px 2px 11px}
+.root-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:700;cursor:pointer;flex:none}
+.root-badge.ok{background:rgba(16,185,129,.15);color:#10B981}
+.root-badge.no{background:rgba(239,68,68,.15);color:#EF4444}
+.root-badge.pending{background:rgba(232,163,61,.15);color:#E8A33D}
+.pw-toprow{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.pw-stat{background:var(--soft);border-radius:12px;padding:8px 10px}
+.pw-stat small{display:block;color:var(--t3);font-size:10px;margin-bottom:2px}
+.pw-stat b{font-size:15px;font-weight:800}
+.chip{border:1.5px solid var(--stroke);background:var(--card-bg);color:var(--t2);font-size:12px;font-weight:600;
+  padding:6px 13px;border-radius:20px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:.15s}
+.chip .dot{width:7px;height:7px;border-radius:50%}
+.chip.on{box-shadow:0 2px 8px rgba(27,37,64,.08)}
+.desc{color:var(--t3);font-size:12px;margin:-2px 2px 11px}
+.hint{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.5}
+
+/* 滑条 */
+.sl{display:flex;align-items:center;gap:10px;padding:7px 0}
+.sl label{width:98px;flex:none;font-size:12px;color:var(--t2)}
+.sl output{width:66px;flex:none;text-align:right;font-size:12px;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;
+  background:linear-gradient(90deg,var(--ac) var(--p,50%),#E0E8F2 var(--p,50%));outline:0}
+.dark input[type=range]{background:linear-gradient(90deg,var(--ac) var(--p,50%),#2A3550 var(--p,50%))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
+  background:#fff;border:2.5px solid var(--ac);box-shadow:0 1px 5px rgba(0,150,200,.4)}
+
+/* 按钮 */
+.btn{width:100%;border:0;background:linear-gradient(90deg,#00C3F0,#A02CF0);color:#fff;font-size:14px;font-weight:700;
+  padding:11px 0;border-radius:20px;cursor:pointer;margin-top:13px;
+  box-shadow:0 4px 16px rgba(0,180,224,.35);transition:.15s}
+.btn:active{transform:scale(.97);opacity:.9}
+.mini-btn{border:1.5px solid var(--ac);background:var(--card-bg);color:var(--ac);font-size:12px;
+  font-weight:700;padding:5px 12px;border-radius:20px;cursor:pointer}
+.mini-btn.ghost{border-color:var(--stroke);color:var(--t2)}
+
+/* 开关 */
+.switch{width:44px;height:25px;border-radius:14px;background:#D4DCE8;border:0;position:relative;cursor:pointer;transition:.2s;flex:none}
+.dark .switch{background:#2A3550}
+.switch::after{content:'';position:absolute;top:2.5px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25);transition:.2s}
+.switch.on{background:var(--ac)}
+.switch.on::after{left:21px}
+
+/* 行 */
+.row-between{display:flex;justify-content:space-between;align-items:center}
+.group{color:var(--t3);font-size:11px;margin:9px 0 1px;padding-left:2px}
+.entry{display:flex;align-items:center;gap:11px;cursor:pointer}
+.entry .bar{width:4px;height:30px;border-radius:3px}
+.entry .tx{flex:1}
+.entry .tx b{font-size:14px}
+.entry .tx i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:1px}
+.unavail{color:var(--t3);font-size:13px;text-align:center;padding:30px 10px;line-height:1.7}
+.unavail b{color:var(--t2)}
+
+/* 下拉选择 */
+.dd{position:relative}
+.dd-btn{display:flex;align-items:center;justify-content:center;gap:7px;background:var(--card-bg);
+  border:1.5px solid var(--ac);color:var(--ac);font-size:13px;font-weight:700;
+  padding:9px 18px;border-radius:20px;cursor:pointer}
+.dd-btn .arr{transition:.2s;font-size:11px}
+.dd.open .dd-btn .arr{transform:rotate(180deg)}
+.dd-list{position:absolute;top:calc(100% + 6px);right:0;min-width:170px;z-index:30;
+  background:var(--nav-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid rgba(0,184,224,.25);border-radius:14px;padding:5px;display:none;
+  box-shadow:0 10px 30px rgba(27,37,64,.16)}
+.dd.open .dd-list{display:block}
+.dd-list .it{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;
+  font-size:13px;color:var(--t1);border-radius:10px;cursor:pointer}
+.dd-list .it:active{background:var(--soft)}
+.dd-list .it.on{color:var(--ac);font-weight:700;background:var(--soft)}
+.dd-list .it.on::after{content:"✓";font-size:12px}
+
+/* 输入框 */
+.input{width:100%;border:1.5px solid var(--stroke);background:var(--card-bg);color:var(--t1);
+  border-radius:12px;padding:9px 12px;font:inherit;font-size:13px;outline:0}
+.input:focus{border-color:var(--ac)}
+
+/* toast */
+#cf-toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:var(--nav-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);color:var(--ac);
+  font-size:13px;font-weight:700;border:1px solid rgba(0,184,224,.3);padding:9px 22px;border-radius:22px;
+  pointer-events:none;box-shadow:0 8px 24px rgba(0,150,200,.22);transition:.25s;z-index:99;max-width:86vw;text-align:center}
+#cf-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+
+/* 弹窗 */
+.cf-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:90;display:flex;
+  align-items:center;justify-content:center;padding:28px}
+.cf-dialog{background:var(--nav-bg);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid var(--stroke);border-radius:22px;padding:20px;width:100%;max-width:340px;
+  box-shadow:0 16px 48px rgba(10,16,32,.3)}
+.cf-dialog-title{font-size:16px;font-weight:800;margin-bottom:8px}
+.cf-dialog-msg{color:var(--t2);font-size:13px;line-height:1.6;white-space:pre-wrap}
+.cf-dialog-btns{display:flex;gap:10px;margin-top:16px}
+.cf-dialog-btn{flex:1;border:0;border-radius:16px;padding:10px 0;font-size:14px;font-weight:700;cursor:pointer}
+.cf-dialog-btn.cancel{background:transparent;color:var(--t2);border:1px solid var(--stroke)}
+.cf-dialog-btn.ok{background:var(--ac);color:#fff}
+.cf-pick-list{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.cf-pick-item{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;
+  font-size:14px;color:var(--t1);border-bottom:1px solid var(--stroke);cursor:pointer}
+.cf-pick-item:last-child{border-bottom:0}
+.cf-pick-item .cf-pick-mark{color:var(--ac);font-weight:800}
+
+/* 底部导航 */
+.tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--nav-bg);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-top:1px solid var(--stroke);z-index:50}
+.tabbar .in{max-width:520px;margin:0 auto;display:flex}
+.tabbar button{flex:1;border:0;background:none;padding:8px 0 10px;display:flex;flex-direction:column;
+  align-items:center;gap:2px;color:var(--t3);font-size:11px;cursor:pointer}
+.tabbar button.on{color:var(--ac);font-weight:700}
+.tabbar button svg{width:21px;height:21px}
+
+/* 底部上拉面板 */
+.sheet-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:80;
+  display:flex;align-items:flex-end;animation:fadeIn .18s}
+.sheet{background:var(--nav-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-radius:24px 24px 0 0;width:100%;max-height:78vh;overflow-y:auto;
+  padding:8px 16px calc(18px + env(safe-area-inset-bottom));animation:slideUp .22s}
+.sheet-title{text-align:center;font-weight:800;font-size:15px;padding:10px 0 4px}
+.sheet-grab{width:38px;height:4px;border-radius:3px;background:var(--stroke);margin:4px auto 2px}
+@keyframes slideUp{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}

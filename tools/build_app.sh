@@ -41,8 +41,12 @@ echo "==> [2/8] aapt2 资源编译/链接 (versionCode=$VC versionName=$VN)"
 
 echo "==> [3/8] javac 业务代码"
 find "$APP/java" "$OUT/gen" -name "*.java" > "$OUT/sources.txt"
-"$JAVAC" -source 8 -target 8 -nowarn -bootclasspath "$BOOTCP" \
-  -d "$OUT/classes" @"$OUT/sources.txt" 2>&1 | grep -v "^注" || true
+# 编译错误必须终止构建（此前 || true 会吞掉错误产出残废 dex）
+if ! "$JAVAC" -source 8 -target 8 -nowarn -bootclasspath "$BOOTCP" \
+  -d "$OUT/classes" @"$OUT/sources.txt" 2> "$OUT/javac.log"; then
+  cat "$OUT/javac.log"; echo "javac 失败"; exit 1
+fi
+grep -v "^Note" "$OUT/javac.log" || true
 
 echo "==> [4/8] R8 混淆 → 业务 dex"
 cat > "$OUT/rules.pro" <<'EOF'
@@ -76,12 +80,22 @@ java -cp "$OUT/pack-classes" Color.fc.stub.PackTool unseal \
   "$OUT/assets/cfc.dat" "$OUT/dex/verify.dex"
 cmp -s "$OUT/dex/classes.dex" "$OUT/dex/verify.dex" || { echo "加壳 roundtrip 校验失败"; exit 1; }
 echo "    roundtrip 校验通过"
+# 组件完整性校验：manifest 引用的类必须全部在业务 dex 中（防 javac 静默丢类）
+# 注意不用 grep -q：提前退出会让 strings 收 SIGPIPE，配合 pipefail 误报失败
+DEX_STRS=$(strings "$OUT/dex/verify.dex")
+for CLS in MainActivity LockActivity MonitorService AppLimitService BootReceiver; do
+  echo "$DEX_STRS" | grep "LColor/fc/$CLS;" > /dev/null \
+    || { echo "组件缺失: $CLS 未编入业务 dex"; exit 1; }
+done
+echo "    组件完整性校验通过"
 
 echo "==> [6/8] 壳 dex（StubApp 明面）"
 mkdir -p "$OUT/stub-dex"
 find "$APP/stub/java" -name "*.java" > "$OUT/stub-sources.txt"
-"$JAVAC" -source 8 -target 8 -nowarn -bootclasspath "$BOOTCP" \
-  -d "$OUT/stub-classes" @"$OUT/stub-sources.txt" 2>&1 | grep -v "^注" || true
+if ! "$JAVAC" -source 8 -target 8 -nowarn -bootclasspath "$BOOTCP" \
+  -d "$OUT/stub-classes" @"$OUT/stub-sources.txt" 2> "$OUT/javac-stub.log"; then
+  cat "$OUT/javac-stub.log"; echo "壳 javac 失败"; exit 1
+fi
 "$BT/d8" --release --lib "$PLATFORM" --min-api 26 \
   --output "$OUT/stub-dex" $(find "$OUT/stub-classes" -name "*.class")
 

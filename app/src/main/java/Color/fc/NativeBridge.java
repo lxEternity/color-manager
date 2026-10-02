@@ -17,9 +17,11 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,6 +58,14 @@ public class NativeBridge {
 
     private static final int REQ_PICK = 0x6CB3;
 
+    /** 功耗记录采样间隔 */
+    private static final long SAMPLE_INTERVAL_MS = 2_000;
+    /** powerCsv 传输行数上限（超出按等距抽稀，防大 CSV 撑爆旧 WebView） */
+    private static final int CSV_MAX_ROWS = 12_000;
+
+    private volatile boolean running = true;
+    private Thread sampler;
+
     public NativeBridge(Activity host, android.webkit.WebView webView) {
         this.host = host;
         this.webView = webView;
@@ -65,6 +75,42 @@ public class NativeBridge {
             rootChecked = true;
             emitEvent(rootEvent());
         });
+        startSampler();
+    }
+
+    /**
+     * 功耗历史采样循环（独立守护线程，2s 一拍）：
+     * 读电池 → 按当前电芯模式修正 → 写入 PowerHistoryManager（内部 2s 节流）。
+     * 不占用桥的单线程队列，页面 JS 调用永不被采样阻塞。
+     */
+    private void startSampler() {
+        sampler = new Thread(() -> {
+            while (running) {
+                try {
+                    PowerMonitor.BatteryStat st = PowerMonitor.readOnce();
+                    if (st != null) {
+                        int cellMode = host.getSharedPreferences("colorfc", Context.MODE_PRIVATE)
+                                .getInt("cellMode", 0);
+                        st.watts = PowerMonitor.applyCellMode(st, cellMode);
+                        PowerHistoryManager.record(host, st);
+                    }
+                } catch (Throwable ignored) {
+                }
+                try {
+                    Thread.sleep(SAMPLE_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "cf-power-sampler");
+        sampler.setDaemon(true);
+        sampler.start();
+    }
+
+    /** 宿主销毁时停止采样 */
+    public void shutdown() {
+        running = false;
+        if (sampler != null) sampler.interrupt();
     }
 
     // ==================== JS 入口 ====================
@@ -187,7 +233,7 @@ public class NativeBridge {
             case "powerCsv": {
                 File f = PowerHistoryManager.file(host);
                 if (f == null || !f.exists()) return "";
-                return readLocalFile(f);
+                return readLocalFileThinned(f, CSV_MAX_ROWS);
             }
             case "clearPowerCsv":
                 PowerHistoryManager.clear(host);
@@ -501,6 +547,42 @@ public class NativeBridge {
             while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
             in.close();
             return bo.toString("UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 读 CSV 并按行数等距抽稀（保留首尾行）：
+     * 2s 采样下全量可达 26 万行（约 7MB），旧 WebView 传输大字符串易卡顿；
+     * 抽到 ≤maxRows 后最粗粒度约 26万/1.2万≈22 秒/点，远小于会话断流阈值（15 分钟），
+     * 会话分段/统计/曲线语义不受影响（曲线端本来就有 600 桶降采样）。
+     */
+    private static String readLocalFileThinned(File f, int maxRows) {
+        try {
+            BufferedReader r = new BufferedReader(new FileReader(f));
+            StringBuilder sb = new StringBuilder();
+            // 第一遍数行数
+            int total = 0;
+            while (r.readLine() != null) total++;
+            r.close();
+            int step = total > maxRows ? (int) Math.ceil(total / (double) maxRows) : 1;
+            if (step == 1) return readLocalFile(f);
+            r = new BufferedReader(new FileReader(f));
+            String line;
+            String lastLine = null;
+            int i = 0;
+            while ((line = r.readLine()) != null) {
+                lastLine = line;
+                if (i % step == 0) sb.append(line).append('\n');
+                i++;
+            }
+            r.close();
+            // 尾行兜底：保证最新采样一定带过去（末行未落在步进点上时补写）
+            if (total > 0 && (total - 1) % step != 0 && lastLine != null) {
+                sb.append(lastLine).append('\n');
+            }
+            return sb.toString();
         } catch (Exception e) {
             return "";
         }

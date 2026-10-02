@@ -81,6 +81,7 @@ public class MainActivity extends ThemedActivity {
 
     @Override
     protected void onDestroy() {
+        if (bridge != null) bridge.shutdown();
         if (webView != null) {
             webView.loadUrl("about:blank");
             ((ViewGroup) webView.getParent()).removeView(webView);

@@ -50,10 +50,10 @@ public class PowerHistoryManager {
         public int samples;
     }
 
-    /** 采样间隔 */
-    private static final long SAMPLE_MS = 60_000;
-    /** 保留上限（约 10 天），超出裁剪一半 */
-    private static final int KEEP_SAMPLES = 15000;
+    /** 采样间隔（2 秒一条） */
+    private static final long SAMPLE_MS = 2_000;
+    /** 保留上限：2s 采样下保底 3 天（裁半后 13 万条）、上限约 6 天（26 万条） */
+    private static final int KEEP_SAMPLES = 260_000;
     /** 会话断流阈值：超过 15 分钟无采样则视为新会话 */
     private static final long GAP_MS = 15 * 60_000;
     /** 曲线断流绘制阈值：相邻采样间隔超过 3 分钟断开，不画误连斜线 */

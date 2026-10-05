@@ -7,6 +7,33 @@
 </head>
 <body>
 <div id="app"></div>
+<script>
+/* ResizeObserver polyfill（Chrome <64 无此 API）
+   Chart.js 响应式图表无条件 new ResizeObserver——Android 8.0 WebView（Chrome 58）
+   上抛 ReferenceError，Vue 挂载中断导致整个应用黑屏。
+   轻量实现：observe 异步首帧回调一次 + 窗口 resize 时回调（图表随窗口变化即可满足）。 */
+if (!window.ResizeObserver) {
+  window.ResizeObserver = function (cb) {
+    var els = []
+    var ro = this
+    function fire() {
+      for (var i = 0; i < els.length; i++) {
+        try { cb([{ target: els[i], contentRect: els[i].getBoundingClientRect() }], ro) } catch (e) {}
+      }
+    }
+    this.observe = function (el) {
+      if (els.indexOf(el) < 0) els.push(el)
+      setTimeout(fire, 0)
+    }
+    this.unobserve = function (el) {
+      var i = els.indexOf(el)
+      if (i >= 0) els.splice(i, 1)
+    }
+    this.disconnect = function () { els.length = 0 }
+    window.addEventListener('resize', fire)
+  }
+}
+</script>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

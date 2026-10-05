@@ -346,7 +346,9 @@ function renderChart() {
   chgFlags = chgs
 
   if (!chart) {
-    chart = new Chart(c, {
+    // 防御：图表初始化失败不应拖垮整个应用
+    try {
+      chart = new Chart(c, {
       type: 'line',
       data: {
         labels,
@@ -402,11 +404,13 @@ function renderChart() {
         }
       }
     })
+    } catch (e) { chart = null }
   } else {
     chart.data.labels = labels
     chart.data.datasets[0].data = power
     chart.data.datasets[1].data = temp
   }
+  if (!chart) return
 
   // 配色实时取自 CSS 变量（日/夜切换后跟随）
   chart.data.datasets[0].borderColor = cssVar('--chart-power-line', '#67d98a')

@@ -186,7 +186,9 @@ function cssVar(name) {
 
 function initRtChart() {
   if (!rtCanvas.value || rtChart) return
-  rtChart = new Chart(rtCanvas.value, {
+  // 防御：图表初始化失败（老 WebView 兼容问题等）不应拖垮整个应用
+  try {
+    rtChart = new Chart(rtCanvas.value, {
     type: 'line',
     data: {
       labels: [],
@@ -221,7 +223,8 @@ function initRtChart() {
         y1: { position: 'right', grid: { display: false }, ticks: { color: cssVar('--chart-text'), font: { size: 9 }, maxTicksLimit: 4, callback: v => v + '°' } }
       }
     }
-  })
+    })
+  } catch (e) { rtChart = null }
 }
 
 function pushRt(w, t, chg) {

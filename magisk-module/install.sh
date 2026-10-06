@@ -47,6 +47,7 @@ on_install() {
 
     unzip -o "$ZIPFILE" -x 'META-INF/*' -d $MODPATH >/dev/null
     set_perm_recursive "$MODPATH" 0 0 0755 0644
+    set_perm_recursive "$MODPATH/webroot" 0 0 0755 0755
 
     . $MODPATH/script/quanj.sh 2>/dev/null
 

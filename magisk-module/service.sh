@@ -36,6 +36,7 @@ chmod 777 $MODULE_PATH/C/*
 chmod 777 $MODULE_PATH/bin/* 2>/dev/null
 chmod 777 $MODULE_PATH/config/*
 chmod 777 $MODULE_PATH/*
+chmod 0755 $MODULE_PATH/webroot/*.sh 2>/dev/null
 
 sleep 1
 cat > /data/powercfg.sh <<'PCEOF'

@@ -8,13 +8,10 @@
     <script type="module" crossorigin src="./assets/index-CA8pALd_.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-MQYxA1L9.css">
     <style>
-      /* 状态行防换行：徽标/按钮/版本三元素适当缩小、紧凑间距、强制单行 */
       .status-row{flex-wrap:nowrap;white-space:nowrap;gap:8px;font-size:12px}
       .status-row .status-badge{font-size:12px;padding:5px 12px;flex:none}
       .status-row .version{font-size:12px;flex:none}
 
-      /* 切换回 Color 调度按钮：嵌入头部 .status-row（状态徽标与版本号之间），
-         样式对齐 .status-badge 胶囊并使用主题 CSS 变量，自动跟随明暗模式 */
       #cfSwapBtn{display:none;align-items:center;gap:6px;margin-left:auto;flex:none;
         padding:5px 12px;border-radius:30px;font-size:12px;font-weight:500;white-space:nowrap;
         background:var(--accent-soft);color:var(--accent);
@@ -22,7 +19,6 @@
         -webkit-tap-highlight-color:transparent;cursor:pointer;user-select:none;
         transition:transform .12s ease,background .2s ease,color .2s ease}
       #cfSwapBtn:active{transform:scale(.96)}
-      /* 二次确认态：同步应用的 warn 徽标配色 */
       #cfSwapBtn.confirm{background:var(--amber-soft);color:var(--amber-text);border-color:var(--amber-soft)}
       #cfSwapBtn.busy{opacity:.55;pointer-events:none}
     </style>
@@ -31,13 +27,6 @@
     <div id="root"></div>
     <button id="cfSwapBtn">⇄ Color调度</button>
     <script>
-    /* kernelsu.exec 标准实现（必须在 bundle 前执行）：
-       限频 bundle 的 exec 通道优先级是 kernelsu.exec（Promise）> ksu.exec（回调）。
-       部分 KSU 兼容壳自带的 kernelsu.exec 返回格式不符合标准（既非
-       {errno,stdout,stderr} 也非字符串），导致模块目录探测全部失败，
-       页面报「找不到模块目录」。这里用真机已验证的 ksu.exec 回调通道
-       实现标准的 kernelsu.exec 并覆盖之；同时剥离兼容壳给 stdout 包裹
-       的引号（Color WebUI 同款兼容处理）。 */
     (function(){
       if(typeof ksu === 'undefined' || typeof ksu.exec !== 'function') return;
       var seq = 0;
@@ -62,7 +51,6 @@
     })();
     </script>
     <script>
-    /* ColorFC 形态切换：点按两次确认 → swap.sh dispatch → 回 Color WebUI */
     (function(){
       var btn = document.getElementById('cfSwapBtn');
       var hasKsu = (typeof ksu !== 'undefined') && (typeof ksu.exec === 'function');
@@ -98,8 +86,6 @@
 
       function fail(msg){ btn.classList.remove('busy'); btn.classList.add('confirm'); btn.textContent = '失败:' + msg; setTimeout(reset, 2600); }
 
-      /* 嵌入位置：头部 .status-row 内，状态徽标（工作中·限频中）与版本号之间。
-         React 可能整棵重渲染，脱挂后自动回插；margin-left:auto 与版本号保持右侧间距 */
       function mountInHeader(){
         var ver = document.querySelector('.status-row .version');
         if(!ver || !ver.parentNode) return false;
@@ -110,13 +96,13 @@
       var mountTries = 0;
       var mountTimer = setInterval(function(){
         if(mountInHeader()){ clearInterval(mountTimer); return; }
-        if(++mountTries > 120){ clearInterval(mountTimer); }   // ~36s 后放弃轮询
+        if(++mountTries > 120){ clearInterval(mountTimer); }
       }, 300);
-      setInterval(function(){ if(!btn.isConnected) mountInHeader(); }, 1000);  // 重渲染脱挂回插
+      setInterval(function(){ if(!btn.isConnected) mountInHeader(); }, 1000);
 
       btn.addEventListener('click', function(){
         if(btn.classList.contains('busy')) return;
-        if(!hasKsu){ location.replace('../index.html'); return; }  // 预览环境直接跳转
+        if(!hasKsu){ location.replace('../index.html'); return; }
         if(!armed){
           armed = true; btn.classList.add('confirm'); btn.textContent = '确认切回Color？';
           clearTimeout(timer); timer = setTimeout(reset, 3200);

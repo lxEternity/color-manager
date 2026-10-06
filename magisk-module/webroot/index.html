@@ -11,7 +11,6 @@
   --ac:#0096C8; --ac2:#A02CF0; --orange:#E08A00;
   --mc0:#00B5A3; --mc2:#E08A00; --soft:#E5F7FD;
   --ok:#0FA968; --warn:#D94343;
-  /* 图表配色 */
   --chart-power-line:#67d98a; --chart-temp-line:#ff8086;
   --chart-grid:rgba(45,140,255,.055); --chart-text:#7f8896;
   --chart-tooltip-bg:rgba(20,31,56,.94); --chart-tooltip-text:#fff;
@@ -21,7 +20,6 @@
 body{background:var(--bg);color:var(--t1);font:14px/1.45 -apple-system,"HarmonyOS Sans SC","MiSans",Roboto,sans-serif;padding-bottom:64px}
 .wrap{max-width:520px;margin:0 auto;padding:0 14px}
 
-/* 顶栏 */
 header{display:flex;align-items:center;gap:10px;padding:14px 0 10px}
 header svg{width:38px;height:38px}
 header h1{font-size:17px;font-weight:700}
@@ -32,18 +30,15 @@ header small{display:block;color:var(--t3);font-size:11px;font-weight:400}
 .demo-badge{background:#FFF3E0;color:var(--orange);border:1px solid #FFD9A0;font-size:11px;
   padding:3px 9px;border-radius:20px;display:none}
 
-/* 卡片 */
 .card{background:var(--card);border:1px solid var(--stroke);border-radius:16px;padding:14px;margin-bottom:11px;
   box-shadow:0 1px 3px rgba(27,37,64,.04)}
 
-/* 数据网格 */
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .cell{background:var(--soft);border-radius:12px;padding:9px 6px;text-align:center}
 .cell i{font-style:normal;display:block;color:var(--t3);font-size:10px}
 .cell b{font-size:13px}
 .cell b em{font-style:normal;font-size:10px;color:var(--t2);font-weight:400}
 
-/* 功耗曲线图表 */
 .chart-header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .chart-title{font-weight:700;font-size:15px}
 .chart-legend{display:flex;gap:5px;flex-wrap:wrap}
@@ -66,7 +61,6 @@ button.legend-pill{font:inherit;cursor:pointer;-webkit-tap-highlight-color:trans
 .chart-frame{position:relative;height:210px;border-radius:12px;overflow:hidden}
 .chart-frame canvas{width:100%!important;height:100%!important;touch-action:pan-y}
 
-/* 形态切换（紧凑行） */
 .form-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
   background:var(--card);border:1px solid var(--stroke);border-radius:14px;padding:10px 12px}
 .fb-info b{font-size:15px}
@@ -79,7 +73,6 @@ button.legend-pill{font:inherit;cursor:pointer;-webkit-tap-highlight-color:trans
 .swap-log{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.6;display:none;
   background:var(--soft);border-radius:10px;padding:8px 10px;word-break:break-all}
 
-/* 模式 chips */
 .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
 .chip{border:1.5px solid var(--stroke);background:var(--card);color:var(--t2);font-size:12px;font-weight:600;
   padding:6px 13px;border-radius:20px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:.15s}
@@ -89,7 +82,6 @@ button.legend-pill{font:inherit;cursor:pointer;-webkit-tap-highlight-color:trans
 .soc-row{color:var(--ac);font-size:12px;font-weight:600;margin:-4px 2px 11px}
 .hint{color:var(--t3);font-size:11px;margin-top:8px;line-height:1.5}
 
-/* 滑条 */
 .sl{display:flex;align-items:center;gap:10px;padding:7px 0}
 .sl label{width:88px;flex:none;font-size:12px;color:var(--t2)}
 .sl output{width:66px;flex:none;text-align:right;font-size:12px;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
@@ -98,13 +90,11 @@ input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:3px;bord
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
   background:#fff;border:2.5px solid var(--ac);box-shadow:0 1px 5px rgba(0,150,200,.4)}
 
-/* 按钮 */
 .btn{width:100%;border:0;background:linear-gradient(90deg,#00C3F0,#A02CF0);color:#fff;font-size:14px;font-weight:700;
   padding:11px 0;border-radius:20px;cursor:pointer;margin-top:13px;
   box-shadow:0 4px 16px rgba(0,180,224,.35);transition:.15s}
 .btn:active{transform:scale(.97);opacity:.9}
 
-/* 入口 */
 .entry{display:flex;align-items:center;gap:11px;cursor:pointer}
 .entry .bar{width:4px;height:30px;border-radius:3px}
 .entry .tx{flex:1}
@@ -112,11 +102,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;heigh
 .entry .tx i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:1px}
 .entry svg{width:16px;height:16px;flex:none}
 
-/* 页面切换 */
 .page{display:none}
 .page.on{display:block}
 
-/* 调速器 */
 .gov-head{display:flex;align-items:center;justify-content:space-between}
 .gov-head .cur small{display:block;color:var(--t3);font-size:11px}
 .gov-head .cur b{font-size:19px;color:var(--ac)}
@@ -138,14 +126,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;heigh
 .dd-list .it.on::after{content:"✓";font-size:12px}
 .gv-note{color:var(--t3);font-size:12px;margin:12px 2px 0}
 
-/* toast */
 #toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%) translateY(20px);opacity:0;
   background:rgba(255,255,255,.92);backdrop-filter:blur(12px);color:var(--ac);font-size:13px;font-weight:700;
   border:1px solid rgba(0,184,224,.3);padding:9px 22px;border-radius:22px;pointer-events:none;
   box-shadow:0 8px 24px rgba(0,150,200,.22);transition:.25s;z-index:99;max-width:86vw;text-align:center}
 #toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 
-/* 底部导航 */
 nav{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);
   -webkit-backdrop-filter:blur(16px);border-top:1px solid var(--stroke);z-index:50}
 nav .in{max-width:520px;margin:0 auto;display:flex}
@@ -165,7 +151,6 @@ nav button.on{color:var(--ac);font-weight:700}
 <body>
 <div class="wrap">
 
-<!-- 顶栏 -->
 <header>
   <svg viewBox="0 0 108 108">
     <rect x="25" y="25" width="58" height="58" rx="12" fill="rgba(0,229,255,.04)" stroke="#00B8E0" stroke-width="3"/>
@@ -182,10 +167,8 @@ nav button.on{color:var(--ac);font-weight:700}
   <span class="demo-badge" id="demoBadge">演示模式</span>
 </header>
 
-<!-- ===== 主页 ===== -->
 <section class="page on" id="pg-home">
 
-  <!-- 模块形态（紧凑行） -->
   <div class="form-bar" id="formBar">
     <div class="fb-info">
       <b id="formName">--</b>
@@ -195,7 +178,6 @@ nav button.on{color:var(--ac);font-weight:700}
   </div>
   <div class="swap-log" id="swapLog"></div>
 
-  <!-- 实时功耗曲线 -->
   <div class="card" id="pwCard">
     <div class="chart-header">
       <span class="chart-title">实时功耗曲线</span>
@@ -215,7 +197,6 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="chart-frame" id="trendFrame"><canvas id="pwChart"></canvas></div>
   </div>
 
-  <!-- 调度：模式快切 -->
   <div class="card" id="modeCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">模式快切</span>
@@ -225,7 +206,6 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="hint">前台监视（动态模式切换.conf）按应用自动切换；手动选择会立即应用并同步为默认模式（moren），重进不再被切回。</div>
   </div>
 
-  <!-- 自适应：状态 -->
   <div class="card" id="adaptCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">自适应限频状态</span>
@@ -242,7 +222,6 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="hint">常态按百分比锁定 CPU/GPU，检测到 games.txt 内游戏前台时自动放开。修改 powerd.conf 或 games.txt 立即生效（MT管理器 Action 按钮可打开配置）。</div>
   </div>
 
-  <!-- 入口（仅调度形态） -->
   <div id="homeEntries">
     <div class="card entry" onclick="go('modes')">
       <div class="bar" style="background:var(--ac)"></div>
@@ -257,7 +236,6 @@ nav button.on{color:var(--ac);font-weight:700}
   </div>
 </section>
 
-<!-- ===== 调度参数 ===== -->
 <section class="page" id="pg-modes">
   <div id="modesUnavail" class="unavail" style="display:none"><b>自适应限频形态下不可用</b><br>请先在主页切回 Color 调度形态</div>
   <div id="modesBody">
@@ -269,7 +247,6 @@ nav button.on{color:var(--ac);font-weight:700}
   </div>
 </section>
 
-<!-- ===== 调速器配置 ===== -->
 <section class="page" id="pg-gov">
   <div id="govUnavail" class="unavail" style="display:none"><b>自适应限频形态下不可用</b><br>请先在主页切回 Color 调度形态</div>
   <div id="govBody">
@@ -291,9 +268,7 @@ nav button.on{color:var(--ac);font-weight:700}
   </div>
 </section>
 
-<!-- ===== 功耗记录 ===== -->
 <section class="page" id="pg-log">
-  <!-- 电芯检测 -->
   <div class="card">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">电芯检测</span>
@@ -310,7 +285,6 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="hint" id="cellHint"></div>
   </div>
 
-  <!-- 功耗记录曲线 -->
   <div class="card" style="margin-top:10px">
     <div class="chart-header">
       <span class="chart-title">功耗记录曲线</span>
@@ -359,7 +333,6 @@ nav button.on{color:var(--ac);font-weight:700}
 <script src="lib/chart.umd.js"></script>
 <script src="lib/chartjs-plugin-datalabels.min.js"></script>
 <script>
-/* ============ ksu.exec 桥 ============ */
 const $ = id => document.getElementById(id);
 const hasKsu = (typeof ksu !== 'undefined') && (typeof ksu.exec === 'function');
 let cbSeq = 0, demoMode = !hasKsu;
@@ -372,10 +345,6 @@ function exec(cmd){
   });
 }
 const shOut = async c => (await exec(c)).stdout.trim();
-/* ---- base64 单行回传读取 ----
-   部分管理器(KSU兼容壳)的 exec 回调对 stdout 中的引号/多行内容处理有兼容性问题
-   （内容被截断或回调不触发），导致读到空配置 → 页面显示默认值而非脚本值。
-   统一改走 base64（输出仅字母数字+/= 且单行），任何桥都能安全回传 */
 function b64d(s){
   try{
     const bin = atob((s||'').replace(/\s+/g,''));
@@ -387,7 +356,7 @@ function b64d(s){
 async function readFileB64(path){
   const b64 = await shOut(`base64 "${path}" 2>/dev/null | tr -d '\\n'`);
   if(b64 && /^[A-Za-z0-9+/=]+$/.test(b64)) return b64d(b64);
-  return await shOut(`cat "${path}" 2>/dev/null`);   // 兜底：base64 不可用（老 toybox）
+  return await shOut(`cat "${path}" 2>/dev/null`);
 }
 let toastT;
 function toast(t){ $('toast').textContent = t||''; $('toast').classList.add('show');
@@ -396,7 +365,6 @@ if(typeof ksu !== 'undefined' && typeof ksu.toast === 'function'){
   const _t = toast; toast = t => { _t(t); try{ ksu.toast(t); }catch(e){} };
 }
 
-/* ============ 常量 ============ */
 const MOD = '/data/adb/modules/colorFC';
 const MODE_KEYS = ['powersave','balance','performance','fast'];
 const MODE_NAMES = {powersave:'省电', balance:'均衡', performance:'性能', fast:'极速'};
@@ -405,22 +373,20 @@ const MODE_DESC = ['powersave · 最长续航，压制频率与提升值','balan
   'performance · 高负载场景，激进提升','fast · 极限性能，全力释放'];
 const GOV_FILES = {powersave:'conservative.sh', balance:'scx1.sh', performance:'scx2.sh', fast:'scx3.sh'};
 
-/* ============ 全局状态 ============ */
-let form = 'dispatch';        // dispatch | adapt
-let curMode = '';             // 当前运行模式
-let activeConf = '';          // config/a.all.sh / b.all.sh / c.all.sh
-let activeScheme = 'a';       // A方案 / B方案 / C方案
-let confText = '';             // 活动配置文件内容
-let modesData = {};            // 解析后的四模式参数
-let modesInitial = {};         // 打开页面时的快照（保存时三方合并，防双端互相覆盖）
+let form = 'dispatch';
+let curMode = '';
+let activeConf = '';
+let activeScheme = 'a';
+let confText = '';
+let modesData = {};
+let modesInitial = {};
 let editMode = 'powersave';
-let govMode = 'powersave';    // 调速器页选中的模式
+let govMode = 'powersave';
 let govData = {governor:'', upThreshold:'', downThreshold:'', freqStep:'', samplingRate:'', targetLoads:'', hasBig:false};
-let govInitial = null;         // 调速器页快照（保存时三方合并用）
-let govAvail = null;           // 本机可用调速器列表（loadGov 时按 sysfs 过滤）
-let socInfo = null;            // {code, marketing, scheme, known}（仅用于 SOC 提示展示）
+let govInitial = null;
+let govAvail = null;
+let socInfo = null;
 
-/* ============ 形态检测与切换 ============ */
 async function detectForm(){
   const out = await shOut(
     `S=$(cat /data/adb/colorFC_store/state 2>/dev/null); `+
@@ -429,7 +395,7 @@ async function detectForm(){
   const st = (out.match(/STATE=(.*)/)||[])[1]||'';
   if(hasPd && !hasSc) form = 'adapt';
   else if(hasSc && !hasPd) form = 'dispatch';
-  else form = (st==='adapt') ? 'adapt' : 'dispatch';   // 混合状态（重刷包）按备份记录判定
+  else form = (st==='adapt') ? 'adapt' : 'dispatch';
   return form;
 }
 
@@ -485,7 +451,6 @@ async function onSwap(){
   btn.disabled = false;
   if(/^OK_/.test(out)){
     if(target==='adapt'){
-      // 切到自适应限频：直接进入限频专属 WebUI（配置/游戏名单/日志都在里面）
       toast('已切换到自适应限频，正在进入限频界面…');
       setTimeout(()=>{ location.replace('./adapt/index.html'); }, 500);
       return;
@@ -502,12 +467,11 @@ async function onSwap(){
     log.textContent += '\n目标形态文件释放失败，请重刷模块安装包后重试。';
     toast('切换失败：文件释放异常');
   }else{
-    toast('切换异常，详见日志'); 
+    toast('切换异常，详见日志');
   }
 }
 function errnoTag(r){ return (r&&r.errno!=null)?r.errno:'?'; }
 
-/* ============ 主页刷新 ============ */
 async function refreshHome(){
   await detectSoc();
   if(demoMode){
@@ -557,9 +521,6 @@ function renderHomeChips(active){
 async function applyMode(k){
   if(demoMode){ toast('演示模式'); return; }
   toast('正在应用 '+MODE_NAMES[k]+'…');
-  /* 统一调度接口：APP / WebUI / Scene / 动态监视(qtbh/qingtd) 全部走 /data/powercfg.sh 同一入口。
-     manual 语义 = 脚本内先写 moren= 再 main.sh 应用（顺序执行无间隙，原子），
-     且动态切换继续运行。单一入口 + 单一状态文件，所有端改动天然同步，无权限抢夺 */
   const r = await exec(`sh /data/powercfg.sh ${k} manual`);
   if(r && r.errno !== 0){ toast('应用失败，请重试'); return; }
   curMode = k; $('curMode').textContent = MODE_NAMES[k];
@@ -567,7 +528,6 @@ async function applyMode(k){
   toast(MODE_NAMES[k]+' 已应用（并设为默认模式）');
 }
 
-/* ============ 调度参数 ============ */
 const SLIDER_DEFS = [
   {k:'opt2',        t:'性能提升',  min:0,  max:100, step:1,  suf:'%'},
   {k:'cpuMax',      t:'CPU 上限',  min:5,  max:100, step:1,  suf:'%'},
@@ -586,23 +546,16 @@ const SLIDER_DEFS = [
 
 async function detectActiveConf(){
   if(demoMode){ activeConf='config/a.all.sh'; activeScheme='a'; return; }
-  // 方案检测统一走 script/fangan.sh（与 main.sh / install.sh 同一实现）：
-  // scx→A / hmbird→B / sugov_next→A / 三者都没有→C
   const P = ((await shOut(`cat ${MOD}/files/peiz 2>/dev/null`))||'all').trim() || 'all';
   const out = await shOut(`sh ${MOD}/script/fangan.sh 2>/dev/null`);
   const m = out.match(/^([abc])\s+(\S+)/);
   let scheme = m ? m[1] : 'a';
   activeScheme = scheme;
-  // 平台专属配置优先，缺失回退 all（与 main.sh 加载规则一致）。
-  // install 会把 ro.board.platform 写进 peiz，仓库只带 .all.sh——
-  // 不回退时 WebUI 会去读不存在的 a.<platform>.sh：显示默认值且无法保存
   const has = await shOut(`test -f ${MOD}/config/${scheme}.${P}.sh && echo 1 || echo 0`);
   activeConf = (has.trim()==='1') ? `config/${scheme}.${P}.sh` : `config/${scheme}.all.sh`;
 }
 
-/* ============ SOC 识别（方案1/方案2/方案3，与 Color 管理器 APP 一致） ============ */
 const SOC_MAP = [
-  // platform, 规范名, 营销名, 方案
   ['sm8975','SM8975','骁龙 8 至尊版 Gen 6 超级至尊版','b'],
   ['sm8950','SM8950','骁龙 8 至尊版 Gen 6','b'],
   ['sm8875','SM8875','骁龙 8 至尊版 Gen 5','b'],
@@ -634,10 +587,7 @@ async function detectSoc(){
     : {code:p?p.toUpperCase():'--', marketing:'未知', scheme:'a', known:false};
   return socInfo;
 }
-/* 方案对应的调速器名：activeScheme 由 detectActiveConf 按调速器可用性判定（与 main.sh 一致） */
 function schemeGovName(){ return activeScheme==='b' ? 'conservative' : activeScheme==='c' ? 'walt' : 'scx'; }
-/* 当前运行调速器：读 sysfs 实时值。不能按方案映射显示——方案 A 下省电实际是
-   conservative、极速是 walt，按 scheme 映射会恒显 scx */
 async function readLiveGov(){
   if(demoMode) return '';
   const g = await shOut('cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null');
@@ -658,7 +608,6 @@ function parseConf(text){
     const blk = bm ? bm[1] : '';
     const d = {};
     d.opt2 = +(blk.match(/\$mokzdz\/[ABC]\/opt2 (\d+)/)||[])[1] || 0;
-    // 2 参=全簇同上限，4 参=小核上限/大核上限/下限/GPU
     const jm = blk.match(/json_cpu_max_min "(\d+)" "(\d+)"(?: "(\d+)")?(?: "(\d+)")?/);
     if(jm && jm[3] != null){
       d.cpuMax = +jm[1]; d.cpuMaxB = +jm[2]; d.cpuMin = +jm[3];
@@ -684,12 +633,11 @@ async function loadModes(){
     modesData = parseConf(DEMO_CONF); activeConf='config/a.all.sh';
   }else{
     await detectActiveConf();
-    // 不用 cat 直读：脚本内容含引号/多行，部分管理器 exec 桥回传会截断 → 显示默认值而非脚本值
     confText = await readFileB64(`${MOD}/${activeConf}`);
     if(!confText) toast('读取 '+activeConf+' 失败，当前显示默认值');
     modesData = parseConf(confText);
   }
-  modesInitial = JSON.parse(JSON.stringify(modesData));   // 打开页面时的快照（保存时三方合并用）
+  modesInitial = JSON.parse(JSON.stringify(modesData));
   const chips=$('modeChips'); chips.innerHTML='';
   MODE_KEYS.forEach((k,i)=>{
     const c=document.createElement('button');
@@ -725,9 +673,6 @@ function renderMode(){
   });
 }
 
-/* 三方合并（防双端互相覆盖的根因修复）：
-   fresh=磁盘最新内容（保留 APP/另一端刚写入的改动）；edited=当前 UI 值（含用户编辑）；
-   initial=页面打开时的快照。仅用户真正动过的字段（edited!=initial）用 UI 值，其余以磁盘为准 */
 function mergeModeData(fresh, edited, initial){
   const out = {};
   MODE_KEYS.forEach(mode=>{
@@ -745,7 +690,6 @@ function mergeModeData(fresh, edited, initial){
 async function saveMode(){
   if(demoMode){ toast('演示模式：真机保存将写入 ' + activeConf); return; }
   if(!confText){ toast('配置读取失败，已阻止保存（防止清空脚本）'); return; }
-  // 保存前重读磁盘最新内容再合并：防止页面持有的旧快照把 APP/另一端的改动覆盖回去
   const freshText = await readFileB64(`${MOD}/${activeConf}`);
   let text;
   if(freshText){
@@ -760,14 +704,12 @@ async function saveMode(){
   confText = text;
   let extra = '';
   if(editMode===curMode){
-    // 统一调度接口（kzlx=1 内部语义：仅应用，不改 moren、不停动态切换）
     await exec(`sh /data/powercfg.sh ${editMode} 1`);
     extra = '，已实时应用';
   }
   toast('已保存' + extra);
 }
 
-/* 在原文上按模式块替换参数（保留其余内容不动） */
 function buildConf(text, data){
   let out = text;
   MODE_KEYS.forEach(mode=>{
@@ -793,7 +735,6 @@ function buildConf(text, data){
   return out;
 }
 
-/* heredoc 写文件（内容经 quoted-EOF 原样落盘） */
 async function writeFile(path, content){
   const body = content.replace(/\r/g,'');
   const cmd = 'cat > "'+path+'" <<\'COLORFC_WUI_EOF\'\n'+body+(body.endsWith('\n')?'':'\n')+'COLORFC_WUI_EOF';
@@ -801,7 +742,6 @@ async function writeFile(path, content){
   return r.errno===0 && !/COLORFC_WUI_EOF/.test(r.stderr);
 }
 
-/* ============ 调速器 ============ */
 const PRESETS=['conservative','walt','ips','sugov_next','scx','hmbird','powersave','performance','schedutil'];
 const GOV_SLIDERS={
   conservative:[
@@ -814,7 +754,6 @@ const GOV_SLIDERS={
   walt:[{k:'targetLoads',t:'目标负载',min:1,max:100,step:1,suf:'%'}],
 };
 
-/* 分组解析：小核=cpu0-3 首个值，大核=cpu4-7 首个值（C方案大小核参数独立） */
 function govGrpVal(text, rx){
   rx.lastIndex = 0;
   let small=null, big=null, m;
@@ -835,13 +774,11 @@ function parseGovScript(text){
   [d.freqStep,        d.freqStepBig]        = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/conservative\/freq_step/g);
   [d.samplingRate,    d.samplingRateBig]    = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/conservative\/sampling_rate/g);
   [d.targetLoads,     d.targetLoadsBig]     = govGrpVal(text, /echo "?([\w.-]+)"? > \S*cpu([0-7])\/cpufreq\/(?:scx|walt)\/target_loads/g);
-  // 兜底：无 cpu 编号的路径（与旧脚本兼容）
   if(!d.upThreshold)   d.upThreshold   = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/up_threshold/)||[])[1]||'';
   if(!d.downThreshold) d.downThreshold = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/down_threshold/)||[])[1]||'';
   if(!d.freqStep)      d.freqStep      = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/freq_step/)||[])[1]||'';
   if(!d.samplingRate)  d.samplingRate  = (text.match(/echo "?([\w.-]+)"? > \S*conservative\/sampling_rate/)||[])[1]||'';
   if(!d.targetLoads)   d.targetLoads   = (text.match(/echo "?([\w.-]+)"? > \S*(?:scx|walt)\/target_loads/)||[])[1]||'';
-  // 大核存在且与小核取值不同 → 双组滑条
   const sm=[d.upThreshold,d.downThreshold,d.freqStep,d.samplingRate,d.targetLoads];
   const bg=[d.upThresholdBig,d.downThresholdBig,d.freqStepBig,d.samplingRateBig,d.targetLoadsBig];
   d.hasBig = bg.some((v,i)=>v && v!==sm[i]);
@@ -850,22 +787,18 @@ function parseGovScript(text){
 
 function buildGovScript(text, d){
   let out = text;
-  // 空值不回写，避免生成 "echo > path" 的坏脚本
   const rep=(rx,v)=>{ if(v!==''&&v!=null) out=out.replace(rx,'$1'+v+'$2'); };
   rep(/(echo "?)[\w.-]+("? > \S*scaling_governor)/g, d.governor);
-  // 1) 兜底：先按统一值替换（含 cpu$cpu 循环变量的脚本）；之后大小组再覆盖
   rep(/(echo "?)[\w.-]+("? > \S*conservative\/up_threshold)/g, d.upThreshold);
   rep(/(echo "?)[\w.-]+("? > \S*conservative\/down_threshold)/g, d.downThreshold);
   rep(/(echo "?)[\w.-]+("? > \S*conservative\/freq_step)/g, d.freqStep);
   rep(/(echo "?)[\w.-]+("? > \S*conservative\/sampling_rate)/g, d.samplingRate);
   rep(/(echo "?)[\w.-]+("? > \S*(?:scx|walt)\/target_loads)/g, d.targetLoads);
-  // 2) 小核 cpu0-3
   rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/up_threshold)/g, d.upThreshold);
   rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/down_threshold)/g, d.downThreshold);
   rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/freq_step)/g, d.freqStep);
   rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/conservative\/sampling_rate)/g, d.samplingRate);
   rep(/(echo "?)[\w.-]+("? > \S*cpu[0-3]\/cpufreq\/(?:scx|walt)\/target_loads)/g, d.targetLoads);
-  // 3) 大核 cpu4-7（未区分大小核时与小核同值）
   rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/up_threshold)/g, d.upThresholdBig||d.upThreshold);
   rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/down_threshold)/g, d.downThresholdBig||d.downThreshold);
   rep(/(echo "?)[\w.-]+("? > \S*cpu[4-7]\/cpufreq\/conservative\/freq_step)/g, d.freqStepBig||d.freqStep);
@@ -877,11 +810,7 @@ function buildGovScript(text, d){
 async function loadGov(){
   if(form!=='dispatch') return;
   await detectSoc();
-  // 方案选择统一走 script/fangan.sh（与 main.sh / install.sh 同一实现）
-  // 不能只按 SOC 映射——自定义内核（如 8gen2 刷风驰内核）实际走 A 方案时，SOC 预设仍是 C
   await detectActiveConf();
-  // 按本机可用调速器过滤下拉列表（读 policy0 scaling_available_governors）：
-  // 不可用的调速器不再显示，本机额外的自定义调速器补充进去
   if(!demoMode){
     const av = ((await shOut('cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null'))||'').trim();
     if(av){
@@ -898,9 +827,8 @@ async function loadGov(){
     govData = parseGovScript(DEMO_GOV[govMode]);
     if(!govData.governor) govData.governor = schemeGovName();
   }else{
-    // 模块调速器脚本目录为大写 A/B/C（activeScheme 是小写方案号，直接拼路径会指向不存在的目录）
     const govDir = activeScheme==='b' ? 'B' : activeScheme==='c' ? 'C' : 'A';
-    const t = await readFileB64(`${MOD}/${govDir}/${file}`);   // base64 单行回传，防引号/多行截断
+    const t = await readFileB64(`${MOD}/${govDir}/${file}`);
     if(!t) toast('读取 '+govDir+'/'+file+' 失败，当前显示默认值');
     govData = parseGovScript(t);
     if(!govData.governor) govData.governor = schemeGovName();
@@ -910,7 +838,7 @@ async function loadGov(){
       });
     }
   }
-  govInitial = JSON.parse(JSON.stringify(govData));   // 快照（保存时三方合并用）
+  govInitial = JSON.parse(JSON.stringify(govData));
   const sn = activeScheme==='a'?'1':activeScheme==='b'?'2':'3';
   $('socTip').textContent = socInfo.known
     ? `当前SOC：${socInfo.code}（${socInfo.marketing}）→ 加载方案 ${sn}`
@@ -934,7 +862,6 @@ document.addEventListener('click',()=>$('dd').classList.remove('open'));
 function renderDd(){
   $('ddLabel').textContent = govData.governor;
   const L=$('ddList'); L.innerHTML='';
-  // 只显示本机可用的调速器（loadGov 时按 sysfs 过滤；demo 模式为全量）
   (govAvail||PRESETS).forEach(p=>{
     const it=document.createElement('div');
     it.className='it'+(p===govData.governor?' on':'');
@@ -944,8 +871,6 @@ function renderDd(){
     L.appendChild(it);
   });
 }
-/* 当前调速器对应的滑条定义：
-   walt 特殊处理——C方案(walt/target_loads)→目标负载；A方案极速(walt+conservative参数)→conservative 组 */
 function govSliderDefs(){
   if(govData.governor==='walt'){
     return (govData.targetLoads||govData.targetLoadsBig) ? GOV_SLIDERS.walt : GOV_SLIDERS.conservative;
@@ -956,7 +881,6 @@ function renderGovSliders(){
   const box=$('govSliders'); box.innerHTML='';
   const defs=govSliderDefs();
   if(!defs){ box.innerHTML=`<div class="gv-note" style="margin:4px 2px">该调速器无附加参数，保存即切换生效</div>`; return; }
-  // C方案大小核参数独立（hasBig）→ 双组滑条：小核 cpu0-3 / 大核 cpu4-7
   const groups = govData.hasBig ? [['','小核·cpu0-3'],['Big','大核·cpu4-7']] : [['','']];
   groups.forEach(([sfx,gn])=>{
     if(gn){
@@ -979,8 +903,6 @@ function renderGovSliders(){
     });
   });
 }
-/* 三方合并（调速器页，防双端互相覆盖）：fresh=磁盘最新；edited=当前 UI；initial=快照。
-   仅用户动过的字段用 UI 值，其余以磁盘为准（保留 APP/另一端的改动） */
 function mergeGovData(fresh, edited, initial){
   const o = Object.assign({}, fresh);
   Object.keys(edited).forEach(k=>{
@@ -991,20 +913,17 @@ function mergeGovData(fresh, edited, initial){
 async function saveGov(){
   if(demoMode){ toast('演示模式：真机保存将写入调速器脚本'); return; }
   await detectSoc();
-  await detectActiveConf();          // 与 main.sh 一致（统一走 fangan.sh）
+  await detectActiveConf();
   const file = GOV_FILES[govMode];
-  // 调速器脚本目录为大写 A/B/C（小写方案号拼路径会写到不存在的目录导致保存失败）
   const govDir = activeScheme==='b' ? 'B' : activeScheme==='c' ? 'C' : 'A';
   const t = await readFileB64(`${MOD}/${govDir}/${file}`);
   if(!t){ toast('调速器脚本读取失败，已阻止保存（防止清空脚本）'); return; }
-  // 重读磁盘最新内容后三方合并：页面旧快照不会覆盖 APP/另一端的改动
   const merged = mergeGovData(parseGovScript(t), govData, govInitial||{});
   const mergedScript = buildGovScript(t, merged);
   const ok = await writeFile(`${MOD}/${govDir}/${file}`, mergedScript);
   if(!ok){ toast('写入失败'); return; }
   govData = merged; govInitial = JSON.parse(JSON.stringify(merged));
   if(govMode===curMode){
-    // 统一调度接口（kzlx=1 内部语义：仅应用）
     await exec(`sh /data/powercfg.sh ${govMode} 1`);
     toast('已保存并实时应用');
   }else{
@@ -1013,22 +932,18 @@ async function saveGov(){
   await refreshGovNow();
 }
 
-/* ============ 实时功耗曲线（Chart.js，配置与配色  ============ */
 const PW_MAXPTS = 30, PW_INTERVAL = 2000, PW_STORE_KEY = 'colorFC_pwlog';
 let pwChart = null, pwLabels = [], pwPower = [], pwTemp = [], pwChg = [], pwTimer = null, pwNeedRescale = true;
-/* 电芯模式：0=自动 1=单电芯 2=双电芯（双芯且节点只报单芯数据时功率×2，对齐 APP applyCellMode） */
 let cellMode = 0;
 function pwCssVar(k, fallback){
   const v = getComputedStyle(document.documentElement).getPropertyValue(k).trim();
   return v || fallback;
 }
-/* 温度单位自适应：0.01℃/0.1℃/℃ → ℃（对齐 APP 端校准，超物理范围视为无效） */
 function calibT(t){
   if(!isFinite(t)) return null;
   if(t>600) t/=100; else if(t>60) t/=10;
   return (t>=0 && t<=90) ? t : null;
 }
-/* ---- 电芯模式：手动切换 + 持久化（文件存储，WebUI 重开/模块重刷均保持） ---- */
 const CELL_NAMES = ['自动','单电芯','双电芯'];
 const CELL_FILE = '/data/adb/colorFC_store/cellmode';
 function renderCellPill(){
@@ -1052,13 +967,10 @@ async function cycleCellMode(){
     await exec('mkdir -p /data/adb/colorFC_store; echo '+cellMode+' > '+CELL_FILE);
   }
   toast('电芯模式：'+CELL_NAMES[cellMode]+'（已保存）');
-  /* 清空当前曲线，避免新旧电芯口径混在同一张图 */
   pwLabels=[]; pwPower=[]; pwTemp=[]; pwChg=[];
   pwNeedRescale = true;
   pwPersist(); pwRender(); pwSample();
 }
-/* ---- 电芯自动检测（对齐 APP PowerMonitor）：串联双芯=总压>5.5V；
-   并联双芯=存在 ≥2 个独立 Battery 节点（排除 bms/fg/充电泵等辅助节点）---- */
 let dualAutoCache = null;
 async function detectDualCell(){
   if(demoMode){ dualAutoCache = false; return dualAutoCache; }
@@ -1075,13 +987,12 @@ async function detectDualCell(){
     if(isFinite(vn) && vn!==0){
       const b = Math.abs(vn);
       const V = b>1000000 ? vn/1e6 : (b>2500 ? vn/1000 : vn);
-      if(V>=5.5){ dualAutoCache = true; return true; }   // 串联双芯（节点报总压，功率已是总值）
+      if(V>=5.5){ dualAutoCache = true; return true; }
     }
-    dualAutoCache = cnt>=2;                               // 并联双芯（每芯各报一半电流）
+    dualAutoCache = cnt>=2;
   }catch(e){ dualAutoCache = false; }
   return dualAutoCache;
 }
-/** 当前是否需要按双芯口径×2（手动双芯 或 自动检测为双芯），且节点报的是单芯数据 */
 function needCellDouble(V){
   const dual = cellMode===2 || (cellMode===0 && dualAutoCache===true);
   return dual && V>0 && V<5.5;
@@ -1129,7 +1040,6 @@ async function pwSample(){
       `echo "S=$(cat /sys/class/power_supply/battery/status 2>/dev/null)";`+
       `echo "M=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)"`);
     const g = k => (out.match(new RegExp('^'+k+'=(.*)$','m'))||[])[1]||'';
-    /* 跨端同步：APP/前台监视切换模式后，WebUI 主页跟随刷新（仅变化时重建，避免打断点击） */
     const mm = g('M').trim();
     if(form==='dispatch' && MODE_KEYS.includes(mm) && mm!==curMode){
       curMode = mm;
@@ -1140,12 +1050,9 @@ async function pwSample(){
     st = g('S').trim();
     chg = /^Charg/i.test(st) || /^(Full|Not charg)/i.test(st);
     if(isFinite(cur) && isFinite(volt) && cur!==0 && volt!==0){
-      /* 电流/电压单位自适应（对齐 APP PowerMonitor：µA/mA/A、µV/mV/V），
-         修复部分机型节点报 mA/mV 时功率被缩小 1000 倍的问题 */
       const a=Math.abs(cur), A = a>100000 ? cur/1e6 : (a>1 ? cur/1000 : cur);
       const b=Math.abs(volt), V = b>1000000 ? volt/1e6 : (b>2500 ? volt/1000 : volt);
       w = Math.abs(A*V);
-      /* 电芯口径修正：手动双芯 或 自动检测为双芯，且节点只报单芯电压/电流时功率×2 */
       if(needCellDouble(V)) w *= 2;
       tp = calibT(tv);
     }
@@ -1235,12 +1142,12 @@ function pwRender(){
       pwNeedRescale = false;
     }
     pwChart.update();
-  }catch(e){ /* 图表初始化异常不阻塞页面 */ }
+  }catch(e){  }
 }
 function pwStart(){
   if(pwTimer) return;
   pwRestore();
-  detectDualCell();          // 电芯自动检测（结果缓存，节点静态只查一次）
+  detectDualCell();
   pwRender();
   pwSample();
   pwTimer = setInterval(pwSample, PW_INTERVAL);
@@ -1250,10 +1157,7 @@ function pwStop(){
 }
 window.addEventListener('resize', ()=>{ if(pwChart) pwChart.resize(); if(logChart) logChart.resize(); });
 
-/* ============ 功耗记录（历史曲线 + 电芯检测） ============ */
 let logChart = null, logRangeH = 24, logBusy = false;
-/* 清除日志：两次点击确认（WebUI 环境不依赖 confirm 弹窗），
-   首次点击按钮变"确认清除?"，3 秒内再点执行、超时自动复原 */
 let clearLogArmed = 0;
 async function clearLog(btn){
   if(demoMode){ toast('演示模式：无可清除的记录'); return; }
@@ -1292,15 +1196,11 @@ async function loadLog(){
         rows.push({t, w:Math.round(w*100)/100, temp:Math.round((33+Math.sin(ph2)*3.5)*10)/10, chg});
       }
     }else{
-      /* 2 秒采样后数据量大（7 天≈30 万行），改由 awk 在设备端按时间桶聚合后回传：
-         桶大小自适应（≤2 万桶），统计（均值/峰值/能耗）由 awk 端按原始行精确计算 */
       await detectDualCell();
       const days = Math.ceil(logRangeH/24);
       const cut = Math.floor(Date.now()/1000) - logRangeH*3600;
       const bs = Math.max(2, Math.ceil(logRangeH*3600/20000));
       const dbl = (cellMode===2 || (cellMode===0 && dualAutoCache===true)) ? 1 : 0;
-      /* 文件名日期改在 JS 端按设备本地时区计算（等价 date +%Y%m%d）：
-         部分 toybox 不支持 `date -d "-N days"`，导致近3天/7天只能读到当天文件 */
       const flist = [];
       const nd = new Date();
       for(let i=0;i<days;i++){
@@ -1308,8 +1208,6 @@ async function loadLog(){
         flist.push('pwlog-'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'.csv');
       }
       const files = [...new Set(flist)].map(f=>'/data/adb/colorFC_store/pwlog/'+f).join(' ');
-      /* CSV 列序（v1.64 起 pwlogd 写入）：时间,功率W,电压V,温度,电量,充放状态；
-         旧版为 5 列（时间,功率W,温度,电量,充放状态）——按列数区分解析 */
       const awkCmd =
         'for f in '+files+'; do [ -f "$f" ] && cat "$f"; done | awk -F, '+
         '-v cut='+cut+' -v bs='+bs+' -v dbl='+dbl+' \''+
@@ -1318,7 +1216,7 @@ async function loadLog(){
         '  w=$2+0; v=0; chg=0; tp=-1;\n'+
         '  if(NF>=6){ v=$3+0; chg=($6=="1")?1:0; if($4!="NA"&&$4!="") tp=$4+0 }\n'+
         '  else { chg=($5=="1")?1:0; if($3!="NA"&&$3!="") tp=$3+0 }\n'+
-        '  if(dbl && v>0 && v<5.5) w*=2;\n'+                       // 双芯口径且该行为单芯电压 → ×2
+        '  if(dbl && v>0 && v<5.5) w*=2;\n'+
         '  if(tp<0||tp>90) tp=-1;\n'+
         '  b=int(t/bs)*bs;\n'+
         '  S[b]+=w; C[b]++;\n'+
@@ -1334,8 +1232,6 @@ async function loadLog(){
         '      printf "%d,%.3f,%.1f,%d\\n", b, S[b]/C[b], (NT[b]>0?ST[b]/NT[b]:-1), (NC[b]*2>=C[b]?1:0);\n'+
         '  }\n'+
         '}\'';
-      /* 聚合结果同样走 base64 单行回传（多行 stdout 部分管理器会截断）；
-         末尾 __EOW__ 哨兵保证空结果也有回传，base64 不可用（老 toybox）时回退原始输出 */
       let out = await shOut('{ '+awkCmd+'; echo __EOW__; } | base64 | tr -d \'\\n\'');
       if(out && /^[A-Za-z0-9+/=]+$/.test(out)) out = b64d(out);
       else out = await shOut(awkCmd);
@@ -1364,7 +1260,6 @@ async function loadLog(){
     renderLog(rows, stats);
   }finally{ logBusy = false; }
 }
-/** 由行数据计算统计（演示模式用；真机统计由 awk 端按原始行精确算出） */
 function statsFromRows(rows){
   const dRows = rows.filter(r=>!r.chg), cRows = rows.filter(r=>r.chg);
   const avg = a => a.length? a.reduce((x,y)=>x+y.w,0)/a.length : null;
@@ -1382,7 +1277,6 @@ function statsFromRows(rows){
 }
 function renderLog(rows, stats){
   const st = stats || statsFromRows(rows);
-  // 降采样到最多 600 桶（桶内取均值）
   const MAXPTS = 600;
   let labels=[], power=[], temp=[], chgs=[];
   if(rows.length > MAXPTS){
@@ -1400,18 +1294,15 @@ function renderLog(rows, stats){
     rows.forEach(r=>{ labels.push(fmtClock(r.t)); power.push(r.w);
       temp.push(r.temp!=null&&!isNaN(r.temp)?r.temp:null); chgs.push(r.chg); });
   }
-  // 统计（真机=awk 端按原始行精确算出；演示=由行数据计算）
   $('stCount').textContent = st.n;
   $('stAvgD').textContent = st.avgD!=null? st.avgD.toFixed(2)+' W' : '--';
   $('stAvgC').textContent = st.avgC!=null? st.avgC.toFixed(2)+' W' : '--';
   $('stMaxT').textContent = st.maxT!=null? st.maxT.toFixed(1)+' ℃' : '--';
   $('stMWh').textContent = st.mWh!=null? (st.mWh>=1000?(st.mWh/1000).toFixed(2)+' Wh':st.mWh.toFixed(0)+' mWh') : '--';
   $('stSpan').textContent = st.span>0? fmtSpan(st.span) : '--';
-  // 图表
   const c = $('logChart');
   if(!c || typeof Chart === 'undefined') return;
   if(!c.clientWidth){
-    // 刚切入页面时容器尚未布局（宽为 0），等一帧再渲染，避免图表空白/尺寸错乱被裁
     requestAnimationFrame(()=>renderLog(rows, stats));
     return;
   }
@@ -1444,8 +1335,6 @@ function renderLog(rows, stats){
         },
         plugins:{
           legend:{display:false},
-          /* 主页实时曲线全局注册过 ChartDataLabels，此处必须显式关闭，
-             否则每个数据点都会画数值标签、密集叠在曲线上（遮挡曲线） */
           datalabels:{display:false},
           tooltip:{backgroundColor:pwCssVar('--chart-tooltip-bg'), titleColor:'#fff', bodyColor:'#fff',
             displayColors:true, padding:10, cornerRadius:12,
@@ -1484,7 +1373,6 @@ function fmtSpan(sec){
   if(m===60){ h++; m=0; }
   return h>0? h+'时'+m+'分' : m+'分';
 }
-/* ---- 电芯检测（OPLUS/通用节点多级回退） ---- */
 async function loadCells(manual){
   const set=(id,v)=>{ $(id).textContent = v; };
   if(demoMode){
@@ -1498,8 +1386,6 @@ async function loadCells(manual){
     `for p in ${paths.join(' ')}; do v=$(cat $p 2>/dev/null); `+
     `[ -n "$v" ] && { echo "$v"; exit 0; }; done; echo NA`);
   const design = (await read(['/sys/class/oplus_chg/battery/design_capacity','/sys/class/power_supply/battery/charge_full_design'])).trim();
-  /* 实测满容量(FCC)：优先 OPLUS FG 学习容量（fg_full_capacity，真实衰减值）；
-     标准 charge_full 在部分 OPLUS 机型上报的是设计容量 → 寿命恒 100% 不准，仅作兜底 */
   const fcc = (await read(['/sys/class/oplus_chg/battery/fg_full_capacity','/sys/class/power_supply/battery/charge_full','/sys/class/power_supply/bms/charge_full'])).trim();
   const cycle = (await read(['/sys/class/oplus_chg/battery/normal_cycle_cnt','/sys/class/power_supply/battery/cycle_count'])).trim();
   const volt = (await read(['/sys/class/power_supply/battery/voltage_now'])).trim();
@@ -1507,14 +1393,12 @@ async function loadCells(manual){
   let d=-1, f=-1;
   if(/^\d+(\.\d+)?$/.test(design)) d = +design;
   if(/^\d+(\.\d+)?$/.test(fcc)) f = +fcc;
-  // charge_full/charge_full_design 通常为 µAh；OPLUS design_capacity/fg_full_capacity 直接为 mAh
   if(d>10000) d = d/1000;
   if(f>10000) f = f/1000;
   set('cellDesign', d>0? Math.round(d)+' mAh' : '--');
   set('cellFcc', f>0? Math.round(f)+' mAh' : '--');
   set('cellHealth', (d>0 && f>0)? (f/d*100).toFixed(1)+'%' : '--');
   set('cellCycle', /^\d+$/.test(cycle)? cycle+' 次' : '--');
-  /* 电压单位自适应（µV/mV/V）：报 mV 的机型不再显示 0.00 V */
   set('cellVolt', /^\d+(\.\d+)?$/.test(volt)
     ? ((+volt>1000000? +volt/1e6 : +volt>2500? +volt/1000 : +volt)).toFixed(2)+' V'
     : '--');
@@ -1523,15 +1407,12 @@ async function loadCells(manual){
   if(manual) toast('已重新检测');
 }
 
-/* ============ 页面切换 ============ */
 function go(p){
   ['home','modes','gov','log'].forEach(k=>{
     $('pg-'+k).classList.toggle('on',k===p);
     $('nb-'+k).classList.toggle('on',k===p);
   });
   if(p==='home'){ refreshHome(); pwStart(); } else { pwStop(); }
-  /* 进入参数/调速器页时选中"当前运行模式"（而非固定省电）：
-     重进 WebUI 后页面不再总是停在省电模式（切页重进未保存的改动本就会被重新读取覆盖） */
   if(!demoMode && MODE_KEYS.includes(curMode)){
     if(p==='modes') editMode = curMode;
     if(p==='gov')   govMode  = curMode;
@@ -1541,7 +1422,6 @@ function go(p){
   if(p==='log'){ requestAnimationFrame(()=>loadLog()); loadCells(false); }
 }
 
-/* ============ 演示数据 ============ */
 const DEMO_CONF = `SOC_PLAT=$(getprop ro.board.platform)
 if [[ $action == "powersave" ]]; then
 	echo "powersave" > $pan1
@@ -1604,15 +1484,13 @@ const DEMO_GOV = {
   fast:'echo "walt" > scaling_governor\necho "60" > scx/target_loads\n',
 };
 
-/* ============ 启动 ============ */
 (async ()=>{
-  await loadCellMode();           // 先恢复持久化的电芯模式（文件存储，重开不重置）
+  await loadCellMode();
   if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); pwStart(); return; }
   await detectForm();
-  // 自适应形态：WebUI 入口直接进入限频专属界面（其内置「⇄ Color调度」按钮切回）
   if(form==='adapt'){ location.replace('./adapt/index.html'); return; }
   renderFormCard();
-  await refreshHome();            // 先取到当前运行模式，参数页选中态才准确
+  await refreshHome();
   pwStart();
 })();
 </script>

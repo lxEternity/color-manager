@@ -21,7 +21,6 @@ MODE_KEYS  = ["powersave", "balance", "performance", "fast"]
 MODE_NAMES = {"powersave": "省电模式", "balance": "均衡模式",
               "performance": "性能模式", "fast": "极速模式"}
 
-# ---------------- 持久化存储 ----------------
 def defaults():
     return {
         "modes": {
@@ -63,7 +62,6 @@ def save_data(d):
         with open(DATA_FILE, "w") as f:
             json.dump(d, f, ensure_ascii=False, indent=1)
 
-# ---------------- sysfs 读取 ----------------
 def read_int(path):
     try:
         with open(path) as f:
@@ -103,10 +101,9 @@ def cpu_count():
             pass
     return None
 
-# ---------------- 演示模式模拟器 ----------------
 class Demo:
     def __init__(self):
-        self.soc, self.volt, self.curr = 84, 4420000, -1230000  # µV / µA
+        self.soc, self.volt, self.curr = 84, 4420000, -1230000
         self.temp, self.cycle = 33.5, 128
         self.status = "Discharging"
         self.gov = "walt"
@@ -118,7 +115,6 @@ class Demo:
 
 _demo = Demo()
 
-# ---------------- 业务 API ----------------
 def api_status():
     d = load_data()
     soc = read_int(f"{BAT}/capacity")
@@ -143,7 +139,6 @@ def api_status():
         avail_s = read_str(f"{CPU_BASE}/cpu0/cpufreq/scaling_available_governors")
         avail = [g for g in PRESET_GOVERNORS if avail_s and g in avail_s] or PRESET_GOVERNORS
         gov_now = read_str(f"{CPU_BASE}/cpu0/cpufreq/scaling_governor") or d["governor"]["governor"]
-    # 电芯判定：>=4.30V 判为双电芯（串联电芯电压 4.4xV）
     auto_cells = 2 if (volt or 0) >= 4300000 else 1
     cell_mode = d["cellMode"]
     cells = auto_cells if cell_mode == 0 else cell_mode
@@ -185,7 +180,6 @@ def api_save_governor(cfg):
         if k in cfg and cfg[k] is not None:
             g[k] = int(cfg[k])
     save_data(d)
-    # 实时应用（需要 root；演示模式仅保存）
     if api_status()["demo"]:
         return {"ok": True, "applied": False}
     applied = True
@@ -208,7 +202,6 @@ def api_save_cells(cell_mode):
     save_data(d)
     return {"ok": True, "cellMode": d["cellMode"]}
 
-# ---------------- HTTP 服务 ----------------
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass

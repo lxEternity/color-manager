@@ -1,3 +1,4 @@
+#!/system/bin/sh
 if [ -z "$POWERD_MKSH" ]; then
   SECONDS=0
   sleep 1

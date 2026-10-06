@@ -1,3 +1,4 @@
+#!/system/bin/sh
 chmod 777 /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 chmod 777 /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 chmod 777 /sys/devices/system/cpu/cpu5/cpufreq/scaling_governor

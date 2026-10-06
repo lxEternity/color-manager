@@ -1,3 +1,4 @@
+#!/system/bin/sh
 MODDIR=${0%/*}
 
 TARGET="$MODDIR/system/bin"

@@ -1,3 +1,4 @@
+#!/system/bin/sh
 G='\033[1;32m'; B='\033[1;34m'; C='\033[1;36m'
 R='\033[1;31m'; Y='\033[1;33m'; M='\033[1;35m'; X='\033[0m'
 CPUFREQ=/sys/devices/system/cpu/cpufreq

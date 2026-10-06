@@ -1,3 +1,4 @@
+#!/system/bin/sh
 chmod 777 /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 echo "conservative" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 echo "96" > /sys/devices/system/cpu/cpu0/cpufreq/conservative/up_threshold

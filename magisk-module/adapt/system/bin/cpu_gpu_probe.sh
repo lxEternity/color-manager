@@ -1,3 +1,4 @@
+#!/system/bin/sh
 exec 2>/dev/null
 
 OUT="${1:-/sdcard/3/cpu_gpu_probe.log}"

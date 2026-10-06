@@ -1,3 +1,4 @@
+#!/system/bin/sh
 cpus="0 3 5 7"
 
 for cpu in $cpus;do

@@ -1,3 +1,4 @@
+#!/system/bin/sh
 BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
 . $BASEDIR/fangan.sh

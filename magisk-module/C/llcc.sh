@@ -1,3 +1,4 @@
+#!/system/bin/sh
 path=/sys/devices/system/cpu/bus_dcvs/LLCC
 
 lock_value () {

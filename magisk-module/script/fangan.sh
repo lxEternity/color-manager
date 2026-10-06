@@ -1,3 +1,4 @@
+#!/system/bin/sh
 fangan_detect(){
     FANGAN=""
     FANGAN_GOV=""

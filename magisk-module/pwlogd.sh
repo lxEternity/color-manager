@@ -1,3 +1,4 @@
+#!/system/bin/sh
 STORE=/data/adb/colorFC_store/pwlog
 PIDF=/data/adb/colorFC_store/pwlogd.pid
 INTERVAL=2

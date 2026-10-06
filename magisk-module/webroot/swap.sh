@@ -1,3 +1,4 @@
+#!/system/bin/sh
 SWAPDIR=$(dirname "$(readlink -f "$0")")
 MODROOT=${SWAPDIR%/*}
 STORE=/data/adb/colorFC_store

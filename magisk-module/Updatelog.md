@@ -1,3 +1,13 @@
+v1.3.9.28（本仓库同步版，模块内版本号）
+【Bug 修复】切换到自适应限频后 WebUI 报「找不到模块目录」：
+- 根因：限频 WebUI 的 exec 通道优先级为 kernelsu.exec（Promise）>
+  ksu.exec（回调），部分 KSU 兼容壳自带的 kernelsu.exec 返回
+  格式不符合标准（非 {errno,stdout,stderr} 对象也非字符串），
+  模块目录探测命令的输出解析全部失败
+- 修复：bundle 加载前注入标准 kernelsu.exec 实现——基于真机
+  验证可用的 ksu.exec 回调通道，含 stdout 包裹引号剥离
+  （JSON.parse 优先、slice 兜底），覆盖兼容壳的异常实现
+
 v1.3.9.27（本仓库同步版，模块内版本号）
 【模块更新】限频 WebUI 头部状态行缩小防换行：
 - 「工作中 · 限频中」「⇄ Color调度」「版本 v1.2.0」三个元素字号

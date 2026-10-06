@@ -31,6 +31,37 @@
     <div id="root"></div>
     <button id="cfSwapBtn">⇄ Color调度</button>
     <script>
+    /* kernelsu.exec 标准实现（必须在 bundle 前执行）：
+       限频 bundle 的 exec 通道优先级是 kernelsu.exec（Promise）> ksu.exec（回调）。
+       部分 KSU 兼容壳自带的 kernelsu.exec 返回格式不符合标准（既非
+       {errno,stdout,stderr} 也非字符串），导致模块目录探测全部失败，
+       页面报「找不到模块目录」。这里用真机已验证的 ksu.exec 回调通道
+       实现标准的 kernelsu.exec 并覆盖之；同时剥离兼容壳给 stdout 包裹
+       的引号（Color WebUI 同款兼容处理）。 */
+    (function(){
+      if(typeof ksu === 'undefined' || typeof ksu.exec !== 'function') return;
+      var seq = 0;
+      function unquote(s){
+        if(typeof s === 'string' && s.length > 1 && s.charCodeAt(0) === 34 && s.charCodeAt(s.length-1) === 34){
+          try{ return JSON.parse(s); }catch(e){ return s.slice(1, -1); }
+        }
+        return s;
+      }
+      window.kernelsu = window.kernelsu || {};
+      window.kernelsu.exec = function(cmd){
+        return new Promise(function(resolve){
+          var name = 'cfKsuExec_' + Date.now() + '_' + (seq++);
+          window[name] = function(errno, stdout, stderr){
+            delete window[name];
+            resolve({ errno: Number(errno) || 0, stdout: unquote(stdout) || '', stderr: (stderr || '') + '' });
+          };
+          try{ ksu.exec(cmd, '{}', name); }
+          catch(e){ delete window[name]; resolve({ errno: -1, stdout: '', stderr: '' + e }); }
+        });
+      };
+    })();
+    </script>
+    <script>
     /* ColorFC 形态切换：点按两次确认 → swap.sh dispatch → 回 Color WebUI */
     (function(){
       var btn = document.getElementById('cfSwapBtn');

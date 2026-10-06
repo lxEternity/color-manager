@@ -8,16 +8,18 @@
     <script type="module" crossorigin src="./assets/index-CA8pALd_.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-MQYxA1L9.css">
     <style>
-      /* 切换回 Color 调度的浮动按钮（与限频暗色主题一致） */
-      #cfSwapBtn{position:fixed;z-index:99999;top:calc(env(safe-area-inset-top,0px) + 10px);right:12px;
-        display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:20px;
-        background:rgba(22,29,47,.88);border:1px solid rgba(120,180,255,.35);color:#9fd0ff;
-        font:600 12px/1 -apple-system,"HarmonyOS Sans SC","MiSans",Roboto,sans-serif;
-        -webkit-tap-highlight-color:transparent;backdrop-filter:blur(8px);
-        box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer;user-select:none}
+      /* 切换回 Color 调度按钮：嵌入头部 .status-row（状态徽标与版本号之间），
+         样式对齐 .status-badge 胶囊并使用主题 CSS 变量，自动跟随明暗模式 */
+      #cfSwapBtn{display:none;align-items:center;gap:6px;margin-left:auto;
+        padding:6px 16px;border-radius:30px;font-size:14px;font-weight:500;
+        background:var(--accent-soft);color:var(--accent);
+        border:1px solid var(--accent-border);
+        -webkit-tap-highlight-color:transparent;cursor:pointer;user-select:none;
+        transition:transform .12s ease,background .2s ease,color .2s ease}
       #cfSwapBtn:active{transform:scale(.96)}
-      #cfSwapBtn.confirm{border-color:#ffb02e;color:#ffb02e}
-      #cfSwapBtn.busy{opacity:.6;pointer-events:none}
+      /* 二次确认态：同步应用的 warn 徽标配色 */
+      #cfSwapBtn.confirm{background:var(--amber-soft);color:var(--amber-text);border-color:var(--amber-soft)}
+      #cfSwapBtn.busy{opacity:.55;pointer-events:none}
     </style>
   </head>
   <body>
@@ -60,6 +62,22 @@
 
       function fail(msg){ btn.classList.remove('busy'); btn.classList.add('confirm'); btn.textContent = '失败:' + msg; setTimeout(reset, 2600); }
 
+      /* 嵌入位置：头部 .status-row 内，状态徽标（工作中·限频中）与版本号之间。
+         React 可能整棵重渲染，脱挂后自动回插；margin-left:auto 与版本号保持右侧间距 */
+      function mountInHeader(){
+        var ver = document.querySelector('.status-row .version');
+        if(!ver || !ver.parentNode) return false;
+        if(btn.parentNode !== ver.parentNode) ver.parentNode.insertBefore(btn, ver);
+        btn.style.display = 'inline-flex';
+        return true;
+      }
+      var mountTries = 0;
+      var mountTimer = setInterval(function(){
+        if(mountInHeader()){ clearInterval(mountTimer); return; }
+        if(++mountTries > 120){ clearInterval(mountTimer); }   // ~36s 后放弃轮询
+      }, 300);
+      setInterval(function(){ if(!btn.isConnected) mountInHeader(); }, 1000);  // 重渲染脱挂回插
+
       btn.addEventListener('click', function(){
         if(btn.classList.contains('busy')) return;
         if(!hasKsu){ location.replace('../index.html'); return; }  // 预览环境直接跳转
@@ -74,8 +92,7 @@
           if(!d) return fail('未找到模块');
           return exec('sh ' + d + '/webroot/api.sh swap dispatch').then(function(r){
             var out = (r.stdout || '').trim();
-            if(/^OK_DISPATCH/.test(out) || out === 'ALREADY_DISPATCH'){ location.replace('../index.html'); }
-            else if(/^OK_/.test(out)){ location.replace('../index.html'); }
+            if(/^OK_/.test(out) || out === 'ALREADY_DISPATCH'){ location.replace('../index.html'); }
             else fail('errno=' + r.errno);
           });
         }).catch(function(){ fail('异常'); });

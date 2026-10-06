@@ -1,6 +1,3 @@
-#!/system/bin/sh
-# C 方案极速模式：walt 调速器全核（小核 cpu0-3 =60，大核 cpu4-7 =52）
-
 chmod 777 /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 chmod 777 /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
 chmod 777 /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor

@@ -1,6 +1,5 @@
 SOC_PLAT=$(getprop ro.board.platform)
 if [[ $action == "powersave" ]]; then
-	# 省电
 	echo "powersave" > $pan1
     $mokzdz/C/opt2 0
     $mokzdz/C/conservative.sh
@@ -17,7 +16,6 @@ if [[ $action == "powersave" ]]; then
 fi
 
 if [[ $action == "balance" ]]; then
-	# 均衡
     $mokzdz/C/llcc.sh unlock_llcc
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq
@@ -39,7 +37,6 @@ if [[ $action == "balance" ]]; then
 fi
 
 if [[ $action == "performance" ]]; then
-	# 性能
     $mokzdz/C/llcc.sh unlock_llcc
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq
@@ -60,7 +57,6 @@ if [[ $action == "performance" ]]; then
 fi
 
 if [[ $action == "fast" ]]; then
-	# 极速
     $mokzdz/C/llcc.sh unlock_llcc
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq

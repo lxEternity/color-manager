@@ -1,5 +1,3 @@
-#!/system/bin/sh
-
 BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
 . $BASEDIR/fangan.sh
@@ -9,9 +7,6 @@ mosdz=$2
 cpuxh=$3
 pan1="$mokml/cur_powermode.txt"
 
-# qhz 死锁自愈：上次切换被中断（进程被杀/报错）会把锁留在 0，
-# 之后所有切换都会静默跳过（表现为"点了没反应/切换不生效"）。
-# 锁龄超过 60 秒视为死锁，强制接管（正常切换在秒级完成）
 if [ "$(cat $mosdz/qhz 2>/dev/null)" != "1" ]; then
 	now=$(date +%s)
 	lock=$(stat -c %Y $mosdz/qhz 2>/dev/null || echo $now)
@@ -20,9 +15,6 @@ if [ "$(cat $mosdz/qhz 2>/dev/null)" != "1" ]; then
 	fi
 fi
 
-# core_ctl 按模式控制（超大核"一直活跃"的根因修复）：
-# 非省电：enable=0 + min/max_cpus=全核 —— 强制全核在线（原 qingtd.sh cpus() 行为）
-# 省电  ：enable=1 + min_cpus=1        —— 交还系统热插拔，空闲核心（含超大核）自动下线休闲
 corectl_off(){
     for d in /sys/devices/system/cpu/cpu*/core_ctl; do
         [ -d "$d" ] || continue
@@ -62,19 +54,14 @@ corectl_on(){
 }
 
 if test $(cat $mosdz/qhz) -eq 1 ; then
-	#无堵塞
 
-	#切换中
 	echo "0" > $mosdz/qhz
 
 	mokzdz="${mosdz%\/files}"
 
-	# 方案选择统一走 fangan.sh（与 install.sh / WebUI 同一实现）：
-	# scx→A / hmbird→B / sugov_next→A(调速器改sugov_next) / 都没有→C
 	fangan_detect
 
 	szwj="$mokzdz/config/$FANGAN.$cpuxh.sh"
-	# 平台专属配置缺失时回退 all 配置（保留用户按平台自定义能力）
 	if [ ! -f "$szwj" ]; then
 		szwj="$mokzdz/config/$FANGAN.all.sh"
 	fi
@@ -90,14 +77,12 @@ if test $(cat $mosdz/qhz) -eq 1 ; then
 		echo "方案 $FANGAN 的配置文件不存在（$cpuxh / all 均缺失）"
 	fi
 
-	# core_ctl 按模式（在配置应用后执行：省电交还热插拔，其他模式全核在线）
 	if [ "$action" = "powersave" ]; then
 		corectl_on
 	else
 		corectl_off
 	fi
 
-	# sugov_next 内核：把调速器统一设为 sugov_next（用户规则：检测到 sugov_next 启用 A 配置并把调速器改为 sugov_next）
 	if [ "$FANGAN_GOV" = "sugov_next" ]; then
 		for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
 			chmod 777 "$g" 2>/dev/null
@@ -105,7 +90,6 @@ if test $(cat $mosdz/qhz) -eq 1 ; then
 		done
 	fi
 
-	#切换结束
 	echo "1" > $mosdz/qhz
 
 fi

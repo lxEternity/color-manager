@@ -1,8 +1,3 @@
-#!/system/bin/sh
-# api.sh — 自适配动态限频 WebUI 后端
-# 由 WebUI 经 kernelsu.exec 以 root 身份调用：api.sh <cmd> [args...]
-# 约定：成功输出数据（JSON / 纯文本 / TSV），失败输出 "ERR: 原因" 到 stderr 并 exit 1
-
 MODDIR=${0%/*}
 MODDIR=${MODDIR%/webroot}
 CONF="$MODDIR/powerd.conf"
@@ -22,7 +17,6 @@ valid_pkg() {
   return 0
 }
 
-# 从单包 dumpsys/pm dump 里提取应用名称
 get_label() {
   local p="$1" line lab
   line=$(dumpsys package "$p" 2>/dev/null | grep -m1 -i 'application-label')
@@ -34,11 +28,6 @@ get_label() {
   printf '%s' "$lab" | tr -d '\t\n\r' | cut -c1-60
 }
 
-# 探测 CPU 簇分级与 GPU（供 WebUI 配置页按实际架构显示/隐藏）
-# 分级逻辑与 powerd.sh 保持一致（去重后档位数 n：1→big；2→big+little；
-# 3→big+mid+little；>=4→big+mid2+mid+little）
-# 输出：{"cpu":[{"key":"big","max":4326000},...],"gpu":{"max":940}|null}
-# cpu.max 单位 kHz；gpu.max 单位 MHz（已归一化）；探测不到为 null/空数组
 cmd_clusters() {
   local CPUFREQ=/sys/devices/system/cpu/cpufreq
   local p maxf freqs="" f n=0
@@ -53,7 +42,7 @@ cmd_clusters() {
 
   local cpu_json=""
   if [ "$n" -ge 1 ]; then
-    set -- $freqs  # $1..$n 升序
+    set -- $freqs
     local f_big f_little f_mid2 f_mid
     eval "f_big=\${$n}"
     f_little=$1
@@ -131,9 +120,6 @@ cmd_log() {
 
 CONF_KEYS="INTERVAL GAME_EXIT_GRACE_SEC FENGCHI_DETECT_SEC CPU_PCT_BIG CPU_PCT_MID2 CPU_PCT_MID CPU_PCT_LITTLE GPU_PCT GPU_BOOST_CONTROL CPU_GOVERNOR LOG_FILE"
 
-# 配置自愈：补全缺失的 key（默认值与 powerd.sh 一致）。
-# 老版本升级上来的 powerd.conf 可能缺少新 key（如 FENGCHI_DETECT_SEC），
-# 守护进程只在内存里给默认值，不会写回，导致 WebUI 读出空值。
 ensure_conf_keys() {
   [ -f "$CONF" ] || return 0
   local k v
@@ -163,7 +149,7 @@ cmd_conf_get() {
   printf '{'
   for k in $CONF_KEYS; do
     v=$(sed -n "s/^$k=//p" "$CONF" 2>/dev/null | head -1)
-    v=$(printf '%s' "$v" | sed 's/[[:space:]]*#.*$//')  # 去行尾注释
+    v=$(printf '%s' "$v" | sed 's/[[:space:]]*#.*$//')
     case "$v" in '"'*'"') v=$(printf '%s' "$v" | sed 's/^"//; s/"$//') ;; esac
     [ "$first" = 1 ] || printf ','
     first=0
@@ -222,8 +208,6 @@ cmd_games_del() {
   echo OK
 }
 
-# 一次 dumpsys 全量解析所有应用 包名 -> 名称（TSV），前端缓存后做即时搜索
-# 无名称的应用以包名作为名称输出
 cmd_apps_all() {
   dumpsys package 2>/dev/null | awk '
     /Package \[/ {
@@ -241,31 +225,26 @@ cmd_apps_all() {
   return 0
 }
 
-# 取单个应用图标（APK 内最高密度 launcher 光栅图标），输出 data URI，取不到输出空
 cmd_app_icon() {
   local p="$1" apk entry dens mime b64 listing
   valid_pkg "$p" || return 1
   command -v unzip >/dev/null 2>&1 || return 1
   apk=$(pm path "$p" 2>/dev/null | head -1 | sed 's/^package://')
   [ -n "$apk" ] && [ -f "$apk" ] || return 1
-  # APK 内全部光栅图片条目（条目名可能含空格，取第 4 列之后全部）
   listing=$(unzip -l "$apk" 2>/dev/null | grep -iE '\.(png|webp|jpg|jpeg)$' | sed -E 's/^ *[^ ]+ +[^ ]+ +[^ ]+ +//')
   [ -n "$listing" ] || return 1
-  # 1) 最高密度的 mipmap launcher 图标（优先非 round）
   for dens in xxxhdpi xxhdpi xhdpi hdpi mdpi; do
     entry=$(printf '%s\n' "$listing" | grep -i "mipmap-${dens}" | grep -iE 'launcher|icon' | grep -vi 'round' | head -1)
     [ -n "$entry" ] && break
     entry=$(printf '%s\n' "$listing" | grep -i "mipmap-${dens}" | grep -iE 'launcher|icon' | head -1)
     [ -n "$entry" ] && break
   done
-  # 2) 任意 mipmap/drawable 下的 launcher/icon
   if [ -z "$entry" ]; then
     entry=$(printf '%s\n' "$listing" | grep -iE 'mipmap|drawable' | grep -iE 'launcher|icon' | grep -vi 'round' | head -1)
   fi
   if [ -z "$entry" ]; then
     entry=$(printf '%s\n' "$listing" | grep -iE 'mipmap|drawable' | grep -iE 'launcher|icon' | head -1)
   fi
-  # 3) 自适应图标兜底：只有 anydpi-v26 XML 时，取约定命名的背景光栅
   if [ -z "$entry" ]; then
     entry=$(printf '%s\n' "$listing" | grep -iE 'ic_launcher_background\.(png|webp|jpg|jpeg)$' | head -1)
   fi
@@ -287,7 +266,6 @@ cmd_restart() {
   case "$pid" in ''|*[!0-9]*) ;; *) [ -d "/proc/$pid" ] && alive=1 ;; esac
   [ "$alive" = "1" ] && kill "$pid" 2>/dev/null
   sleep 2
-  # 看门狗 30s 内也会拉起；这里立即拉起一次（acquire_lock 防多实例）
   nohup /system/bin/sh "$MODDIR/powerd.sh" start >/dev/null 2>&1 &
   echo OK
 }
@@ -300,8 +278,6 @@ cmd_about() {
   return 0
 }
 
-# 形态切换（ColorFC 合并形态）：转发到 webroot/swap.sh，输出透传
-# swap dispatch → 切回 Color 调度；swap adapt → 切到自适应限频
 cmd_swap() {
   case "$1" in
     adapt|dispatch) ;;

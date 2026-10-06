@@ -1,5 +1,3 @@
-#!/system/bin/sh
-
 path=/sys/devices/system/cpu/bus_dcvs/LLCC
 
 lock_value () {
@@ -13,7 +11,7 @@ get_max_freq(){
 }
 
 set_max_freq(){
-  
+
   local freq="$2"
   for file in "$path"/*/max_freq
   do
@@ -29,7 +27,6 @@ visible() {
   [[ -d $path ]] && echo 1 || echo 0
 }
 
-
 usage() {
 cat <<EOF
 用法: $0 [指令] [参数]
@@ -41,12 +38,10 @@ cat <<EOF
 EOF
 }
 
-
 if [ $# -lt 1 ]; then
   usage
   exit 1
 fi
-
 
 case "$1" in
 get_max_freq)

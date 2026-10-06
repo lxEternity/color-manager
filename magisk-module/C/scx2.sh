@@ -1,6 +1,3 @@
-#!/system/bin/sh
-# C 方案性能模式：walt 调速器（小核 cpu0/3 =74，大核 cpu5/7 =66）
-
 chmod 777 /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 chmod 777 /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 chmod 777 /sys/devices/system/cpu/cpu5/cpufreq/scaling_governor

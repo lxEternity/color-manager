@@ -1,13 +1,3 @@
-#!/system/bin/sh
-# ============================================================
-#  cpu_gpu_probe.sh  (v5)
-#  用法：
-#    su -c 'sh /sdcard/3/cpu_gpu_probe.sh'
-#    su -c 'sh /sdcard/3/cpu_gpu_probe.sh /sdcard/3/cpu_gpu_probe.log'
-#  安全：只读节点，不写频率、不改权限。
-# ============================================================
-
-# 屏蔽 mksh 交互模式下的 fc 噪音
 exec 2>/dev/null
 
 OUT="${1:-/sdcard/3/cpu_gpu_probe.log}"

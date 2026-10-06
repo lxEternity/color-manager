@@ -13,7 +13,6 @@ echo $pid > /dev/cpuset/$2/tasks
 echo $pid
 }
 
-
 wj_zr() {
     local value="$1"
     local file="$2"

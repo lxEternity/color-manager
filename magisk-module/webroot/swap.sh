@@ -1,12 +1,9 @@
-#!/system/bin/sh
-#==================================================
 SWAPDIR=$(dirname "$(readlink -f "$0")")
 MODROOT=${SWAPDIR%/*}
 STORE=/data/adb/colorFC_store
 DLOG=$STORE/swap.log
 mode=$1
 
-# 调度形态的专属文件
 DISPATCH_ITEMS="script A B C config qingtd files install.sh post-fs-data.sh uninstall.sh service.sh module.prop META-INF README.md Updatelog.md json_cpu_max_min.c Color调度管理器_1.3.8.apk"
 
 ADAPT_ITEMS="service.sh post-fs-data.sh action.sh powerd.sh powerd.conf games.txt system updatelog.txt module.prop state pause status.json powerd.log"
@@ -16,9 +13,8 @@ log() { echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$DLOG" 2>/dev/null; }
 mkdir -p "$STORE" "$STORE/dispatch" "$STORE/adapt"
 log "==== swap 开始: $mode ===="
 
-# ---------- 守护进程控制 ----------
 stop_dispatch() {
-  
+
     for p in "qingtdjc1.sh" "script/qingtd.sh" "qingtdjc" "qtbh.sh"; do
         pkill -f "$p" 2>/dev/null
     done
@@ -26,7 +22,6 @@ stop_dispatch() {
 }
 
 stop_adapt() {
-    # powerd restore
     [ -f "$MODROOT/powerd.sh" ] && sh "$MODROOT/powerd.sh" restore >/dev/null 2>&1
     sleep 1
     for p in "powerd.sh start" "proc_monitor.sh" "colorFC/service.sh"; do
@@ -35,7 +30,6 @@ stop_adapt() {
     log "自适应守护已停止（频率已恢复）"
 }
 
-# ---------- 文件搬迁 ----------
 move_out_dispatch() {
     for f in $DISPATCH_ITEMS; do
         if [ -e "$MODROOT/$f" ]; then
@@ -43,7 +37,6 @@ move_out_dispatch() {
             mv -f "$MODROOT/$f" "$STORE/dispatch/" 2>/dev/null
         fi
     done
-    # 接口
     for f in /data/powercfg.sh /data/powercfg.json; do
         [ -e "$f" ] && mv -f "$f" "$STORE/dispatch/" 2>/dev/null
     done
@@ -66,7 +59,7 @@ move_in_dispatch() {
     [ -d "$MODROOT/script" ] && chmod -R 0755 "$MODROOT/script" 2>/dev/null
     [ -d "$MODROOT/A" ] && chmod 0755 "$MODROOT/A"/* 2>/dev/null
     [ -d "$MODROOT/B" ] && chmod 0755 "$MODROOT/B"/* 2>/dev/null
-    
+
     [ -f "$STORE/dispatch/powercfg.sh" ] && cp -af "$STORE/dispatch/powercfg.sh" /data/ && chmod 0777 /data/powercfg.sh
     [ -f "$STORE/dispatch/powercfg.json" ] && cp -af "$STORE/dispatch/powercfg.json" /data/ && chmod 0777 /data/powercfg.json
     log "调度文件已重新释放到模块目录"
@@ -87,9 +80,6 @@ move_in_adapt() {
 
     src="$MODROOT/adapt"
     [ -f "$STORE/adapt/powerd.sh" ] && src="$STORE/adapt"
-    # 版本感知：备份引擎版本 ≠ 内置版本（模块升级后首次切换）时，
-    # 引擎与 powerd.conf 取内置新版（否则老备份会永远压住新版引擎，
-    # 用户更新模块后切不进新版本），games.txt 仍取备份保留用户游戏清单
     store_ver=$(grep -o '^version=.*' "$STORE/adapt/module.prop" 2>/dev/null | head -1)
     bundled_ver=$(grep -o '^version=.*' "$MODROOT/adapt/module.prop" 2>/dev/null | head -1)
     if [ "$src" = "$STORE/adapt" ] && [ -n "$store_ver" ] && [ "$store_ver" != "$bundled_ver" ]; then
@@ -118,7 +108,6 @@ move_in_adapt() {
     log "自适应文件已全新释放到模块目录 (源: $src)"
 }
 
-# ---------- 形态启动 ----------
 start_adapt() {
     nohup /system/bin/sh "$MODROOT/service.sh" >/dev/null 2>&1 &
     log "自适应限频服务已启动（约10秒后开始限频）"
@@ -126,7 +115,6 @@ start_adapt() {
 
 start_dispatch() {
     nohup /system/bin/sh "$MODROOT/script/qingtd.sh" >/dev/null 2>&1 &
-    # 立即按上次模式重新应用一次（统一调度接口，kzlx=1 仅应用）
     sleep 1
     cur=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)
     [ -z "$cur" ] && cur="balance"
@@ -140,7 +128,6 @@ start_dispatch() {
     log "调度守护已启动，已应用模式: $cur"
 }
 
-# ---------- 刷新管理器模块列表 ----------
 reload_managers() {
     sleep 2
     for m in me.weishu.kernelsu com.rifsxd.ksunext me.bmax.apatch; do
@@ -151,7 +138,6 @@ reload_managers() {
     done
 }
 
-# ---------- 主流程 ----------
 case "$mode" in
 adapt)
     if [ -f "$MODROOT/powerd.sh" ] && [ ! -d "$MODROOT/script" ]; then

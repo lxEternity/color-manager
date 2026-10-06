@@ -1,4 +1,3 @@
-#!/system/bin/sh
 cpus="0 3 5 7"
 
 for cpu in $cpus;do
@@ -12,7 +11,4 @@ for cpu in $cpus;do
     echo "1" > /sys/devices/system/cpu/cpu$cpu/cpufreq/conservative/ignore_nice_load
 done
 
-
-
-       
 echo "1" > /proc/game_opt/early_detect/ed_enable

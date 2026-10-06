@@ -1,5 +1,3 @@
-#!/system/bin/sh
-# chkfreq.sh v1.2.0 — CPU/GPU 频率实时监控
 G='\033[1;32m'; B='\033[1;34m'; C='\033[1;36m'
 R='\033[1;31m'; Y='\033[1;33m'; M='\033[1;35m'; X='\033[0m'
 CPUFREQ=/sys/devices/system/cpu/cpufreq
@@ -27,7 +25,6 @@ govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/d
 
 printf '\033[?25l'
 trap 'printf "\033[?25h"; clear; printf "${G}已关闭${X}\n"' EXIT
-# INT/TERM 必须显式 exit：仅挂 EXIT 时信号被捕获后脚本会继续跑，Ctrl+C 无法退出
 trap 'exit 130' INT TERM
 
 clear
@@ -47,7 +44,6 @@ printf "${B}%-48s${X}\n" "──────────────────
 printf "%-8s  %-14s  %10s  %10s\n" "核心" "调速器" "上限" "当前"
 printf "${B}%-48s${X}\n" "────────────────────────────────────────────────"
 
-# 表头共 11 行：logo×5 + byline + 分隔线 + 调速器行 + 分隔线 + 列头 + 分隔线
 header_lines=11
 
 while :; do
@@ -66,7 +62,6 @@ while :; do
         schedutil) cl=$B ;;
         *) cl=$G ;;
       esac
-      # “上限”显示 scaling_max_freq（模块实际施加的封顶），而非硬件 cpuinfo_max_freq
       mx=$(cat "$p/scaling_max_freq" 2>/dev/null)
       cur=$(cat "$p/scaling_cur_freq" 2>/dev/null)
       mx_g=$(awk -v v="${mx:-0}" 'BEGIN{printf "%.2fGHz",v/1000000}')

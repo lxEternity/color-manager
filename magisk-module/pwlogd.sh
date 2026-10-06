@@ -1,30 +1,13 @@
-#!/system/bin/sh
-# ============================================================
-# ColorFC 功耗记录守护：低频采样电池 功率/温度/电量/充放状态 → CSV
-# 数据目录 /data/adb/colorFC_store/pwlog/（形态切换/重刷模块均保留）
-# 供 WebUI「功耗记录」页绘制历史曲线
-#
-# v1.3.9.7 修复：
-#  1. 采样间隔 30s → 2s（对齐 WebUI 实时曲线口径）
-#  2. CSV 追加第 6 列：采样电压（已归一化为 V）。写入端不再按电芯模式×2，
-#     统一由 WebUI 查看端按"当前电芯模式 + 每行电压"修正，避免写/看两端重复×2 变 4 倍
-#  3. 电流/电压单位自适应（µA/mA/A、µV/mV/V），修复部分机型
-#     节点报 mA/mV 时功率被缩小 1000 倍（充电显示 0.06W）
-#  4. 温度单位自适应（0.01℃/0.1℃/℃ → ℃），修复记录页 363℃ 异常
-#  5. 启动时清理旧版本遗留的 pwlogd 进程（旧进程按旧公式持续写坏数据）
-# ============================================================
 STORE=/data/adb/colorFC_store/pwlog
 PIDF=/data/adb/colorFC_store/pwlogd.pid
-INTERVAL=2       # 采样间隔（秒），一天约 43200 条
-KEEP_DAYS=7      # 历史保留天数
+INTERVAL=2
+KEEP_DAYS=7
 
-# 清理旧版/其他路径遗留的 pwlogd 进程（模块升级后旧进程不会自行退出）
 if command -v pgrep >/dev/null 2>&1; then
     for p in $(pgrep -f pwlogd.sh 2>/dev/null); do
         [ "$p" = "$$" ] || kill "$p" 2>/dev/null
     done
 else
-    # 兜底：PID 文件方式（校验 cmdline 防止误杀复用 PID 的无关进程）
     if [ -f "$PIDF" ]; then
         op=$(cat "$PIDF" 2>/dev/null)
         if [ -n "$op" ] && [ -r "/proc/$op/cmdline" ] \
@@ -39,7 +22,6 @@ echo $$ > "$PIDF"
 
 B=/sys/class/power_supply/battery
 
-# 清理过期文件（启动时执行一次；toybox date 不支持 -d N days 时静默跳过）
 cleanup() {
     cutoff=$(date -d "-${KEEP_DAYS} days" +%Y%m%d 2>/dev/null) || return 0
     [ -n "$cutoff" ] || return 0
@@ -60,28 +42,22 @@ while true; do
         temp=$(cat $B/temp 2>/dev/null)
         cap=$(cat $B/capacity 2>/dev/null)
         st=$(cat $B/status 2>/dev/null)
-        # 功率：电流/电压单位自适应（µA/mA/A、µV/mV/V，对齐 APP 端 PowerMonitor 校准）
-        # 写入原始功率（不做电芯×2 修正），电芯口径由 WebUI 查看端按当前模式 + 每行电压修正
-        # 第 6 列 = 归一化后的电压 V（判断该行是单芯口径还是串联总压）
         wv=$(awk -v c="$cur" -v v="$volt" 'BEGIN{
             a = c<0 ? -c : c; A = a>100000 ? c/1e6 : (a>1 ? c/1000 : c);
             b = v<0 ? -v : v; V = b>1000000 ? v/1e6 : (b>2500 ? v/1000 : v);
             w = A*V; if (w<0) w = -w;
             printf "%.2f,%.2f", w, V;
         }')
-        # 温度：单位自适应（0.01℃/0.1℃/℃ → ℃），超物理范围写 NA
         tv=NA
         [ -n "$temp" ] && tv=$(awk -v t="$temp" 'BEGIN{
             if (t>600) t/=100; else if (t>60) t/=10;
             if (t>=0 && t<=90) printf "%.1f", t; else printf "NA";
         }')
-        # 状态映射：1=充电/满/接电，0=放电
         case "$st" in
             Charging*|Full|Not\ charg*) c=1;;
             *) c=0;;
         esac
         echo "$now,${wv},${tv},${cap:-NA},$c" >> "$STORE/pwlog-$(date +%Y%m%d).csv"
-        # 每 30 分钟滚动清理一次（now%1800 落在采样间隔内即触发）
         [ $((now % 1800)) -lt $INTERVAL ] && cleanup
     }
     sleep $INTERVAL

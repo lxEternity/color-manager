@@ -1,12 +1,11 @@
 SOC_PLAT=$(getprop ro.board.platform)
 if [[ $action == "powersave" ]]; then
-	# 省电
 	echo "powersave" > $pan1
     $mokzdz/A/opt2 0
     $mokzdz/A/conservative.sh
     $mokzdz/A/json_cpu_max_min "42" "24" "5" "0"
     $mokzdz/A/llcc.sh set_max_freq 350000
-    
+
     echo "6" > /dev/cpuctl/display/cpu.uclamp.min
     echo "5" > /dev/cpuctl/ssfg/cpu.uclamp.min
     echo "8" > /dev/cpuctl/touch/cpu.uclamp.min
@@ -16,7 +15,6 @@ if [[ $action == "powersave" ]]; then
 fi
 
 if [[ $action == "balance" ]]; then
-	# 均衡
     $mokzdz/A/llcc.sh unlock_llcc
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq
@@ -27,7 +25,7 @@ if [[ $action == "balance" ]]; then
     $mokzdz/A/scx1.sh
     $mokzdz/A/json_cpu_max_min "64" "20"
     $mokzdz/A/llcc.sh set_max_freq 680000
-   
+
     echo "30" > /dev/cpuctl/display/cpu.uclamp.min
     echo "28" > /dev/cpuctl/ssfg/cpu.uclamp.min
     echo "40" > /dev/cpuctl/touch/cpu.uclamp.min
@@ -37,7 +35,6 @@ if [[ $action == "balance" ]]; then
 fi
 
 if [[ $action == "performance" ]]; then
-	# 性能
     $mokzdz/A/llcc.sh unlock_llcc
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq
@@ -57,7 +54,6 @@ if [[ $action == "performance" ]]; then
 fi
 
 if [[ $action == "fast" ]]; then
-	# 极速
     $mokzdz/A/llcc.sh unlock_llcc
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/max_freq
     chattr -i /sys/class/devfreq/soc:qcom,memlat-drv/min_freq
@@ -76,4 +72,4 @@ if [[ $action == "fast" ]]; then
     echo "84" > /dev/cpuctl/multimedia/cpu.uclamp.min
     echo "94" > /dev/cpuctl/rt/cpu.uclamp.min
     echo "78" > /dev/cpuctl/top-app/cpu.uclamp.min
-fi 
+fi

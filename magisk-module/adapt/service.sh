@@ -9,14 +9,24 @@ SH=/system/bin/sh
 while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done
 sleep 10
 
+is_alive() {
+  # 先看 lock 里记录的 pid，避免每轮都 pgrep 全表扫描
+  local pid
+  pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
+  case "$pid" in
+    ''|*[!0-9]*) ;;
+    *) [ -d "/proc/$pid" ] && return 0 ;;
+  esac
+  # lock 丢失/过期时的兜底：全表扫描
+  for pid in $(pgrep -f "powerd.sh start" 2>/dev/null); do
+    [ -d "/proc/$pid" ] && return 0
+  done
+  return 1
+}
 
 while true; do
-  alive=0
-  for pid in $(pgrep -f "powerd.sh start" 2>/dev/null); do
-    [ -d "/proc/$pid" ] && alive=1 && break
-  done
-  if [ "$alive" = "0" ] && [ ! -f "$MODDIR/pause" ]; then
-    nohup $SH "$MODDIR/powerd.sh" start > /dev/null 2>&1 &
+  if ! is_alive && [ ! -f "$MODDIR/pause" ]; then
+    nohup "$SH" "$MODDIR/powerd.sh" start > /dev/null 2>&1 &
   fi
 
   # ColorFC 功耗记录守护（幂等，两形态常驻）

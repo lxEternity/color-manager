@@ -1,8 +1,9 @@
 #!/system/bin/sh
+# chkfreq.sh v1.2.0 — CPU/GPU 频率实时监控
 G='\033[1;32m'; B='\033[1;34m'; C='\033[1;36m'
 R='\033[1;31m'; Y='\033[1;33m'; M='\033[1;35m'; X='\033[0m'
 CPUFREQ=/sys/devices/system/cpu/cpufreq
-MODDIR=/data/adb/modules/powerd_freqcap
+MODDIR=/data/adb/modules/colorFC
 
 find_gpu_node() {
   for d in /sys/class/kgsl/kgsl-3d0 \
@@ -24,8 +25,10 @@ for c in /sys/devices/system/cpu/cpu[0-9]*; do [ -d "$c" ] && cores=$((cores+1))
 
 govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null)
 
-echo -ne "\033[?25l"
-trap 'echo -ne "\033[?25h"; clear; printf "${G}已关闭${X}\n"' EXIT INT TERM
+printf '\033[?25l'
+trap 'printf "\033[?25h"; clear; printf "${G}已关闭${X}\n"' EXIT
+# INT/TERM 必须显式 exit：仅挂 EXIT 时信号被捕获后脚本会继续跑，Ctrl+C 无法退出
+trap 'exit 130' INT TERM
 
 clear
 printf "${R} ____             _  __ _\n"
@@ -39,16 +42,13 @@ printf "${G}支持的调速器:${X} "
 for g in $govs; do
   case $g in scx|hmbird) printf "${R}${g}(风驰)${X} " ;; *) printf "${C}${g}${X} " ;; esac
 done
-echo
-
+printf "\n"
 printf "${B}%-48s${X}\n" "────────────────────────────────────────────────"
 printf "%-8s  %-14s  %10s  %10s\n" "核心" "调速器" "上限" "当前"
 printf "${B}%-48s${X}\n" "────────────────────────────────────────────────"
 
-header_lines=12
-i=0; while [ "$i" -lt "$cores" ]; do i=$((i+1)); done
-total_lines=$((header_lines + cores + 2))
-if [ -n "$GPU_DIR" ]; then total_lines=$((total_lines+1)); fi
+# 表头共 11 行：logo×5 + byline + 分隔线 + 调速器行 + 分隔线 + 列头 + 分隔线
+header_lines=11
 
 while :; do
   row=$((header_lines+1))
@@ -66,7 +66,8 @@ while :; do
         schedutil) cl=$B ;;
         *) cl=$G ;;
       esac
-      mx=$(cat "$p/cpuinfo_max_freq" 2>/dev/null)
+      # “上限”显示 scaling_max_freq（模块实际施加的封顶），而非硬件 cpuinfo_max_freq
+      mx=$(cat "$p/scaling_max_freq" 2>/dev/null)
       cur=$(cat "$p/scaling_cur_freq" 2>/dev/null)
       mx_g=$(awk -v v="${mx:-0}" 'BEGIN{printf "%.2fGHz",v/1000000}')
       cur_g=$(awk -v v="${cur:-0}" 'BEGIN{printf "%.2fGHz",v/1000000}')
@@ -98,7 +99,9 @@ while :; do
   fi
 
   st=$(cat "$MODDIR/state" 2>/dev/null || echo "unknown")
+  gp=$(sed -n 's/^game_pkg=//p' "$MODDIR/run/status" 2>/dev/null)
   printf "\033[${row};0H\033[K${B}模块状态:${X} ${G}${st}${X}  时间: ${C}$(date +'%T')${X}  [q退出]"
+  [ -n "$gp" ] && printf "  游戏: ${M}%s${X}" "$gp"
 
   read -t 1 in 2>/dev/null
   [ "$in" = "q" ] && break

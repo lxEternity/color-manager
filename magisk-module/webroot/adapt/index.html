@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0e1a" />
+    <title>自适配动态限频</title>
+    <script type="module" crossorigin src="./assets/index-CA8pALd_.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-MQYxA1L9.css">
+    <style>
+      /* 切换回 Color 调度的浮动按钮（与限频暗色主题一致） */
+      #cfSwapBtn{position:fixed;z-index:99999;top:calc(env(safe-area-inset-top,0px) + 10px);right:12px;
+        display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:20px;
+        background:rgba(22,29,47,.88);border:1px solid rgba(120,180,255,.35);color:#9fd0ff;
+        font:600 12px/1 -apple-system,"HarmonyOS Sans SC","MiSans",Roboto,sans-serif;
+        -webkit-tap-highlight-color:transparent;backdrop-filter:blur(8px);
+        box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer;user-select:none}
+      #cfSwapBtn:active{transform:scale(.96)}
+      #cfSwapBtn.confirm{border-color:#ffb02e;color:#ffb02e}
+      #cfSwapBtn.busy{opacity:.6;pointer-events:none}
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <button id="cfSwapBtn">⇄ Color调度</button>
+    <script>
+    /* ColorFC 形态切换：点按两次确认 → swap.sh dispatch → 回 Color WebUI */
+    (function(){
+      var btn = document.getElementById('cfSwapBtn');
+      var hasKsu = (typeof ksu !== 'undefined') && (typeof ksu.exec === 'function');
+      var seq = 0, armed = false, timer = null, modDir = null;
+
+      function exec(cmd){
+        return new Promise(function(res){
+          var name = 'cfSwapCb_' + Date.now() + '_' + (seq++);
+          window[name] = function(errno, stdout, stderr){
+            delete window[name];
+            res({errno:errno, stdout:(''+stdout).replace(/^"|"$/g,''), stderr:''+stderr});
+          };
+          try{ ksu.exec(cmd, '{}', name); }
+          catch(e){ delete window[name]; res({errno:-1, stdout:'', stderr:''+e}); }
+        });
+      }
+
+      function resolveModDir(){
+        if(modDir) return Promise.resolve(modDir);
+        var cands = ['/data/adb/modules/colorFC','/data/adb/ap/modules/colorFC',
+                     '/data/adb/modules/powerd_freqcap','/data/adb/ap/modules/powerd_freqcap'];
+        return cands.reduce(function(chain, d){
+          return chain.then(function(found){
+            if(found) return found;
+            return exec('test -x ' + d + '/webroot/api.sh && echo OK').then(function(r){
+              return (r.stdout || '').trim() === 'OK' ? (modDir = d) : null;
+            });
+          });
+        }, Promise.resolve(null));
+      }
+
+      function reset(){ armed = false; clearTimeout(timer); btn.classList.remove('confirm','busy'); btn.textContent = '⇄ Color调度'; }
+
+      function fail(msg){ btn.classList.remove('busy'); btn.classList.add('confirm'); btn.textContent = '失败:' + msg; setTimeout(reset, 2600); }
+
+      btn.addEventListener('click', function(){
+        if(btn.classList.contains('busy')) return;
+        if(!hasKsu){ location.replace('../index.html'); return; }  // 预览环境直接跳转
+        if(!armed){
+          armed = true; btn.classList.add('confirm'); btn.textContent = '确认切回Color？';
+          clearTimeout(timer); timer = setTimeout(reset, 3200);
+          return;
+        }
+        reset();
+        btn.classList.add('busy'); btn.textContent = '切换中…';
+        resolveModDir().then(function(d){
+          if(!d) return fail('未找到模块');
+          return exec('sh ' + d + '/webroot/api.sh swap dispatch').then(function(r){
+            var out = (r.stdout || '').trim();
+            if(/^OK_DISPATCH/.test(out) || out === 'ALREADY_DISPATCH'){ location.replace('../index.html'); }
+            else if(/^OK_/.test(out)){ location.replace('../index.html'); }
+            else fail('errno=' + r.errno);
+          });
+        }).catch(function(){ fail('异常'); });
+      });
+    })();
+    </script>
+  </body>
+</html>

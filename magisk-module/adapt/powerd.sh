@@ -1,11 +1,9 @@
 #!/system/bin/sh
 
-# By Ktwo (MTK 适配版)
+# By Ktwo
+# 自适配动态限频守护进程 v1.2.0
+# 常态按百分比锁定 CPU/GPU 上限，游戏前台自动放开。
 
-# ---- shell 兼容层（移植自 g750-boost v2.1.6）----
-# 上游可能用 busybox ash 拉起本脚本，而 busybox 的 $SECONDS 赋值后恒为 0
-# → 游戏退出迟滞（$SECONDS 单调秒）永久失效（表现为游戏退出不复位）。
-# 检测到不自增就用 /system/bin/sh(mksh) 重执行自身；exec 不改变 pid。
 if [ -z "$POWERD_MKSH" ]; then
   SECONDS=0
   sleep 1
@@ -17,6 +15,8 @@ fi
 SECONDS=0
 
 MODDIR=${0%/*}
+# 无路径前缀调用（如 cd 模块目录后 sh powerd.sh stop）时 ${0%/*} 等于 $0，回退当前目录
+case "$MODDIR" in "$0") MODDIR=. ;; esac
 [ -f "$MODDIR/powerd.conf" ] && . "$MODDIR/powerd.conf"
 LOG_FILE="${LOG_FILE:-$MODDIR/powerd.log}"
 LOG_MAX_BYTES="${LOG_MAX_BYTES:-262144}"
@@ -24,13 +24,14 @@ exec 2>>"$LOG_FILE"
 STATE_FILE="$MODDIR/state"
 LOCK_DIR="$MODDIR/powerd.lock"
 GAME_LIST="$MODDIR/games.txt"
-GAME_LIST_HEAVY="$MODDIR/games_heavy.txt"
 RUN_DIR="$MODDIR/run"            # 状态快照与 GPU 恢复记录
 GPU_JOURNAL="$RUN_DIR/gpu.saved"
+GAME_PERM_JOURNAL="$RUN_DIR/game_perms.saved"  # 游戏放权时的原始权限记录
 STATUS_FILE="$RUN_DIR/status"
+ORIG_GOVS_FILE="$RUN_DIR/orig_govs"  # 调速器原始值持久化（防 kill -9 丢失）
 PAUSE_FILE="$MODDIR/pause"
 GPU_RESULT=unknown
-GPU_MIN_TOUCHED=0
+GPU_OK=0                     # detect_gpu 成功（有可写节点或 pwrlevel）才置 1
 CPUFREQ="$SYSFS_PREFIX/sys/devices/system/cpu/cpufreq"
 
 GPU=""
@@ -44,13 +45,16 @@ INTERVAL="${INTERVAL:-5}"
 APPLIED_GAME_PKG=""
 GAME_REENTER=0
 GAME_PKG=""            # 当前前台游戏包名
-GAME_TYPE=""           # heavy / normal（保留本模块原有的分级）
-GAME_PKGS=""           # games.txt 包名集合，每次判定重新加载
+GAME_PKGS=""           # games.txt 包名集合，带 mtime 缓存
+GAME_PKGS_MTIME=""
+GAME_PKGS_LOADED=""
 GAME_MISSING_SINCE=""
 GAME_LAST_SEEN=0       # 最后一次判定为游戏态的 $SECONDS
 NOW_SEC=0              # 本轮 $SECONDS（单调秒）
 # 游戏退出迟滞（秒）：前台检测暂失后保持解锁的时长，超时才复位
 GAME_EXIT_GRACE_SEC="${GAME_EXIT_GRACE_SEC:-30}"
+# 游戏进入后等待风驰调速器接管的检测时间（秒）；超时仍非风驰则写入默认游戏调速器
+FENGCHI_DETECT_SEC="${FENGCHI_DETECT_SEC:-1}"
 
 CPU_CAPS=""
 WL_EFF=""
@@ -63,7 +67,30 @@ LOCK_OWNED=0
 ORIG_GOVS=""
 ORIG_GOVS_READY=0
 
+# ---- 时间戳加速探测 ----
+# mksh 的 printf '%(…)T' -1 可直接取当前时间，无需 fork date。
+# 若当前 shell 不支持（理论上不会发生，兼容层已保证 mksh），回退到 date。
+TS_FAST=0
+_ts_probe=$(printf '%(%H:%M:%S)T' -1 2>/dev/null)
+case "$_ts_probe" in
+  *%*) TS_FAST=0 ;;
+  ?*)  TS_FAST=1 ;;
+esac
+unset _ts_probe
+
+ts_now() {
+  if [ "$TS_FAST" = "1" ]; then
+    printf '%(%Y-%m-%d %H:%M:%S)T' -1
+  else
+    date '+%Y-%m-%d %H:%M:%S'
+  fi
+}
+
+LOG_COUNT=0
 trim_log() {
+  # 每 25 次 log 调用才检查一次文件大小，避免每次 fork wc/tail/awk
+  LOG_COUNT=$((LOG_COUNT + 1))
+  [ $((LOG_COUNT % 25)) -ne 1 ] && return 0
   local size
   [ -f "$LOG_FILE" ] || return 0
   size=$(wc -c < "$LOG_FILE" 2>/dev/null)
@@ -78,7 +105,11 @@ trim_log() {
 
 log() {
   trim_log
-  printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" >> "$LOG_FILE"
+  if [ "$TS_FAST" = "1" ]; then
+    printf '[%(%H:%M:%S)T] %s\n' -1 "$*" >> "$LOG_FILE"
+  else
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" >> "$LOG_FILE"
+  fi
 }
 
 validate_pct() {
@@ -104,6 +135,8 @@ validate_config() {
   case "$GAME_EXIT_GRACE_SEC" in ''|*[!0-9]*) GAME_EXIT_GRACE_SEC=30 ;; esac
   [ "$GAME_EXIT_GRACE_SEC" -lt "$INTERVAL" ] && GAME_EXIT_GRACE_SEC=$INTERVAL
   [ "$GAME_EXIT_GRACE_SEC" -gt 300 ] && GAME_EXIT_GRACE_SEC=300
+  case "$FENGCHI_DETECT_SEC" in ''|*[!0-9]*) FENGCHI_DETECT_SEC=1 ;; esac
+  [ "$FENGCHI_DETECT_SEC" -gt 10 ] && FENGCHI_DETECT_SEC=10
 }
 
 acquire_lock() {
@@ -167,16 +200,15 @@ filter_hw_caps() {
 }
 
 snap_freq() {
-  local pol="$1" want="$2" tbl f best=0 diff bestdiff=999999999
+  # 将期望封顶值吸附到频点表上。只向下取最接近且不超过 want 的档位：
+  # 封顶语义要求实际值永远 <= 预期，向上吸附会让限频名存实亡。
+  local pol="$1" want="$2" tbl f best=0
   case "$want" in ''|0|*[!0-9]*) echo "$want"; return ;; esac
   tbl="$CPUFREQ/$pol/scaling_available_frequencies"
   if [ -r "$tbl" ]; then
     for f in $(cat "$tbl" 2>/dev/null); do
       case "$f" in ''|*[!0-9]*) continue ;; esac
-      if [ "$f" -ge "$want" ]; then diff=$((f - want)); else diff=$((want - f)); fi
-      if [ "$diff" -lt "$bestdiff" ] || { [ "$diff" -eq "$bestdiff" ] && [ "$f" -lt "$best" ]; }; then
-        best=$f; bestdiff=$diff
-      fi
+      [ "$f" -le "$want" ] && [ "$f" -gt "$best" ] && best=$f
     done
   fi
   [ "$best" -gt 0 ] && echo "$best" || echo "$want"
@@ -186,7 +218,7 @@ snap_freq() {
 detect_gpu() {
   local avail f gpumax gpumax_is_mhz=0
   GPU=""; GPU_MIN=""; GPU_NORMAL=""; GPU_IS_MHZ=0; GPU_MIN_IS_MHZ=0
-  GPU_NORMAL_WRITE=""; GPU_FREQS=""; GPU_PWRLEVEL=""; GPU_PWRLEVEL_NORMAL=""
+  GPU_FREQS=""; GPU_PWRLEVEL=""; GPU_PWRLEVEL_NORMAL=""
   GPU_MAX_HZ=""
   GPU_MIN_HZ=""
   GPU_PLATFORM=""
@@ -268,11 +300,7 @@ detect_gpu() {
     *) GPU_PLATFORM="?" ;;
   esac
 
-  if [ "$GPU_IS_MHZ" = "1" ]; then
-    GPU_NORMAL_WRITE=$(( GPU_NORMAL / 1000000 ))
-  else
-    GPU_NORMAL_WRITE=$GPU_NORMAL
-  fi
+  # GPU_NORMAL_WRITE 已移除：write_gpu 会按节点单位自行换算，避免两处换算逻辑漂移
 
   if [ -e "/sys/kernel/gpu/gpu_min_clock" ]; then
     GPU_MIN="/sys/kernel/gpu/gpu_min_clock"
@@ -300,6 +328,7 @@ detect_gpu() {
     log "WARN: 未找到可写 GPU 节点，跳过 GPU 限频"
     return 1
   fi
+  GPU_OK=1
   return 0
 }
 
@@ -363,7 +392,6 @@ write_lock() {
   [ -e "$node" ] || return 1
   chmod 644 "$node" 2>/dev/null
   printf '%s\n' "$val" > "$node" 2>/dev/null
-  [ "$lock" = "1" ] && chmod 644 "$node" 2>/dev/null
   local got
   got=$(cat "$node" 2>/dev/null)
   [ -n "$got" ] || { log "WARN write_lock: 回读为空 node=$node"; return 1; }
@@ -419,7 +447,6 @@ gpu_write_node() {
     case "$mode" in ''|*[!0-7]*) mode=644 ;; esac
     printf '%s %s %s\n' "$node" "$raw" "$mode" >> "$GPU_JOURNAL" || return 1
   fi
-  [ "$node" = "$GPU_MIN" ] && GPU_MIN_TOUCHED=1
   node_write "$node" "$value"
 }
 
@@ -441,6 +468,56 @@ restore_gpu_nodes() {
     log 'WARN: GPU 恢复未完成，保留逐节点快照，下次启动先重试恢复'
     return 1
   fi
+}
+
+# ---- 游戏放权：权限交换 ----
+# 进入游戏时，把 CPU/GPU/调速器相关节点的写权限交给系统（666），
+# 让厂商框架（perfd / fpsgo / ged 等）能真正接管调频；
+# 退出游戏或停止守护时，按 journal 恢复原始权限。
+loosen_node_perm() {
+  local node="$1" mode="${2:-666}" path old found=0
+  [ -e "$node" ] || return 1
+  if [ -f "$GAME_PERM_JOURNAL" ]; then
+    while read -r path old; do
+      [ "$path" = "$node" ] && { found=1; break; }
+    done < "$GAME_PERM_JOURNAL"
+  fi
+  if [ "$found" = "0" ]; then
+    old=$(stat -c '%a' "$node" 2>/dev/null)
+    case "$old" in ''|*[!0-7]*) old=644 ;; esac
+    printf '%s %s\n' "$node" "$old" >> "$GAME_PERM_JOURNAL" 2>/dev/null || return 1
+  fi
+  chmod "$mode" "$node" 2>/dev/null
+}
+
+restore_game_perms() {
+  local node old restored=0
+  [ -f "$GAME_PERM_JOURNAL" ] || return 0
+  while read -r node old; do
+    [ -e "$node" ] || continue
+    chmod "$old" "$node" 2>/dev/null && restored=$((restored + 1))
+  done < "$GAME_PERM_JOURNAL"
+  rm -f "$GAME_PERM_JOURNAL"
+  [ "$restored" -gt 0 ] && log "  游戏放权已收回（恢复 $restored 个节点权限）"
+  return 0
+}
+
+loosen_game_perms() {
+  local node
+  # CPU：上限 / 下限 / 调速器
+  for node in "$CPUFREQ"/policy*/scaling_max_freq \
+              "$CPUFREQ"/policy*/scaling_min_freq \
+              "$CPUFREQ"/policy*/scaling_governor; do
+    [ -e "$node" ] && loosen_node_perm "$node" 666
+  done
+  # GPU：已探测节点 + 所有候选上限节点 + pwrlevel
+  for node in "$GPU" "$GPU_MIN" "$GPU_PWRLEVEL"; do
+    [ -n "$node" ] && [ -e "$node" ] && loosen_node_perm "$node" 666
+  done
+  for node in $(gpu_max_nodes); do
+    [ -e "$node" ] && loosen_node_perm "$node" 666
+  done
+  log "  游戏放权：CPU/GPU/调速器节点权限已交由系统接管"
 }
 
 write_gpu() {
@@ -506,6 +583,27 @@ snapshot_governors() {
   done
   ORIG_GOVS="${ORIG_GOVS# }"
   ORIG_GOVS_READY=1
+  # 持久化一份：进程被 kill -9 时内存快照丢失，下次启动可据此先恢复
+  mkdir -p "$RUN_DIR" 2>/dev/null
+  printf '%s\n' "$ORIG_GOVS" > "$ORIG_GOVS_FILE" 2>/dev/null
+}
+
+# 上次异常退出（kill -9 / 崩溃）后，凭持久化快照尽力恢复调速器；
+# 随后 snapshot_governors 会基于恢复后的状态重新快照。
+restore_governors_from_file() {
+  local item pol orig got
+  [ -f "$ORIG_GOVS_FILE" ] || return 0
+  while read -r item; do
+    pol=${item%:*}; orig=${item##*:}
+    [ -n "$pol" ] && [ -n "$orig" ] && [ "$pol" != "$item" ] || continue
+    [ -f "$CPUFREQ/$pol/scaling_governor" ] || continue
+    chmod 644 "$CPUFREQ/$pol/scaling_governor" 2>/dev/null
+    printf '%s\n' "$orig" > "$CPUFREQ/$pol/scaling_governor" 2>/dev/null
+    got=$(cat "$CPUFREQ/$pol/scaling_governor" 2>/dev/null)
+    [ "$got" = "$orig" ] \
+      && log "  $pol 调速器恢复(异常退出) -> $orig" \
+      || log "  WARN: $pol 调速器恢复失败 want=$orig got=$got"
+  done < "$ORIG_GOVS_FILE"
 }
 
 apply_governor() {
@@ -560,13 +658,20 @@ apply_cpu_caps() {
 }
 
 snapshot_limits() {
-  local item pol node val
+  local item pol cap node val hw
   ORIG_CPU_MAXS=""
   for item in $CPU_CAPS; do
-    pol=${item%:*}
+    pol=${item%:*}; cap=${item##*:}
     node="$CPUFREQ/$pol/scaling_max_freq"
     val=$(cat "$node" 2>/dev/null)
     case "$val" in ''|*[!0-9]*) continue ;; esac
+    # 崩溃重启保护：当前值恰等于本模块封顶值时，是上次被中断运行残留的限制
+    #（GPU 侧已有等价的 restore_gpu_nodes 先行恢复）；改用硬件最高频作为原始值，
+    # 否则 stop/restore 永远无法恢复真实频率
+    if [ "$val" = "$cap" ]; then
+      hw=$(cat "$CPUFREQ/$pol/cpuinfo_max_freq" 2>/dev/null)
+      case "$hw" in ''|*[!0-9]*) ;; *) val=$(snap_freq "$pol" "$hw") ;; esac
+    fi
     ORIG_CPU_MAXS="$ORIG_CPU_MAXS $pol:$val"
   done
   ORIG_CPU_MAXS="${ORIG_CPU_MAXS# }"
@@ -617,13 +722,15 @@ unlock_cpu_game() {
   done
 }
 
+# 风驰调速器检测：只认 hmbird / scx（真正的风驰调度器）。
+# 非风驰 → 由 apply_game 快速切换为默认游戏调速器。
 is_fengchi_governor() {
   local pol gov
   for pol in $(printf '%s\n' $CPU_CAPS | tr ' ' '\n' | sed 's/:.*//'); do
     [ -f "$CPUFREQ/$pol/scaling_governor" ] || continue
     gov=$(cat "$CPUFREQ/$pol/scaling_governor" 2>/dev/null)
     case "$gov" in
-      hmbird*|scx*|vivo*|mtk*) return 0 ;;
+      hmbird*|scx*) return 0 ;;
     esac
   done
   return 1
@@ -640,7 +747,7 @@ apply_game_fallback_governor() {
     [ -f "$CPUFREQ/$pol/scaling_governor" ] || continue
     cur=$(cat "$CPUFREQ/$pol/scaling_governor" 2>/dev/null)
     case "$cur" in
-      hmbird*|scx*|vivo*|mtk*) log "  $pol 厂商调速器 $cur，跳过"; continue ;;
+      hmbird*|scx*) log "  $pol 风驰调速器 $cur，跳过"; continue ;;
     esac
 
     target=""
@@ -659,37 +766,32 @@ apply_game_fallback_governor() {
   done
 }
 
-unlock_game_governors() {
-  local node pol
-  for node in "$CPUFREQ"/policy*/scaling_governor; do
-    [ -e "$node" ] || continue
-    pol=${node%/scaling_governor}; pol=${pol##*/}
-    chmod 644 "$node" 2>/dev/null
-    log "  $pol 游戏 governor 放权 -> 644，交给系统/风驰"
-  done
+# 将 GPU_MIN 写回最低档（按节点单位自动换算 raw 值）；调用方自行判断 GPU_BOOST_CONTROL
+gpu_min_to_floor() {
+  local want
+  [ -n "$GPU_MIN" ] && [ -e "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ] || return 1
+  if [ "$GPU_MIN_IS_MHZ" = "1" ]; then
+    want=$(( GPU_MIN_HZ / 1000000 ))
+  else
+    want=$GPU_MIN_HZ
+  fi
+  gpu_write_node "$GPU_MIN" "$want"
 }
 
 patrol_gpu_min() {
   [ "${GPU_BOOST_CONTROL:-0}" = "1" ] || return 0
-  local cur_gpumin gpumin_want
   [ -n "$GPU_MIN" ] && [ -e "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ] || return 0
-  cur_gpumin=$(cat "$GPU_MIN" 2>/dev/null)
-  case "$cur_gpumin" in ''|*[!0-9]*) return 0 ;; esac
-  if [ "$GPU_MIN_IS_MHZ" = "1" ]; then
-    gpumin_want=$(( GPU_MIN_HZ / 1000000 ))
-    cur_gpumin=$(( cur_gpumin * 1000000 ))
-  else
-    gpumin_want=$GPU_MIN_HZ
-  fi
-  if [ "$cur_gpumin" -gt "$GPU_MIN_HZ" ]; then
-    gpu_write_node "$GPU_MIN" "$gpumin_want" || return 1
-    local after raw_after
-    raw_after=$(cat "$GPU_MIN" 2>/dev/null)
-    if [ "$GPU_MIN_IS_MHZ" = "1" ]; then after=$(( ${raw_after:-0} * 1000000 )); else after=${raw_after:-0}; fi
-    if [ "$after" -lt "$cur_gpumin" ]; then
-      log "RESTORE GPU_MIN Boost: raw=$(cat "$GPU_MIN" 2>/dev/null) normalized=${cur_gpumin}Hz -> target=${GPU_MIN_HZ}Hz"
-    fi
-  fi
+  local cur norm raw_after after
+  cur=$(cat "$GPU_MIN" 2>/dev/null)
+  case "$cur" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$GPU_MIN_IS_MHZ" = "1" ]; then norm=$(( cur * 1000000 )); else norm=$cur; fi
+  [ "$norm" -gt "$GPU_MIN_HZ" ] || return 0
+  gpu_min_to_floor || return 1
+  raw_after=$(cat "$GPU_MIN" 2>/dev/null)
+  case "$raw_after" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "$GPU_MIN_IS_MHZ" = "1" ]; then after=$(( raw_after * 1000000 )); else after=$raw_after; fi
+  [ "$after" -lt "$norm" ] && \
+    log "RESTORE GPU_MIN Boost: raw=$raw_after normalized=${norm}Hz -> target=${GPU_MIN_HZ}Hz"
 }
 
 patrol_cpu_caps() {
@@ -714,18 +816,14 @@ apply_normal() {
   prev=$(cat "$STATE_FILE" 2>/dev/null)
   if [ "$prev" != "normal" ]; then
     log "→ 常态 GPU=${GPU_NORMAL} CPU: $CPU_CAPS"
-    if [ "${GPU_BOOST_CONTROL:-0}" = "1" ] && [ "$prev" = "game" ] && [ -n "$GPU_MIN" ] && [ -e "$GPU_MIN" ]; then
-      chmod 644 "$GPU_MIN" 2>/dev/null
-      local gpumin_write
-      if [ "$GPU_MIN_IS_MHZ" = "1" ]; then
-        gpumin_write=$(( ${GPU_MIN_HZ:-0} / 1000000 ))
-      else
-        gpumin_write=${GPU_MIN_HZ:-0}
-      fi
-      gpu_write_node "$GPU_MIN" "$gpumin_write"
+    # 收权：先恢复游戏期间交给系统的节点权限，再施加常态限制
+    restore_game_perms
+    if [ "${GPU_BOOST_CONTROL:-0}" = "1" ] && [ "$prev" = "game" ]; then
+      gpu_min_to_floor 2>/dev/null
     fi
     apply_cpu_caps
-    write_gpu "$GPU_NORMAL"
+    # 无可写 GPU 节点时不再空写，避免每次切换都刷一条 WARN
+    [ "$GPU_OK" = "1" ] && write_gpu "$GPU_NORMAL"
     printf 'normal\n' > "$STATE_FILE"
   else
     patrol_cpu_caps
@@ -738,21 +836,8 @@ apply_normal() {
         esac
         [ "$cur_gpu" -gt "$GPU_NORMAL" ] && write_gpu "$GPU_NORMAL"
       ;; esac
-      if [ "${GPU_BOOST_CONTROL:-0}" = "1" ] && [ -n "$GPU_MIN" ] && [ -e "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ]; then
-        local cur_gpumin gpumin_want
-        cur_gpumin=$(cat "$GPU_MIN" 2>/dev/null)
-        if [ "$GPU_MIN_IS_MHZ" = "1" ]; then
-          gpumin_want=$(( GPU_MIN_HZ / 1000000 ))
-          cur_gpumin=$(( ${cur_gpumin:-0} * 1000000 ))
-        else
-          gpumin_want=$GPU_MIN_HZ
-        fi
-        if [ -n "$cur_gpumin" ] && [ "$cur_gpumin" -gt "$GPU_MIN_HZ" ]; then
-          log "RESTORE GPU_MIN Boost: raw=$(cat "$GPU_MIN" 2>/dev/null) normalized=${cur_gpumin}Hz -> target=${GPU_MIN_HZ}Hz"
-          gpu_write_node "$GPU_MIN" "$gpumin_want"
-        fi
-      fi
     fi
+    patrol_gpu_min
   fi
 }
 
@@ -764,11 +849,10 @@ apply_game() {
   APPLIED_GAME_PKG=$GAME_PKG
   GAME_REENTER=0
   log "  游戏前台进入: $GAME_PKG"
-  log "→ 游戏 (${GAME_TYPE:-?}) 解锁到硬件最高频率 GPU_MAX=${GPU_MAX_HZ:-?}Hz GPU_MIN=${GPU_MIN_HZ:-?}Hz"
+  log "→ 游戏解锁到硬件最高频率 GPU_MAX=${GPU_MAX_HZ:-?}Hz GPU_MIN=${GPU_MIN_HZ:-?}Hz，交还系统接管"
 
   unlock_cpu_game
-  unlock_game_governors
-  if [ -n "$GPU_MAX_HZ" ]; then
+  if [ "$GPU_OK" = "1" ] && [ -n "$GPU_MAX_HZ" ]; then
     write_gpu "$GPU_MAX_HZ" unlock
   fi
   if [ -n "$GPU_PWRLEVEL" ]; then
@@ -784,15 +868,19 @@ apply_game() {
     gpu_write_node "$GPU_MIN" "$game_min_write"
     log "  游戏 GPU_MIN -> raw=$game_min_write normalized=${GPU_MIN_HZ}Hz"
   fi
+  # 权限交换：先解锁频率值，再把节点写权限交给系统，让厂商框架真正接管
+  loosen_game_perms
 
   printf 'game\n' > "$STATE_FILE"
 
-  sleep 3
+  # 风驰接管检测等待（之前 3 秒，现默认 1 秒，可用 FENGCHI_DETECT_SEC 调整）：
+  # 给系统调度器一个短暂的接管窗口；超时仍非风驰则快速写入默认游戏调速器
+  sleep "$FENGCHI_DETECT_SEC"
   is_game || { log "  游戏检测暂失，交由主循环统一宽限"; return; }
   if is_fengchi_governor; then
-    log "  风驰/厂商调度器已接管调速器，不干预"
+    log "  风驰调速器已接管，不干预"
   else
-    log "  风驰未接管，按 SoC 写入游戏默认调速器"
+    log "  非风驰调速器，快速切换为默认游戏调速器"
     apply_game_fallback_governor
   fi
 }
@@ -801,28 +889,33 @@ apply_game() {
 # 每次判定执行一次 timeout 2 dumpsys window，由 awk 解析焦点。
 # 游戏进程留在后台不作为命中依据；窗口暂失由退出宽限处理。
 
-# games.txt -> GAME_PKGS（去注释 / 空行 / 重复）
+# games.txt -> GAME_PKGS（去注释 / 空行 / 重复 / CR）
+# 带 mtime 缓存：文件未变化时直接复用，避免每 5 秒重解析一次；
+# 修改后 mtime 变化即重新加载（保持原有“修改后立即生效”语义）。
+CR=$(printf '\r')
 load_game_pkgs() {
-  GAME_PKGS=""
-  [ -f "$GAME_LIST" ] || return 0
-  while IFS= read -r _p || [ -n "$_p" ]; do
-    case "$_p" in
-      \#*|"") continue ;;
-    esac
-    case " $GAME_PKGS " in
-      *" $_p "*) continue ;;
-    esac
-    GAME_PKGS="$GAME_PKGS $_p"
-  done < "$GAME_LIST"
-  GAME_PKGS="${GAME_PKGS# }"
-}
-
-# 分级（保留本模块原有的 heavy / normal 分级）
-game_type_of() {
-  GAME_TYPE="normal"
-  if [ -f "$GAME_LIST_HEAVY" ] && grep -q -F -x -- "$1" "$GAME_LIST_HEAVY" 2>/dev/null; then
-    GAME_TYPE="heavy"
+  local mtime _p
+  mtime=$(stat -c '%Y' "$GAME_LIST" 2>/dev/null)
+  if [ -n "$GAME_PKGS_LOADED" ] && [ -n "$mtime" ] && \
+     [ "$mtime" = "$GAME_PKGS_MTIME" ]; then
+    return 0
   fi
+  GAME_PKGS=""
+  if [ -f "$GAME_LIST" ]; then
+    while IFS= read -r _p || [ -n "$_p" ]; do
+      _p=${_p%$CR}
+      case "$_p" in
+        \#*|"") continue ;;
+      esac
+      case " $GAME_PKGS " in
+        *" $_p "*) continue ;;
+      esac
+      GAME_PKGS="$GAME_PKGS $_p"
+    done < "$GAME_LIST"
+  fi
+  GAME_PKGS="${GAME_PKGS# }"
+  GAME_PKGS_MTIME=$mtime
+  GAME_PKGS_LOADED=1
 }
 
 game_exit_due() {
@@ -841,7 +934,6 @@ publish_status() {
     printf 'game_proc=none\n'
     printf 'game_pkg=%s\n' "${GAME_PKG:-}"
     printf 'game_pid=\n'
-    printf 'game_type=%s\n' "${GAME_TYPE:-}"
     printf 'last_seen=%s\n' "${GAME_LAST_SEEN:-}"
     printf 'gpu_result=%s\n' "${GPU_RESULT:-unknown}"
   } > "$tmp" 2>/dev/null && mv -f "$tmp" "$STATUS_FILE" 2>/dev/null
@@ -870,7 +962,6 @@ collect_foreground_apps() {
 
 is_game() {
   local app previous="$GAME_PKG"
-  GAME_TYPE=""
   GAME_PKG=""
   load_game_pkgs
   collect_foreground_apps
@@ -878,12 +969,7 @@ is_game() {
     case " $GAME_PKGS " in
       *" $app "*) GAME_PKG=$app ;;
     esac
-    if [ -z "$GAME_PKG" ] && [ -f "$GAME_LIST_HEAVY" ] &&
-       grep -q -F -x -- "$app" "$GAME_LIST_HEAVY" 2>/dev/null; then
-      GAME_PKG=$app
-    fi
     [ -n "$GAME_PKG" ] || continue
-    game_type_of "$GAME_PKG"
     GAME_MISSING_SINCE=""
     return 0
   done
@@ -900,20 +986,25 @@ cleanup() {
   log "停止，恢复模块启动前状态"
   restore_governor
   restore_cpu_caps
+  restore_game_perms
   restore_gpu_nodes
-  rm -f "$STATE_FILE" "$STATUS_FILE"
+  rm -f "$STATE_FILE" "$STATUS_FILE" "$ORIG_GOVS_FILE"
   release_lock
 }
 
 main() {
   acquire_lock || return 1
   : > "$LOG_FILE"
-  log "===== powerd start pid=$$ $(date '+%Y-%m-%d %H:%M:%S') ====="
+  log "===== powerd start pid=$$ $(ts_now) ====="
   # TERM/INT 必须显式 exit：否则 cleanup 跑完会继续主循环
   #（旧版 trap cleanup EXIT INT TERM 会让 stop/kill 形同虚设 → 多实例抢写频率）
   trap 'cleanup' EXIT
   trap 'exit 0' INT TERM
   validate_config
+  # 启动依赖检查：缺工具时给出明确 WARN，而不是静默行为异常
+  for _tool in awk timeout dumpsys stat; do
+    command -v "$_tool" >/dev/null 2>&1 || log "WARN: 缺少工具 $_tool，部分功能可能受限"
+  done
 
   i=0
   while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
@@ -921,8 +1012,9 @@ main() {
   done
   sleep 3
 
-  SOC=$(getprop ro.board.platform 2>/dev/null)
-  [ -n "$SOC" ] || SOC=$(getprop ro.soc.model 2>/dev/null)
+  # 与 powerd.conf 一致：优先 ro.soc.model（如 sm8850/mt6991），回退 ro.board.platform
+  SOC=$(getprop ro.soc.model 2>/dev/null | tr 'A-Z' 'a-z')
+  [ -n "$SOC" ] || SOC=$(getprop ro.board.platform 2>/dev/null)
 
   detect_cpu_caps
   detect_gpu
@@ -932,6 +1024,8 @@ main() {
 
   # Foreground windows control mode; no process-event monitor is started.
   mkdir -p "$RUN_DIR" 2>/dev/null
+  # 上次若被 kill -9，内存中的调速器快照已丢失，先按持久化快照恢复
+  restore_governors_from_file
   load_game_pkgs
   log "游戏判定: 前台窗口 白名单=$(printf '%s' "$GAME_PKGS" | wc -w) 个包 迟滞=${GAME_EXIT_GRACE_SEC}s"
 
@@ -950,11 +1044,8 @@ main() {
       apply_game
       [ "$(cat "$STATE_FILE" 2>/dev/null)" = "game" ] && patrol_gpu_min
       publish_status
-      if [ -n "$GAME_MISSING_SINCE" ]; then
-        sleep "$INTERVAL"
-      else
-        sleep $(( INTERVAL * 2 ))
-      fi
+      # GAME_MISSING_SINCE 在本分支入口已清空，游戏态固定用 2 倍间隔巡检
+      sleep $(( INTERVAL * 2 ))
     else
       if [ "$(cat "$STATE_FILE" 2>/dev/null)" = "game" ]; then
         # 精确迟滞:$SECONDS 单调秒,0 fork
@@ -1003,7 +1094,6 @@ case "${1:-start}" in
       printf 'game_proc=none\n'
       printf 'game_pkg=\n'
       printf 'game_pid=\n'
-      printf 'game_type=\n'
       printf 'last_seen=\n'
       printf 'gpu_result=unknown\n'
     fi

@@ -8,10 +8,15 @@
     <script type="module" crossorigin src="./assets/index-CA8pALd_.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-MQYxA1L9.css">
     <style>
+      /* 状态行防换行：徽标/按钮/版本三元素适当缩小、紧凑间距、强制单行 */
+      .status-row{flex-wrap:nowrap;white-space:nowrap;gap:8px;font-size:12px}
+      .status-row .status-badge{font-size:12px;padding:5px 12px;flex:none}
+      .status-row .version{font-size:12px;flex:none}
+
       /* 切换回 Color 调度按钮：嵌入头部 .status-row（状态徽标与版本号之间），
          样式对齐 .status-badge 胶囊并使用主题 CSS 变量，自动跟随明暗模式 */
-      #cfSwapBtn{display:none;align-items:center;gap:6px;margin-left:auto;
-        padding:6px 16px;border-radius:30px;font-size:14px;font-weight:500;
+      #cfSwapBtn{display:none;align-items:center;gap:6px;margin-left:auto;flex:none;
+        padding:5px 12px;border-radius:30px;font-size:12px;font-weight:500;white-space:nowrap;
         background:var(--accent-soft);color:var(--accent);
         border:1px solid var(--accent-border);
         -webkit-tap-highlight-color:transparent;cursor:pointer;user-select:none;

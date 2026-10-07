@@ -102,6 +102,9 @@ move_in_adapt() {
                 cp -af "$src/$f" "$MODROOT/" 2>/dev/null
             fi
         done
+        if [ -f "$STORE/adapt/games.txt" ]; then
+            cp -f "$STORE/adapt/games.txt" "$MODROOT/games.txt" 2>/dev/null
+        fi
     fi
     cp -af "$MODROOT/adapt/module.prop" "$MODROOT/module.prop" 2>/dev/null
     chmod 0755 "$MODROOT/powerd.sh" "$MODROOT/service.sh" "$MODROOT/post-fs-data.sh" "$MODROOT/action.sh" 2>/dev/null
@@ -140,6 +143,21 @@ reload_managers() {
 }
 
 case "$mode" in
+adapt-restore)
+    if [ -f "$MODROOT/powerd.sh" ] && [ ! -d "$MODROOT/script" ]; then
+        log "已是自适应形态，跳过"; echo "ALREADY_ADAPT"; exit 0
+    fi
+    move_out_dispatch
+    move_in_adapt
+    if [ ! -f "$MODROOT/powerd.sh" ] || [ ! -f "$MODROOT/module.prop" ]; then
+        log "错误：自适应文件释放失败"
+        echo "ERR_ADAPT_DEPLOY"
+        exit 1
+    fi
+    echo "adapt" > "$STORE/state"
+    log "==== 模块更新后恢复自适应形态完成（不启动服务，重启后生效） ===="
+    echo "OK_ADAPT_RESTORE"
+    ;;
 adapt)
     if [ -f "$MODROOT/powerd.sh" ] && [ ! -d "$MODROOT/script" ]; then
         log "已是自适应形态，跳过"; echo "ALREADY_ADAPT"; exit 0

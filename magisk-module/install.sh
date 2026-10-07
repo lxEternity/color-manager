@@ -327,6 +327,20 @@ PCEOF
         cp -af "$MODPATH/config/powercfg.json" /data/powercfg.json 2>/dev/null
     fi
 
+    if [ "$(cat /data/adb/colorFC_store/state 2>/dev/null)" = "adapt" ]; then
+        ui_print "检测到当前为自适应限频形态，恢复自适应引擎..."
+        OLDMOD=/data/adb/modules/colorFC
+        if [ -f "$OLDMOD/games.txt" ]; then
+            mkdir -p /data/adb/colorFC_store/adapt
+            cp -f "$OLDMOD/games.txt" /data/adb/colorFC_store/adapt/games.txt
+        fi
+        if sh "$MODPATH/webroot/swap.sh" adapt-restore 2>/dev/null | grep -q "OK_ADAPT_RESTORE\|ALREADY_ADAPT"; then
+            ui_print "自适应引擎已恢复，重启后自动生效"
+        else
+            ui_print "警告：自适应引擎恢复失败，将以Color调度形态启动"
+        fi
+    fi
+
     ui_print "配置已写入完毕
     请重启手机"
 }

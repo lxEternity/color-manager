@@ -1,5 +1,12 @@
 #!/system/bin/sh
-MODDIR=${0%/*}
+SELF=$(readlink -f "$0" 2>/dev/null)
+[ -n "$SELF" ] || SELF="$0"
+MODDIR=${SELF%/*}
+
+if [ "$1" != "detached" ]; then
+  nohup /system/bin/sh "$SELF" detached </dev/null >/dev/null 2>&1 &
+  exit 0
+fi
 
 chmod 0755 "$MODDIR/powerd.sh" 2>/dev/null
 chmod 0755 "$MODDIR"/webroot/*.sh 2>/dev/null
@@ -14,7 +21,7 @@ is_alive() {
   pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
   case "$pid" in
     ''|*[!0-9]*) ;;
-    *) [ -d "/proc/$pid" ] && return 0 ;;
+    *) [ -r "/proc/$pid/cmdline" ] && grep -q "powerd.sh" "/proc/$pid/cmdline" 2>/dev/null && return 0 ;;
   esac
   for pid in $(pgrep -f "powerd.sh start" 2>/dev/null); do
     [ -d "/proc/$pid" ] && return 0
@@ -27,7 +34,9 @@ while true; do
     nohup "$SH" "$MODDIR/powerd.sh" start > /dev/null 2>&1 &
   fi
 
-  [ -f "$MODDIR/pwlogd.sh" ] && nohup $SH "$MODDIR/pwlogd.sh" > /dev/null 2>&1 &
+  if [ -f "$MODDIR/pwlogd.sh" ] && ! pgrep -f "pwlogd.sh" >/dev/null 2>&1; then
+    nohup "$SH" "$MODDIR/pwlogd.sh" > /dev/null 2>&1 &
+  fi
 
   sleep 30
 done

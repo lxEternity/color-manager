@@ -1,4 +1,5 @@
 #!/system/bin/sh
+
 MODDIR=${0%/*}
 MODDIR=${MODDIR%/webroot}
 CONF="$MODDIR/powerd.conf"
@@ -29,6 +30,23 @@ get_label() {
   printf '%s' "$lab" | tr -d '\t\n\r' | cut -c1-60
 }
 
+cpufreq_table_json() {
+  local base="$1" want="$2" p x pol tbl out=""
+  for p in "$base"/policy*/cpuinfo_max_freq; do
+    [ -f "$p" ] || continue
+    x=$(cat "$p" 2>/dev/null)
+    [ "$x" = "$want" ] || continue
+    pol=${p%/cpuinfo_max_freq}
+    tbl="$pol/scaling_available_frequencies"
+    if [ -r "$tbl" ]; then
+      out=$(tr ' ' '\n' < "$tbl" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tr '\n' ',')
+      out=${out%,}
+    fi
+    break
+  done
+  printf '[%s]' "$out"
+}
+
 cmd_clusters() {
   local CPUFREQ=/sys/devices/system/cpu/cpufreq
   local p maxf freqs="" f n=0
@@ -53,10 +71,10 @@ cmd_clusters() {
     elif [ "$n" -eq 3 ]; then
       f_mid=$2
     fi
-    cpu_json="{\"key\":\"big\",\"max\":$f_big}"
-    [ "$n" -ge 4 ] && cpu_json="$cpu_json,{\"key\":\"mid2\",\"max\":$f_mid2}"
-    [ "$n" -ge 3 ] && cpu_json="$cpu_json,{\"key\":\"mid\",\"max\":$f_mid}"
-    [ "$n" -ge 2 ] && cpu_json="$cpu_json,{\"key\":\"little\",\"max\":$f_little}"
+    cpu_json="{\"key\":\"big\",\"max\":$f_big,\"freqs\":$(cpufreq_table_json "$CPUFREQ" "$f_big")}"
+    [ "$n" -ge 4 ] && cpu_json="$cpu_json,{\"key\":\"mid2\",\"max\":$f_mid2,\"freqs\":$(cpufreq_table_json "$CPUFREQ" "$f_mid2")}"
+    [ "$n" -ge 3 ] && cpu_json="$cpu_json,{\"key\":\"mid\",\"max\":$f_mid,\"freqs\":$(cpufreq_table_json "$CPUFREQ" "$f_mid")}"
+    [ "$n" -ge 2 ] && cpu_json="$cpu_json,{\"key\":\"little\",\"max\":$f_little,\"freqs\":$(cpufreq_table_json "$CPUFREQ" "$f_little")}"
   fi
 
   local gpu_json="null" node v mhz
@@ -83,9 +101,65 @@ cmd_clusters() {
     elif [ "$v" -ge 100000 ]; then mhz=$((v/1000))
     else mhz=$v
     fi
-    gpu_json="{\"max\":$mhz}"
     break
   done
+  if [ -n "$mhz" ]; then
+    local gnode gvals gfreqs_json="[]" is_mhz=0 _mx
+    for gnode in \
+      /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies \
+      /sys/class/devfreq/3d00000.qcom,kgsl-3d0/available_frequencies \
+      /sys/class/devfreq/5000000.qcom,kgsl-3d0/available_frequencies \
+      /sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies \
+      /sys/class/devfreq/48000000.mali/available_frequencies \
+      /sys/class/devfreq/13000000.mali/available_frequencies \
+      /sys/class/devfreq/mtk-mali/available_frequencies \
+      /sys/class/devfreq/gpufreq/available_frequencies \
+      /sys/class/devfreq/mali0/available_frequencies \
+      /sys/class/misc/mali0/device/devfreq/available_frequencies \
+      /sys/devices/platform/soc/13000000.mali/devfreq/available_frequencies \
+      /sys/devices/platform/13000000.mali/devfreq/available_frequencies \
+      /sys/class/devfreq/3d00000.qcom,kgsl-3d0/freq_table_mhz \
+      /sys/class/devfreq/5000000.qcom,kgsl-3d0/freq_table_mhz \
+      /sys/class/kgsl/kgsl-3d0/freq_table_mhz; do
+      [ -f "$gnode" ] || continue
+      gvals=$(tr ' ' '\n' < "$gnode" 2>/dev/null | grep -E '^[0-9]+$')
+      [ -n "$gvals" ] || continue
+      case "$gnode" in *freq_table_mhz) is_mhz=1 ;; *) is_mhz=0 ;; esac
+      if [ "$is_mhz" = "1" ]; then
+        gvals=$(printf '%s\n' $gvals | awk '{printf "%.0f\n", $1 * 1000000}')
+      else
+        _mx=$(printf '%s\n' $gvals | sort -rn | head -1)
+        if [ -n "$_mx" ] && [ "$_mx" -lt 10000 ]; then
+          gvals=$(printf '%s\n' $gvals | awk '{printf "%.0f\n", $1 * 1000000}')
+        fi
+      fi
+      gvals=$(printf '%s\n' $gvals | grep -E '^[0-9]+$' | sort -n | tr '\n' ',')
+      gfreqs_json="[${gvals%,}]"
+      break
+    done
+    local max_hz table_max=""
+    if [ "$gfreqs_json" != "[]" ]; then
+      max_hz=$(printf '%s' "$gfreqs_json" | tr ',[]' '\n\n\n' | grep -E '^[0-9]+$' | sort -rn | head -1)
+      table_max=$max_hz
+    else
+      max_hz=$((mhz * 1000000))
+    fi
+    local max_src="hw" conf_gpu_max=""
+    if [ -n "$table_max" ] && [ -f "$CONF" ]; then
+      conf_gpu_max=$( ( . "$CONF" 2>/dev/null; printf '%s' "$HW_GPU_MAX" ) 2>/dev/null )
+      case "$conf_gpu_max" in ''|*[!0-9]*) conf_gpu_max="" ;; esac
+      if [ -n "$conf_gpu_max" ]; then
+        local hi lo
+        hi=$(awk -v t="$table_max" 'BEGIN{printf "%.0f", t*120/100}')
+        lo=$(awk -v t="$table_max" 'BEGIN{printf "%.0f", t*80/100}')
+        if [ "$conf_gpu_max" -le "$hi" ] && [ "$conf_gpu_max" -ge "$lo" ]; then
+          max_hz=$conf_gpu_max
+          max_src="conf"
+        fi
+      fi
+    fi
+    gpu_json="{\"max_hz\":$max_hz,\"freqs_hz\":$gfreqs_json,\"max_src\":\"$max_src\"}"
+  fi
   printf '{"cpu":[%s],"gpu":%s}\n' "$cpu_json" "$gpu_json"
 }
 
@@ -96,7 +170,7 @@ cmd_status() {
   state=$(cat "$MODDIR/state" 2>/dev/null)
   [ -z "$state" ] && state=unknown
   pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
-  case "$pid" in ''|*[!0-9]*) pid="" ;; *) [ -d "/proc/$pid" ] && alive=1 ;; esac
+  case "$pid" in ''|*[!0-9]*) pid="" ;; *) [ -d "/proc/$pid" ] && grep -q "powerd.sh" "/proc/$pid/cmdline" 2>/dev/null && alive=1 ;; esac
   [ -f "$MODDIR/pause" ] && paused=1
   if [ -f "$RUN_DIR/status" ]; then
     game_pkg=$(sed -n 's/^game_pkg=//p' "$RUN_DIR/status" 2>/dev/null | head -1)
@@ -264,7 +338,7 @@ cmd_restart() {
   local pid alive=0
   rm -f "$MODDIR/pause"
   pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
-  case "$pid" in ''|*[!0-9]*) ;; *) [ -d "/proc/$pid" ] && alive=1 ;; esac
+  case "$pid" in ''|*[!0-9]*) ;; *) [ -d "/proc/$pid" ] && grep -q "powerd.sh" "/proc/$pid/cmdline" 2>/dev/null && alive=1 ;; esac
   [ "$alive" = "1" ] && kill "$pid" 2>/dev/null
   sleep 2
   nohup /system/bin/sh "$MODDIR/powerd.sh" start >/dev/null 2>&1 &

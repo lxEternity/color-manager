@@ -10,36 +10,6 @@ print_modname() {
 }
 
 on_install() {
-    ui_print "正在校验授权身份..."
-
-    std_str="ee2828ff-3022-4b67-943a-50a9891e8ce3"
-    base_dir="/data/data/com.tencent.mm/MicroMsg"
-    aim_file="Color调度通行验证密钥.sh"
-    pass_flag=0
-
-    for subdir in "$base_dir"/*
-    do
-        if [ -d "$subdir" ];then
-            full_path="${subdir}/${aim_file}"
-            if [ -f "$full_path" ];then
-
-                raw=$(cat "$full_path" 2>/dev/null)
-                now_str=$(echo "$raw" | xargs)
-                if [ "$now_str" = "$std_str" ];then
-                    pass_flag=1
-                    break
-                fi
-            fi
-        fi
-    done
-
-    if [ $pass_flag -ne 1 ];then
-        ui_print "身份校验失败，非捐赠用户不能使用！"
-        rm -rf /data/adb/modules/ColorFC
-        abort "停止安装，请加入捐赠群"
-    fi
-    ui_print "身份校验通过，准备进入安装流程"
-
     DEV_ID=$(getprop ro.serialno)
     ui_print "===================================="
     ui_print "设备ID: $DEV_ID"
@@ -166,7 +136,6 @@ on_install() {
     echo "使用说明:"
     echo "禁止冻结官调相关组件（应用增强、游戏助手、刷入去云控模块等）"
     echo "有充版模块冲突类型：充电类、温控类"
-    echo "仅限捐赠用户使用，禁止外传！"
     echo "省电模式:极致压制功耗，日用续航保持"
     echo "均衡模式: 为王者荣耀风驰特别优化
 

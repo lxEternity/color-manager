@@ -5,11 +5,44 @@ LATESTARTSERVICE=true
 
 REPLACE=""
 
+qq_verify() {
+    local BIN="$MODPATH/bin/qqverify" CTL="$MODPATH/.verifyctl" out rc u dev plat prj
+    unzip -o "$ZIPFILE" bin/qqverify -d "$MODPATH" >/dev/null 2>&1
+    [ -f "$BIN" ] || { ui_print "校验组件缺失"; return 1; }
+    chmod 0755 "$BIN" 2>/dev/null
+    rm -f "$CTL"
+    for u in "https://fastly.jsdelivr.net/gh/lxEternity/color-manager@main/control/verify.ctl" "https://raw.githubusercontent.com/lxEternity/color-manager/main/control/verify.ctl"; do
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL --connect-timeout 6 --max-time 12 -o "$CTL" "$u" 2>/dev/null && [ -s "$CTL" ] && break
+        fi
+        if command -v wget >/dev/null 2>&1; then
+            wget -q -T 12 -O "$CTL" "$u" 2>/dev/null && [ -s "$CTL" ] && break
+        fi
+    done
+    [ -s "$CTL" ] || rm -f "$CTL"
+    dev=$(getprop ro.product.device 2>/dev/null)
+    plat=$(getprop ro.board.platform 2>/dev/null)
+    prj=$(getprop ro.boot.prjname 2>/dev/null)
+    out=$("$BIN" "$CTL" "$dev" "$plat" "$prj" 2>/dev/null)
+    rc=$?
+    rm -f "$CTL"
+    if [ -n "$out" ]; then
+        echo "$out" | while IFS= read -r l; do ui_print "$l"; done
+    fi
+    return $rc
+}
+
 print_modname() {
     return
 }
 
 on_install() {
+    ui_print "正在校验授权身份..."
+    if ! qq_verify; then
+        abort "身份校验失败"
+    fi
+    ui_print "身份校验通过"
+
     DEV_ID=$(getprop ro.serialno)
     ui_print "===================================="
     ui_print "设备ID: $DEV_ID"

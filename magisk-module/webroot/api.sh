@@ -10,6 +10,16 @@ LOG_FILE=$(sed -n 's/^LOG_FILE=//p' "$CONF" 2>/dev/null | head -1)
 
 err() { echo "ERR: $1" >&2; exit 1; }
 
+API_LOG="$RUN_DIR/api.log"
+_log_api() {
+  local sz
+  [ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR" 2>/dev/null
+  sz=$(stat -c '%s' "$API_LOG" 2>/dev/null)
+  case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+  [ "$sz" -gt 65536 ] && : > "$API_LOG" 2>/dev/null
+  printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >> "$API_LOG" 2>/dev/null
+}
+
 jesc() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\t' '  '
 }
@@ -61,7 +71,7 @@ cmd_clusters() {
 
   local cpu_json=""
   if [ "$n" -ge 1 ]; then
-    set -- $freqs
+    set -- $freqs  # $1..$n 升序
     local f_big f_little f_mid2 f_mid
     eval "f_big=\${$n}"
     f_little=$1
@@ -170,7 +180,7 @@ cmd_status() {
   state=$(cat "$MODDIR/state" 2>/dev/null)
   [ -z "$state" ] && state=unknown
   pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
-  case "$pid" in ''|*[!0-9]*) pid="" ;; *) [ -d "/proc/$pid" ] && grep -q "powerd.sh" "/proc/$pid/cmdline" 2>/dev/null && alive=1 ;; esac
+  case "$pid" in ''|*[!0-9]*) pid="" ;; *) [ -d "/proc/$pid" ] && alive=1 ;; esac
   [ -f "$MODDIR/pause" ] && paused=1
   if [ -f "$RUN_DIR/status" ]; then
     game_pkg=$(sed -n 's/^game_pkg=//p' "$RUN_DIR/status" 2>/dev/null | head -1)
@@ -224,7 +234,7 @@ cmd_conf_get() {
   printf '{'
   for k in $CONF_KEYS; do
     v=$(sed -n "s/^$k=//p" "$CONF" 2>/dev/null | head -1)
-    v=$(printf '%s' "$v" | sed 's/[[:space:]]*#.*$//')
+    v=$(printf '%s' "$v" | sed 's/[[:space:]]*#.*$//')  # 去行尾注释
     case "$v" in '"'*'"') v=$(printf '%s' "$v" | sed 's/^"//; s/"$//') ;; esac
     [ "$first" = 1 ] || printf ','
     first=0
@@ -283,7 +293,12 @@ cmd_games_del() {
   echo OK
 }
 
-cmd_apps_all() {
+ICON_BIN="$MODDIR/bin/apkicon"
+APPS_CACHE="$RUN_DIR/apps.cache"
+APPS_LOCK="$RUN_DIR/apps.lock"
+
+apps_scan() {
+  local tmp="$APPS_CACHE.tmp.$$"
   dumpsys package 2>/dev/null | awk '
     /Package \[/ {
       if (pkg != "") print pkg "\t" lastlab;
@@ -296,51 +311,178 @@ cmd_apps_all() {
       gsub(/\t/, " ", lab);
       if (lab != "") lastlab=lab;
     }
-    END { if (pkg != "") print pkg "\t" lastlab }'
+    END { if (pkg != "") print pkg "\t" lastlab }' > "$tmp" 2>/dev/null
+  if [ -s "$tmp" ]; then
+    mv -f "$tmp" "$APPS_CACHE" 2>/dev/null
+    rm -rf "$APPS_LOCK" 2>/dev/null
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  rm -rf "$APPS_LOCK" 2>/dev/null
+  return 1
+}
+
+apps_scan_bg() {
+  if [ -d "$APPS_LOCK" ]; then
+    local mt now
+    mt=$(stat -c '%Y' "$APPS_LOCK" 2>/dev/null); now=$(date +%s)
+    case "$mt" in
+      ''|*[!0-9]*) ;;
+      *) [ $((now - mt)) -lt 300 ] && return 0 ;;
+    esac
+    rm -rf "$APPS_LOCK" 2>/dev/null
+  fi
+  mkdir "$APPS_LOCK" 2>/dev/null || return 0
+  if command -v setsid >/dev/null 2>&1; then
+    setsid /system/bin/sh "$0" apps_scan_job >/dev/null 2>&1 &
+  else
+    ( apps_scan >/dev/null 2>&1 ) >/dev/null 2>&1 &
+  fi
+}
+
+cmd_apps_all() {
+  local mt now
+  mkdir -p "$RUN_DIR" 2>/dev/null
+  if [ "$1" = "force" ]; then
+    apps_scan
+    [ -s "$APPS_CACHE" ] && cat "$APPS_CACHE"
+    return 0
+  fi
+  if [ -s "$APPS_CACHE" ]; then
+    cat "$APPS_CACHE"
+    mt=$(stat -c '%Y' "$APPS_CACHE" 2>/dev/null); now=$(date +%s)
+    case "$mt" in
+      ''|*[!0-9]*) ;;
+      *) [ $((now - mt)) -gt 21600 ] && apps_scan_bg ;;
+    esac
+    return 0
+  fi
+  pm list packages 2>/dev/null | sed 's/^package://' | while IFS= read -r p; do
+    [ -n "$p" ] && printf '%s\t%s\n' "$p" "$p"
+  done
+  apps_scan_bg
   return 0
+}
+
+icon_candidates() {
+  local listing="$1" dens
+  for dens in xhdpi hdpi xxhdpi xxxhdpi mdpi; do
+    printf '%s\n' "$listing" | grep -i "mipmap-${dens}" | grep -iE 'launcher|icon' | grep -vi 'round'
+    printf '%s\n' "$listing" | grep -i "mipmap-${dens}" | grep -iE 'launcher|icon'
+  done
+  printf '%s\n' "$listing" | grep -iE 'mipmap|drawable' | grep -iE 'launcher|icon' | grep -vi 'round'
+  printf '%s\n' "$listing" | grep -iE 'mipmap|drawable' | grep -iE 'launcher|icon'
+  printf '%s\n' "$listing" | grep -iE 'ic_launcher_background\.(png|webp|jpg|jpeg)$'
+  printf '%s\n' "$listing" | grep -iE '(^|/)(ic_launcher|app_icon|appicon)[^/]*\.(png|webp|jpg|jpeg)$'
 }
 
 cmd_app_icon() {
-  local p="$1" apk entry dens mime b64 listing
+  local p="$1" apk entry mime b64 listing dir f mt now cands fallback fb_mime cand
   valid_pkg "$p" || return 1
   command -v unzip >/dev/null 2>&1 || return 1
-  apk=$(pm path "$p" 2>/dev/null | head -1 | sed 's/^package://')
-  [ -n "$apk" ] && [ -f "$apk" ] || return 1
-  listing=$(unzip -l "$apk" 2>/dev/null | grep -iE '\.(png|webp|jpg|jpeg)$' | sed -E 's/^ *[^ ]+ +[^ ]+ +[^ ]+ +//')
-  [ -n "$listing" ] || return 1
-  for dens in xxxhdpi xxhdpi xhdpi hdpi mdpi; do
-    entry=$(printf '%s\n' "$listing" | grep -i "mipmap-${dens}" | grep -iE 'launcher|icon' | grep -vi 'round' | head -1)
-    [ -n "$entry" ] && break
-    entry=$(printf '%s\n' "$listing" | grep -i "mipmap-${dens}" | grep -iE 'launcher|icon' | head -1)
-    [ -n "$entry" ] && break
+  dir="$RUN_DIR/icons"
+  mkdir -p "$dir" 2>/dev/null
+  f="$dir/$p.b64"
+  if [ -f "$f" ]; then
+    mt=$(stat -c '%Y' "$f" 2>/dev/null); now=$(date +%s)
+    case "$mt" in
+      ''|*[!0-9]*) ;;
+      *)
+        if [ -s "$f" ]; then
+          [ $((now - mt)) -lt 604800 ] && { cat "$f"; return 0; }
+        else
+          [ $((now - mt)) -lt 3600 ] && return 0
+        fi
+        ;;
+    esac
+  fi
+  for apk in $(pm path "$p" 2>/dev/null | sed 's/^package://'); do
+    [ -f "$apk" ] || continue
+    cands=""
+    if [ -x "$ICON_BIN" ]; then
+      entry=$("$ICON_BIN" icon "$apk" 2>/dev/null)
+      case "$entry" in
+        *.xml)
+          for cand in $("$ICON_BIN" refs "$apk" "$entry" 2>/dev/null); do
+            entry=$("$ICON_BIN" id "$apk" "$cand" 2>/dev/null)
+            case "$entry" in
+              *.png|*.webp|*.jpg|*.jpeg) break ;;
+              *) entry="" ;;
+            esac
+          done
+          ;;
+      esac
+      case "$entry" in
+        *.png|*.webp|*.jpg|*.jpeg) cands="$entry" ;;
+      esac
+    fi
+    listing=$(unzip -l "$apk" 2>/dev/null | grep -iE '\.(png|webp|jpg|jpeg)$' | sed -E 's/^ *[^ ]+ +[^ ]+ +[^ ]+ +//')
+    [ -n "$listing" ] && cands="$cands
+$(icon_candidates "$listing")"
+    cands=$(printf '%s\n' "$cands" | awk 'NF && !seen[$0]++')
+    [ -n "$cands" ] || continue
+    printf '%s\n' "$cands" > "$dir/.cand.$$" 2>/dev/null
+    b64=""; fallback=""; fb_mime=""
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      case "$entry" in
+        *.webp|*.WEBP) mime="image/webp" ;;
+        *.jpg|*.jpeg|*.JPG|*.JPEG) mime="image/jpeg" ;;
+        *) mime="image/png" ;;
+      esac
+      b64=$(unzip -p "$apk" "$entry" 2>/dev/null | base64 2>/dev/null | tr -d '\n')
+      [ -n "$b64" ] || continue
+      [ ${#b64} -le 120000 ] && break
+      [ -n "$fallback" ] || { fallback="$b64"; fb_mime="$mime"; }
+      b64=""
+    done < "$dir/.cand.$$"
+    rm -f "$dir/.cand.$$" 2>/dev/null
+    [ -n "$b64" ] || { b64="$fallback"; mime="$fb_mime"; }
+    [ -n "$b64" ] || continue
+    printf 'data:%s;base64,%s' "$mime" "$b64" > "$f" 2>/dev/null
+    cat "$f"
+    return 0
   done
-  if [ -z "$entry" ]; then
-    entry=$(printf '%s\n' "$listing" | grep -iE 'mipmap|drawable' | grep -iE 'launcher|icon' | grep -vi 'round' | head -1)
-  fi
-  if [ -z "$entry" ]; then
-    entry=$(printf '%s\n' "$listing" | grep -iE 'mipmap|drawable' | grep -iE 'launcher|icon' | head -1)
-  fi
-  if [ -z "$entry" ]; then
-    entry=$(printf '%s\n' "$listing" | grep -iE 'ic_launcher_background\.(png|webp|jpg|jpeg)$' | head -1)
-  fi
-  [ -n "$entry" ] || return 1
-  case "$entry" in
-    *.webp|*.WEBP) mime="image/webp" ;;
-    *.jpg|*.jpeg|*.JPG|*.JPEG) mime="image/jpeg" ;;
-    *) mime="image/png" ;;
-  esac
-  b64=$(unzip -p "$apk" "$entry" 2>/dev/null | base64 2>/dev/null | tr -d '\n')
-  [ -n "$b64" ] && printf 'data:%s;base64,%s' "$mime" "$b64"
+  : > "$f" 2>/dev/null
   return 0
 }
 
+cmd_conf_restore() {
+  local bak="$MODDIR/powerd.conf.bak"
+  [ -f "$bak" ] || err "没有 powerd.conf.bak（未升级过或已还原）"
+  [ -f "$CONF" ] && cp -f "$CONF" "$MODDIR/powerd.conf.prev" 2>/dev/null
+  cp -f "$bak" "$CONF" 2>/dev/null || err "写入失败"
+  chmod 644 "$CONF" 2>/dev/null
+  ensure_conf_keys
+  echo OK
+}
+
+cmd_conf_bak() {
+  [ -f "$MODDIR/powerd.conf.bak" ] && echo yes || echo no
+}
+
+cmd_diag() {
+  echo "moddir=$MODDIR"
+  echo "games=$([ -f "$GAMES" ] && grep -vcE '^#|^$' "$GAMES" 2>/dev/null || echo none)"
+  echo "apps_cache=$([ -s "$APPS_CACHE" ] && wc -l < "$APPS_CACHE" 2>/dev/null || echo none)"
+  echo "icons=$(ls "$RUN_DIR/icons" 2>/dev/null | wc -l)"
+  echo "conf=$([ -f "$CONF" ] && echo yes || echo no) bak=$([ -f "$MODDIR/powerd.conf.bak" ] && echo yes || echo no)"
+  echo "pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)"
+  echo "unzip=$(command -v unzip 2>/dev/null || echo none)"
+  echo "state=$(sed -n 's/^state=//p' "$RUN_DIR/status" 2>/dev/null)"
+}
+
 cmd_restart() {
-  local pid alive=0
+  local pid alive=0 w=0
   rm -f "$MODDIR/pause"
   pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
-  case "$pid" in ''|*[!0-9]*) ;; *) [ -d "/proc/$pid" ] && grep -q "powerd.sh" "/proc/$pid/cmdline" 2>/dev/null && alive=1 ;; esac
-  [ "$alive" = "1" ] && kill "$pid" 2>/dev/null
-  sleep 2
+  case "$pid" in ''|*[!0-9]*) ;; *) [ -d "/proc/$pid" ] && alive=1 ;; esac
+  if [ "$alive" = "1" ]; then
+    kill "$pid" 2>/dev/null
+    while [ -d "/proc/$pid" ] && [ "$w" -lt 10 ]; do sleep 1; w=$((w+1)); done
+    [ "$w" -ge 10 ] && [ -d "/proc/$pid" ] && kill -9 "$pid" 2>/dev/null
+    sleep 1
+  fi
   nohup /system/bin/sh "$MODDIR/powerd.sh" start >/dev/null 2>&1 &
   echo OK
 }
@@ -352,6 +494,8 @@ cmd_about() {
   cat "$MODDIR/updatelog.txt" 2>/dev/null
   return 0
 }
+
+_log_api "${1:-none}"
 
 cmd_swap() {
   case "$1" in
@@ -383,20 +527,24 @@ cmd_takeover_set() {
 
 case "$1" in
   ping) cmd_ping ;;
+  swap) cmd_swap "$2" ;;
+  takeover_get) cmd_takeover_get ;;
+  takeover_set) cmd_takeover_set "$2" ;;
   status) cmd_status ;;
   log) cmd_log "$2" ;;
   conf_get) cmd_conf_get ;;
   conf_set) cmd_conf_set "$2" "$3" ;;
+  conf_restore) cmd_conf_restore ;;
+  conf_bak) cmd_conf_bak ;;
+  diag) cmd_diag ;;
+  apps_scan_job) apps_scan ;;
   games_list) cmd_games_list ;;
   games_add) cmd_games_add "$2" ;;
   games_del) cmd_games_del "$2" ;;
-  apps_all) cmd_apps_all ;;
+  apps_all) cmd_apps_all "$2" ;;
   app_icon) cmd_app_icon "$2" ;;
   clusters) cmd_clusters ;;
   restart) cmd_restart ;;
   about) cmd_about ;;
-  swap) cmd_swap "$2" ;;
-  takeover_get) cmd_takeover_get ;;
-  takeover_set) cmd_takeover_set "$2" ;;
   *) echo "ERR: 未知命令" >&2; exit 1 ;;
 esac

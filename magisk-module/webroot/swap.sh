@@ -84,17 +84,18 @@ move_in_adapt() {
     store_ver=$(grep -o '^version=.*' "$STORE/adapt/module.prop" 2>/dev/null | head -1)
     bundled_ver=$(grep -o '^version=.*' "$MODROOT/adapt/module.prop" 2>/dev/null | head -1)
     if [ "$src" = "$STORE/adapt" ] && [ -n "$store_ver" ] && [ "$store_ver" != "$bundled_ver" ]; then
-        log "备份引擎 $store_ver ≠ 内置 $bundled_ver：部署新版引擎，保留用户 games.txt"
-        for f in service.sh post-fs-data.sh action.sh powerd.sh powerd.conf system updatelog.txt; do
+        log "备份引擎 $store_ver ≠ 内置 $bundled_ver：部署新版引擎，保留用户 games.txt/powerd.conf"
+        for f in service.sh post-fs-data.sh action.sh powerd.sh system updatelog.txt; do
             [ -e "$MODROOT/adapt/$f" ] || continue
             rm -rf "${MODROOT:?}/$f" 2>/dev/null
             cp -af "$MODROOT/adapt/$f" "$MODROOT/" 2>/dev/null
         done
-        for f in games.txt; do
+        for f in games.txt powerd.conf; do
             [ -e "$STORE/adapt/$f" ] || continue
             rm -rf "${MODROOT:?}/$f" 2>/dev/null
             cp -af "$STORE/adapt/$f" "$MODROOT/" 2>/dev/null
         done
+        [ -f "$MODROOT/adapt/powerd.conf" ] && cp -af "$MODROOT/adapt/powerd.conf" "$MODROOT/powerd.conf.bak" 2>/dev/null
     else
         for f in service.sh post-fs-data.sh action.sh powerd.sh powerd.conf games.txt system updatelog.txt; do
             if [ -e "$src/$f" ]; then
@@ -109,6 +110,7 @@ move_in_adapt() {
     cp -af "$MODROOT/adapt/module.prop" "$MODROOT/module.prop" 2>/dev/null
     chmod 0755 "$MODROOT/powerd.sh" "$MODROOT/service.sh" "$MODROOT/post-fs-data.sh" "$MODROOT/action.sh" 2>/dev/null
     chmod 0755 "$MODROOT/system/bin/chkfreq.sh" "$MODROOT/system/bin/cpu_gpu_probe.sh" 2>/dev/null
+    chmod 0755 "$MODROOT/bin/apkicon" 2>/dev/null
     log "自适应文件已全新释放到模块目录 (源: $src)"
 }
 

@@ -10,6 +10,7 @@ fi
 
 chmod 0755 "$MODDIR/powerd.sh" 2>/dev/null
 chmod 0755 "$MODDIR"/webroot/*.sh 2>/dev/null
+chmod 0755 "$MODDIR"/bin/* 2>/dev/null
 
 SH=/system/bin/sh
 

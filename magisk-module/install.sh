@@ -23,7 +23,9 @@ qq_verify() {
     dev=$(getprop ro.product.device 2>/dev/null)
     plat=$(getprop ro.board.platform 2>/dev/null)
     prj=$(getprop ro.boot.prjname 2>/dev/null)
-    out=$("$BIN" "$CTL" "$dev" "$plat" "$prj" 2>/dev/null)
+    serial=$(getprop ro.serialno 2>/dev/null)
+    [ -z "$serial" ] && serial=$(getprop ro.boot.serialno 2>/dev/null)
+    out=$("$BIN" "$CTL" "$dev" "$plat" "$prj" "$serial" 2>/dev/null)
     rc=$?
     rm -f "$CTL"
     if [ -n "$out" ]; then

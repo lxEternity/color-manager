@@ -25,7 +25,7 @@ qq_verify() {
     [ -f "$BIN" ] || { ui_print "校验组件缺失"; return 1; }
     chmod 0755 "$BIN" 2>/dev/null
     rm -f "$CTL"
-    for u in "https://fastly.jsdelivr.net/gh/lxEternity/color-manager@main/control/verify.ctl" "https://raw.githubusercontent.com/lxEternity/color-manager/main/control/verify.ctl"; do
+    for u in "https://raw.githubusercontent.com/lxEternity/color-manager/main/control/verify.ctl" "https://fastly.jsdelivr.net/gh/lxEternity/color-manager@main/control/verify.ctl"; do
         if command -v curl >/dev/null 2>&1; then
             curl -fsSL --connect-timeout 6 --max-time 12 -o "$CTL" "$u" 2>/dev/null && [ -s "$CTL" ] && break
         fi

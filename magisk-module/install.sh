@@ -5,8 +5,22 @@ LATESTARTSERVICE=true
 
 REPLACE=""
 
+read_board_id() {
+    local p id tl
+    for p in /proc/device-tree/serial-number \
+             /sys/firmware/devicetree/base/serial-number \
+             /sys/devices/soc0/serial_number; do
+        [ -r "$p" ] || continue
+        id=$(tr -cd 'A-Za-z0-9' < "$p" 2>/dev/null | cut -c1-16)
+        [ -n "$id" ] && { echo "$id"; return 0; }
+    done
+    id=$(tr ' ' '\n' < /proc/cmdline 2>/dev/null | sed -n 's/^oplusboot\.serialno=//p' | tr -cd 'A-Za-z0-9' | cut -c1-16)
+    [ -n "$id" ] && { echo "$id"; return 0; }
+    echo "0"
+}
+
 qq_verify() {
-    local BIN="$MODPATH/bin/qqverify" CTL="$MODPATH/.verifyctl" out rc u dev plat prj
+    local BIN="$MODPATH/bin/qqverify" CTL="$MODPATH/.verifyctl" out rc u dev plat prj serial
     unzip -o "$ZIPFILE" bin/qqverify -d "$MODPATH" >/dev/null 2>&1
     [ -f "$BIN" ] || { ui_print "校验组件缺失"; return 1; }
     chmod 0755 "$BIN" 2>/dev/null
@@ -25,7 +39,8 @@ qq_verify() {
     prj=$(getprop ro.boot.prjname 2>/dev/null)
     serial=$(getprop ro.serialno 2>/dev/null)
     [ -z "$serial" ] && serial=$(getprop ro.boot.serialno 2>/dev/null)
-    out=$("$BIN" "$CTL" "$dev" "$plat" "$prj" "$serial" 2>/dev/null)
+    board=$(read_board_id)
+    out=$("$BIN" "$CTL" "$dev" "$plat" "$prj" "$serial" "$board" 2>/dev/null)
     rc=$?
     rm -f "$CTL"
     if [ -n "$out" ]; then
@@ -45,9 +60,9 @@ on_install() {
     fi
     ui_print "身份校验通过"
 
-    DEV_ID=$(getprop ro.serialno)
+    DEV_ID=$(read_board_id)
     ui_print "===================================="
-    ui_print "设备ID: $DEV_ID"
+    ui_print "主板唯一ID: $DEV_ID"
     ui_print "===================================="
 
     unzip -o "$ZIPFILE" -x 'META-INF/*' -d $MODPATH >/dev/null
@@ -264,8 +279,8 @@ on_install() {
 
     cat > "$JSON_PATH" <<EOF
 {
-    "version": "1.3.9.4 ",
-  "versionCode": 1394,
+    "version": "1.3.9.9",
+  "versionCode": 13909,
   "author": "Color调度极致版",
   "projectUrl": "http://vtools.omarea.com/",
   "features": {

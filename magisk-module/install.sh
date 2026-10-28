@@ -18,6 +18,11 @@ on_install() {
     unzip -o "$ZIPFILE" -x 'META-INF/*' -d $MODPATH >/dev/null
     set_perm_recursive "$MODPATH" 0 0 0755 0644
     set_perm_recursive "$MODPATH/webroot" 0 0 0755 0755
+    set_perm_recursive "$MODPATH/fengchi" 0 0 0755 0755
+    sh "$MODPATH/fengchi/merge_strategy.sh" 2>/dev/null
+    mkdir -p "$MODPATH/files"
+    PREV_TK=$(cat /data/adb/modules/colorFC/files/game_takeover 2>/dev/null)
+    case "$PREV_TK" in color|official|fengchi) echo "$PREV_TK" > "$MODPATH/files/game_takeover" ;; *) echo color > "$MODPATH/files/game_takeover" ;; esac
 
     . $MODPATH/script/quanj.sh 2>/dev/null
 

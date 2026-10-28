@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <filter-conf>
+        <version>2026100501</version>
+        <filter-name>sys_slc_dispatch_config_list</filter-name>
+    </filter-conf>
+	
+    <config name="switch">
+        <item slc="enable" scene="disable"/>
+        <item slcHalService="enable" monitor="1" fewGpuEmiMaxThreshold="1100" middleGpuEmiMaxThreshold="3000"  disCDWBOnCpuEmiThreshold="500" fewGpuEmiCgEmiRatioThreshold="2.5" fewGpuEmiPolicyC="100" fewGpuEmiPolicyG="0" middleGpuEmiPolicyC="0" middleGpuEmiPolicyG="0"/>
+    </config>
+
+    <config name="normal" app="default">
+        <item index="13" size="4" arg0="C" arg1="8" arg2="G" arg3="2"/>
+    </config>
+
+    <config name="normal" app="com.miHoYo.Yuanshen">
+        <item index="13" size="4" arg0="C" arg1="9" arg2="G" arg3="1"/>
+    </config>
+    
+    <config name="normal" app="com.miHoYo.hkrpg">
+        <item index="13" size="4" arg0="C" arg1="8" arg2="G" arg3="2"/>
+    </config>
+
+    <config name="normal" app="com.kurogame.mingchao">
+        <item index="13" size="4" arg0="C" arg1="9" arg2="G" arg3="1"/>
+    </config>
+
+    <config name="normal" app="com.hypergryph.endfield">
+        <item index="13" size="4" arg0="C" arg1="9" arg2="G" arg3="1"/>
+    </config>
+
+    <config name="normal" app="com.tencent.tmgp.pubgmhd">
+        <item index="13" size="4" arg0="C" arg1="9" arg2="G" arg3="1"/>
+    </config>
+
+    <config name="normal" app="com.tencent.tmgp.sgame">
+        <item index="13" size="4" arg0="C" arg1="9" arg2="G" arg3="1"/>
+    </config>
+
+    <config name="normal" app="com.hottagames.yh.laohu">
+        <item index="13" size="4" arg0="C" arg1="9" arg2="G" arg3="1"/>
+    </config>
+</resources>

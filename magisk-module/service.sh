@@ -143,6 +143,14 @@ killall qingtd.sh
 
 nohup $MODULE_PATH/script/qingtd.sh >/dev/null 2>&1 &
 
+if [ ! -f $mosdz/game_takeover ]; then
+    echo color > $mosdz/game_takeover
+fi
+chmod 0755 $MODULE_PATH/fengchi/*.sh 2>/dev/null
+if [ "$(cat $mosdz/game_takeover 2>/dev/null)" = "fengchi" ]; then
+    nohup sh $MODULE_PATH/fengchi/run_inject.sh >/dev/null 2>&1 &
+fi
+
 wjdz=/sdcard/Android/qing8gen2
 
 if [ -d $wjdz ]; then

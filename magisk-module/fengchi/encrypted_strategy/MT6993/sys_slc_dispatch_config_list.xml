@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <filter-conf>
+        <version>2026031901</version>
+        <filter-name>sys_slc_dispatch_config_list</filter-name>
+    </filter-conf>
+	
+    <config name="switch">
+        <item slc="enable" scene="enable"/>
+        <item slcHalService="enable" 
+		monitor="1" fewGpuEmiMaxThreshold="1100" middleGpuEmiMaxThreshold="3000" disCDWBOnCpuEmiThreshold="500" fewGpuEmiCgEmiRatioThreshold="2.5" 
+		fewGpuEmiPolicyC="100" fewGpuEmiPolicyG="0" middleGpuEmiPolicyC="0" middleGpuEmiPolicyG="0" 
+		gameSceneEn="0" gameCustPd="1" gameCpuPrefetch="1" gameCmBalance="128" 
+		cameraSceneEn="1" cameraCustPd="0" cameraCpuPrefetch="1" cameraCmBalance="512" 
+		benchSceneEn="0" benchCustPd="0" benchCpuPrefetch="0" benchCmBalance="512" 
+		normalSceneEn="0" normalCustPd="0" normalCpuPrefetch="0" normalCmBalance="512"/>
+    </config>
+	
+	<config name="normal" app="default">
+        <item index="-1" size="10" arg0="L" arg1="0" arg2="M" arg3="0" arg4="D" arg5="256" arg6="C" arg7="9" arg8="G" arg9="1"/>
+    </config>
+
+    <config name="normal" app="com.miHoYo.hkrpg">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="7" arg8="G" arg9="3"/>
+	</config>
+	<!-- <config name="normal" app="com.miHoYo.Yuanshen">
+        <item index="13" size="4" arg0="L" arg1="1" arg2="M" arg3="1"/>
+	</config> -->
+	<config name="normal" app="com.miHoYo.Nap">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.kurogame.mingchao">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="6" arg8="G" arg9="4"/>
+	</config>
+
+	<config name="normal" app="com.tencent.tmgp.sgame">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.pubgmhd">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="7" arg8="G" arg9="3"/>
+	</config>
+	<config name="normal" app="com.netease.party.nearme.gamecenter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.happyelements.AndroidAnimal">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.minitech.miniworld.nearme.gamecenter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.netease.mc.nearme.gamecenter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.jkchess">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.KiHan">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.netease.dwrg.nearme.gamecenter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.mf.uam">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.dfm">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="7" arg8="G" arg9="3"/>
+	</config>
+	<config name="normal" app="com.kiloo.subwaysurf">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.wepie.snake.nearme.gamecenter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.letsgo">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.cf">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.netease.sky.nearme.gamecenter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.cod">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="5" arg8="G" arg9="5"/>
+	</config>
+	<config name="normal" app="com.qqgame.hlddz">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.speedmobile">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.qqgame.happymj">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.lolm">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.netease.yhtj">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.nfsonline">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.sofunny.Sausage">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.supercell.brawlstars">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.supercell.clashofclans">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.papegames.lysk.cn">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tuyoo.fish3d.official">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.dnf">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.gnyx">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.ChillyRoom.DungeonShooter">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.netease.aceracer">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.netease.race">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+	<config name="normal" app="com.hypergryph.endfield">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="8" arg8="G" arg9="2"/>
+	</config>
+	<config name="normal" app="com.tencent.tmgp.cf">
+        <item index="13" size="10" arg0="L" arg1="1" arg2="M" arg3="1" arg4="D" arg5="128" arg6="C" arg7="9" arg8="G" arg9="1"/>
+	</config>
+</resources>

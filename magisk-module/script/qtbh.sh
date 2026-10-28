@@ -40,18 +40,37 @@ if [[ $jbaoming != $xbaoming ]]; then
         exit 0
     fi
 
+    tkm=$(cat $mosdz/game_takeover 2>/dev/null)
+    [ -z "$tkm" ] && tkm=color
+
     if mos=$(grep "^$xbaoming=" "$hmd" 2>/dev/null | head -n 1 | cut -d '=' -f2); [ -n "$mos" ]; then
-        echo "$shij $xbaoming >> $mos" >> $rizhidz
-        ms=$mos
-        kzlx=1
-        . /data/powercfg.sh
+        if [ "$tkm" = "color" ]; then
+            echo "$shij $xbaoming >> $mos (Color接管)" >> $rizhidz
+            ms=$mos
+            kzlx=1
+            . /data/powercfg.sh
+        else
+            if [ "$tkm" = "fengchi" ] && [ ! -f "$MODULE_PATH/fengchi/.injected" ]; then
+                echo "$shij $xbaoming 游戏前台(风驰增强接管)，策略未注入，后台注入中" >> $rizhidz
+                nohup sh "$MODULE_PATH/fengchi/run_inject.sh" >/dev/null 2>&1 &
+            else
+                if [ "$tkm" = "fengchi" ]; then
+                    echo "$shij $xbaoming 游戏前台(风驰增强接管)，Color不介入" >> $rizhidz
+                else
+                    echo "$shij $xbaoming 游戏前台(官方风驰接管)，Color不介入" >> $rizhidz
+                fi
+            fi
+            jbaoming=$xbaoming
+            echo $xbaoming > $mosdz/baom
+            exit 0
+        fi
     else
         mos=$(grep "^moren=" "$hmd" 2>/dev/null | head -n 1 | cut -d '=' -f2)
         if [ -z "$mos" ]; then
             echo "$shij 未配置默认模式(moren)，跳过本次切换" >> $rizhidz
             exit 0
         fi
-        echo "$shij $xbaoming >> $mos" >> $rizhidz
+        echo "$shij $xbaoming >> $mos (切回Color接管)" >> $rizhidz
         ms=$mos
         kzlx=1
         . /data/powercfg.sh

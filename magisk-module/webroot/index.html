@@ -206,6 +206,15 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="hint">前台监视（动态模式切换.conf）按应用自动切换；手动选择会立即应用并同步为默认模式（moren），重进不再被切回。</div>
   </div>
 
+  <div class="card" id="takeoverCard" style="display:none">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">游戏接管模式</span>
+      <span style="color:var(--t3);font-size:11px">退出游戏一律切回Color接管</span>
+    </div>
+    <div class="chips" id="takeoverChips" style="margin-bottom:0"></div>
+    <div class="hint">Color调度：游戏由Color按名单模式接管；官方风驰：游戏期间Color不介入，交由系统风驰调度；风驰增强：游戏期间由游戏助手增强策略接管（首次选择自动后台注入）。所有模式下CPU解除限制与伪装温度保持生效，游戏名单取自动态模式切换.conf中配置了专属模式的应用。</div>
+  </div>
+
   <div class="card" id="adaptCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">自适应限频状态</span>
@@ -419,6 +428,7 @@ function renderFormCard(){
   }
   $('demoBadge').style.display = demoMode?'inline-block':'none';
   $('modeCard').style.display = form==='dispatch'?'':'none';
+  $('takeoverCard').style.display = form==='dispatch'?'':'none';
   $('adaptCard').style.display = form==='adapt'?'':'none';
   $('homeEntries').style.display = form==='dispatch'?'':'none';
   const un = form!=='dispatch';
@@ -477,11 +487,13 @@ async function refreshHome(){
   if(demoMode){
     $('curMode').textContent='balance';
     renderHomeChips('balance');
+    renderTakeoverChips('color');
     return;
   }
   const out = await shOut(
     (form==='dispatch'
-      ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)"`
+      ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)";`+
+        `echo "TK=$(sh ${MOD}/webroot/api.sh takeover_get 2>/dev/null)"`
       : `echo "PD=$(sh ${MOD}/powerd.sh status 2>/dev/null | tail -1)";`+
         `echo "BIG=$(grep -o 'CPU_PCT_BIG=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
         `echo "MID2=$(grep -o 'CPU_PCT_MID2=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
@@ -495,6 +507,8 @@ async function refreshHome(){
     if(!MODE_KEYS.includes(curMode)) curMode='balance';
     $('curMode').textContent = MODE_NAMES[curMode]||curMode;
     renderHomeChips(curMode);
+    let tk = g('TK'); if(!TK_KEYS.includes(tk)) tk='color';
+    renderTakeoverChips(tk);
   }else{
     $('pBig').textContent = g('BIG')+'%'; $('pMid2').textContent = g('MID2')+'%';
     $('pMid').textContent = g('MID')+'%'; $('pLittle').textContent = g('LIT')+'%';
@@ -526,6 +540,28 @@ async function applyMode(k){
   curMode = k; $('curMode').textContent = MODE_NAMES[k];
   renderHomeChips(k);
   toast(MODE_NAMES[k]+' 已应用（并设为默认模式）');
+}
+
+const TK_KEYS = ['color','official','fengchi'];
+const TK_NAMES = {color:'Color调度', official:'官方风驰', fengchi:'风驰增强'};
+
+function renderTakeoverChips(active){
+  const box = $('takeoverChips'); box.innerHTML='';
+  TK_KEYS.forEach(k=>{
+    const c = document.createElement('button');
+    c.className = 'chip'+(k===active?' on':'');
+    c.textContent = TK_NAMES[k];
+    c.onclick = ()=>applyTakeover(k);
+    box.appendChild(c);
+  });
+}
+
+async function applyTakeover(k){
+  if(demoMode){ toast('演示模式'); return; }
+  const r = await exec(`sh ${MOD}/webroot/api.sh takeover_set ${k}`);
+  if(r && r.errno !== 0){ toast('设置失败，请重试'); return; }
+  renderTakeoverChips(k);
+  toast(k==='fengchi' ? '风驰增强接管已开启（后台注入策略中，游戏助手重启后生效）' : '游戏接管: '+TK_NAMES[k]);
 }
 
 const SLIDER_DEFS = [

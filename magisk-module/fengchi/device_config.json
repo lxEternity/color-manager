@@ -1,0 +1,39 @@
+{
+  "devices": {
+    "lighthouse": { "models": ["PMA110", "PMA120", "CPH2841"], "strategy_path": "infiniti" },
+    "infiniti":   { "models": ["PLK110", "CPH2745", "CPH2747", "CPH2749"], "strategy_path": "infiniti" },
+    "mario":      { "models": ["PYF110"], "strategy_path": "infiniti" },
+    "redalert":   { "models": ["PMS110"], "strategy_path": "infiniti" },
+    "fairlady":   { "models": ["PLZ110"], "strategy_path": "infiniti" },
+    "iceland":    { "models": ["OPD2511", "OPD2513", "OPD2514"], "strategy_path": "iceland" },
+    "swangoose":  { "models": ["CPH2765", "PLP110", "PLP120"], "strategy_path": "infiniti" }
+  },
+  "platforms": {
+    "SM8750P":  "SM8750",
+    "SM8750AC": "SM8750",
+    "SM8845P":  "SM8845",
+    "SM8850P":  "SM8850",
+    "SM8850Q":  "SM8850",
+    "MT6991Z":  "MT6991",
+    "MT6991T":  "MT6991",
+    "MT6992":   "MT6991",
+    "MT6995":   "MT6993"
+  },
+  "games": {
+    "com.miHoYo.Yuanshen": ["com.miHoYo.yuanshencb", "com.miHoYo.GenshinImpact", "com.miHoYo.ys.bilibili"],
+    "com.miHoYo.hkrpg":    "com.HoYoverse.hkrpgoversea",
+    "com.miHoYo.Nap":      ["com.miHoYo.NapCb", "com.miHoYo.Nap.bilibili", "com.HoYoverse.Nap"],
+    "com.miHoYo.bh3":      ["com.miHoYo.bh3.bilibili", "com.miHoYo.bh3.nearme.gamecenter", "com.miHoYo.bh3.lenovo", "com.miHoYo.bh3.huawei", "com.miHoYo.bh3.vivo", "com.miHoYo.bh3.mi", "com.miHoYo.enterprise.NGHSoD", "com.miHoYo.bh3tw", "com.miHoYo.bh3rdJP", "com.miHoYo.bh3global", "com.miHoYo.bh3oversea", "com.miHoYo.bh3twmycard", "com.tencent.tmgp.bh3", "com.miHoYo.bh3.uc"],
+    "com.hypergryph.endfield":  ["com.tencent.czn", "com.hypergryph.endfield.bilibili"],
+    "com.hypergryph.arknights": "com.hypergryph.arknights.bilibili",
+    "com.kurogame.mingchao":    ["com.tencent.ngr", "com.kurogame.mingchao.bilibili"],
+    "com.tencent.lolm":         "com.dfjz.moba",
+    "com.tencent.tmgp.cod":     "com.garena.game.codm",
+    "com.tencent.tmgp.sgame":   ["com.tencent.tmgp.sgamece", "com.levelinfinite.sgameGlobal", "com.levelinfinite.sgameGlobal.midaspay", "com.tencent.tmgp.osgame"],
+    "com.tencent.mf.uam":       "com.proximabeta.mf.uamo",
+    "com.pubg.imobile":         ["com.tencent.ig", "com.pubg.krmobile", "com.rekoo.pubgm"],
+    "com.netease.dwrg":  ["com.netease.dwrg.nearme.gamecenter", "com.netease.dwrg.m4399"],
+    "com.netease.party":        ["com.netease.party.bilibili", "com.netease.party.huawei"],
+    "com.hottagames.yh.laohu": "com.hottagames.yh.bilibili"
+  }
+}

@@ -362,6 +362,25 @@ cmd_swap() {
   sh "$MODDIR/webroot/swap.sh" "$1" 2>/dev/null
 }
 
+cmd_takeover_get() {
+  v=$(cat "$MODDIR/files/game_takeover" 2>/dev/null)
+  case "$v" in color|official|fengchi) ;; *) v=color ;; esac
+  echo "$v"
+}
+
+cmd_takeover_set() {
+  case "$1" in
+    color|official|fengchi) ;;
+    *) err "用法: api.sh takeover_set [color|official|fengchi]" ;;
+  esac
+  mkdir -p "$MODDIR/files"
+  echo "$1" > "$MODDIR/files/game_takeover"
+  if [ "$1" = "fengchi" ]; then
+    nohup sh "$MODDIR/fengchi/run_inject.sh" >/dev/null 2>&1 &
+  fi
+  echo "OK"
+}
+
 case "$1" in
   ping) cmd_ping ;;
   status) cmd_status ;;
@@ -377,5 +396,7 @@ case "$1" in
   restart) cmd_restart ;;
   about) cmd_about ;;
   swap) cmd_swap "$2" ;;
+  takeover_get) cmd_takeover_get ;;
+  takeover_set) cmd_takeover_set "$2" ;;
   *) echo "ERR: 未知命令" >&2; exit 1 ;;
 esac

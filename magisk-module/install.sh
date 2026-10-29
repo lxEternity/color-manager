@@ -272,26 +272,6 @@ on_install() {
         fi
     } >/dev/null 2>&1
 
-    JSON_PATH="/data/data/com.omarea.vtools/files/manifest.json"
-    mkdir -p "$(dirname "$JSON_PATH")"
-
-    chattr -i "$JSON_PATH" 2>/dev/null
-
-    cat > "$JSON_PATH" <<EOF
-{
-    "version": "1.4.0.0",
-  "versionCode": 14000,
-  "author": "Color调度极致版",
-  "projectUrl": "http://vtools.omarea.com/",
-  "features": {
-    "strict": true,
-    "pedestal": false
-  }
-}
-EOF
-
-    chattr +i "$JSON_PATH" 2>/dev/null
-
     ChooseInstallAPP
     local app_sel=$?
     if [ $app_sel -eq 1 ];then

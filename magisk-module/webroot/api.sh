@@ -519,9 +519,23 @@ cmd_takeover_set() {
   esac
   mkdir -p "$MODDIR/files"
   echo "$1" > "$MODDIR/files/game_takeover"
+  if [ "$1" != "color" ]; then
+    local moren
+    moren=$(grep "^moren=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
+    [ -n "$moren" ] && sh /data/powercfg.sh "$moren" >/dev/null 2>&1
+  fi
   if [ "$1" = "fengchi" ]; then
     nohup sh "$MODDIR/fengchi/run_inject.sh" >/dev/null 2>&1 &
   fi
+  nohup sh -c '
+    sleep 1
+    am force-stop com.oplus.games >/dev/null 2>&1
+    monkey -p com.oplus.games -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    rm -f /data/data/com.oplus.cosa/databases/db_game_database* 2>/dev/null
+    rm -f /data/data/com.oplus.cosa/no_backup/androidx.work.workdb* 2>/dev/null
+    am force-stop com.oplus.cosa >/dev/null 2>&1
+    monkey -p com.oplus.cosa -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  ' >/dev/null 2>&1 &
   echo "OK"
 }
 

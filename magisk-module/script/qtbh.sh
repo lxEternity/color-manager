@@ -1,18 +1,19 @@
 BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
 
-$MODULE_PATH/fps
-
 now=$(date +%s)
-last=$(cat $mosdz/qtbh_ts 2>/dev/null)
+last=0
+[ -f $mosdz/qtbh_ts ] && read last < $mosdz/qtbh_ts
 [ -z "$last" ] && last=0
 if [ $((now - last)) -lt 2 ]; then
     exit 0
 fi
 echo $now > $mosdz/qtbh_ts
 
-jbaoming=$(cat $mosdz/baom)
+jbaoming=""
+[ -f $mosdz/baom ] && read jbaoming < $mosdz/baom
 xbaoming=$(dumpsys window displays | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
+[ -z "$xbaoming" ] && xbaoming=$(dumpsys window | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
 
 if [[ $jbaoming != $xbaoming ]]; then
     shij="[$(date '+%T')]"
@@ -40,7 +41,8 @@ if [[ $jbaoming != $xbaoming ]]; then
         exit 0
     fi
 
-    tkm=$(cat $mosdz/game_takeover 2>/dev/null)
+    tkm=""
+    [ -f $mosdz/game_takeover ] && read tkm < $mosdz/game_takeover
     [ -z "$tkm" ] && tkm=color
 
     if mos=$(grep "^$xbaoming=" "$hmd" 2>/dev/null | head -n 1 | cut -d '=' -f2); [ -n "$mos" ]; then

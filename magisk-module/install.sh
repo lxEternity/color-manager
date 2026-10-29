@@ -279,8 +279,8 @@ on_install() {
 
     cat > "$JSON_PATH" <<EOF
 {
-    "version": "1.3.9.9",
-  "versionCode": 13909,
+    "version": "1.4.0.0",
+  "versionCode": 14000,
   "author": "Color调度极致版",
   "projectUrl": "http://vtools.omarea.com/",
   "features": {

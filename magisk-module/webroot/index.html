@@ -94,6 +94,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;heigh
   padding:11px 0;border-radius:20px;cursor:pointer;margin-top:13px;
   box-shadow:0 4px 16px rgba(0,180,224,.35);transition:.15s}
 .btn:active{transform:scale(.97);opacity:.9}
+.btn:disabled{opacity:.45;pointer-events:none}
 
 .entry{display:flex;align-items:center;gap:11px;cursor:pointer}
 .entry .bar{width:4px;height:30px;border-radius:3px}
@@ -212,7 +213,8 @@ nav button.on{color:var(--ac);font-weight:700}
       <span style="color:var(--t3);font-size:11px">退出游戏一律切回Color接管</span>
     </div>
     <div class="chips" id="takeoverChips" style="margin-bottom:0"></div>
-    <div class="hint">Color调度：游戏由Color按名单模式接管；官方风驰：游戏期间Color不介入，交由系统风驰调度；风驰增强：游戏期间由游戏助手增强策略接管（首次选择自动后台注入）。所有模式下CPU解除限制与伪装温度保持生效，游戏名单取自动态模式切换.conf中配置了专属模式的应用。</div>
+    <button class="btn" id="takeoverSaveBtn" style="margin-top:11px" onclick="saveTakeover()">保存</button>
+    <div class="hint">Color调度：游戏由Color按名单模式接管；官方风驰：游戏期间Color不介入，交由系统风驰调度；风驰增强：游戏期间由游戏助手增强策略接管（首次选择自动后台注入）。保存后自动静默重启游戏助手并清理应用增强数据。所有模式下CPU解除限制与伪装温度保持生效，游戏名单取自动态模式切换.conf中配置了专属模式的应用。</div>
   </div>
 
   <div class="card" id="adaptCard" style="display:none">
@@ -508,7 +510,8 @@ async function refreshHome(){
     $('curMode').textContent = MODE_NAMES[curMode]||curMode;
     renderHomeChips(curMode);
     let tk = g('TK'); if(!TK_KEYS.includes(tk)) tk='color';
-    renderTakeoverChips(tk);
+    tkSel = tk; tkCur = tk;
+    renderTakeoverChips();
   }else{
     $('pBig').textContent = g('BIG')+'%'; $('pMid2').textContent = g('MID2')+'%';
     $('pMid').textContent = g('MID')+'%'; $('pLittle').textContent = g('LIT')+'%';
@@ -544,24 +547,31 @@ async function applyMode(k){
 
 const TK_KEYS = ['color','official','fengchi'];
 const TK_NAMES = {color:'Color调度', official:'官方风驰', fengchi:'风驰增强'};
+let tkSel = 'color', tkCur = 'color';
 
-function renderTakeoverChips(active){
+function renderTakeoverChips(){
   const box = $('takeoverChips'); box.innerHTML='';
   TK_KEYS.forEach(k=>{
     const c = document.createElement('button');
-    c.className = 'chip'+(k===active?' on':'');
+    c.className = 'chip'+(k===tkSel?' on':'');
     c.textContent = TK_NAMES[k];
-    c.onclick = ()=>applyTakeover(k);
+    c.onclick = ()=>{ tkSel = k; renderTakeoverChips(); };
     box.appendChild(c);
   });
+  const b = $('takeoverSaveBtn');
+  if(b) b.disabled = (tkSel === tkCur);
 }
 
-async function applyTakeover(k){
+async function saveTakeover(){
   if(demoMode){ toast('演示模式'); return; }
-  const r = await exec(`sh ${MOD}/webroot/api.sh takeover_set ${k}`);
-  if(r && r.errno !== 0){ toast('设置失败，请重试'); return; }
-  renderTakeoverChips(k);
-  toast(k==='fengchi' ? '风驰增强接管已开启（后台注入策略中，游戏助手重启后生效）' : '游戏接管: '+TK_NAMES[k]);
+  if(tkSel === tkCur){ toast('游戏接管模式未更改'); return; }
+  const b = $('takeoverSaveBtn'); if(b) b.disabled = true;
+  toast('正在切换到 '+TK_NAMES[tkSel]+'…');
+  const r = await exec(`sh ${MOD}/webroot/api.sh takeover_set ${tkSel}`);
+  if(r && r.errno !== 0){ toast('设置失败，请重试'); if(b) b.disabled = false; return; }
+  tkCur = tkSel;
+  renderTakeoverChips();
+  toast(TK_NAMES[tkSel]+' 已保存，游戏助手/应用增强已静默重启'+(tkSel!=='color'?'，游戏期间Color调度不接管':''));
 }
 
 const SLIDER_DEFS = [

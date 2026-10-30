@@ -1,12 +1,10 @@
 #!/system/bin/sh
-# colorFC thermal control: fake temp injection + custom temp wall
+# colorFC thermal control: continuous fake temp injection (never hand back to system thermal)
 # state dir survives module updates and form swaps
 MODDIR=$(dirname "$(readlink -f "$0")")
 TDIR=/data/adb/colorFC_thermal
 LOG="$TDIR/thermal.log"
 FAKE_MS=36000
-WALL_MIN=36
-WALL_MAX=55
 
 log(){
   echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$LOG" 2>/dev/null
@@ -22,7 +20,6 @@ log_trim(){
 init_defaults(){
   mkdir -p "$TDIR" 2>/dev/null
   [ -f "$TDIR/fake" ] || echo 1 > "$TDIR/fake" 2>/dev/null
-  [ -f "$TDIR/wall" ] || echo "$WALL_MAX" > "$TDIR/wall" 2>/dev/null
 }
 
 get_real(){
@@ -34,12 +31,6 @@ get_real(){
 load_state(){
   read fake < "$TDIR/fake" 2>/dev/null
   [ "$fake" = "1" ] || fake=0
-  read wall < "$TDIR/wall" 2>/dev/null
-  case "$wall" in ''|*[!0-9]*) wall="" ;; esac
-  if [ -n "$wall" ]; then
-    [ "$wall" -gt "$WALL_MAX" ] && wall=$WALL_MAX
-    [ "$wall" -lt "$WALL_MIN" ] && wall=$WALL_MIN
-  fi
 }
 
 read_sys_wall(){
@@ -83,13 +74,8 @@ tick_once(){
   load_state
   real=$(get_real)
   if [ "$fake" = "1" ]; then
-    if [ -n "$wall" ] && [ -n "$real" ] && [ "$real" -ge $((wall*10)) ]; then
-      mode="release"
-      apply_all $((real*100))
-    else
-      mode="fake"
-      apply_all "$FAKE_MS"
-    fi
+    mode="fake"
+    apply_all "$FAKE_MS"
   else
     mode="off"
     [ -n "$real" ] && apply_all $((real*100))
@@ -109,7 +95,7 @@ daemon_main(){
   done
   init_defaults
   load_state
-  log "温控守护启动 pid=$$ fake=$fake wall=${wall:-none}"
+  log "温控守护启动 pid=$$ fake=$fake（持续伪装，不交还系统温控）"
   log_trim
   LAST_MODE=""
   while :; do
@@ -129,8 +115,8 @@ case "$1" in
     real=$(get_real)
     sys=$(read_sys_wall)
     if pgrep -f "thermal/thermal.sh daemon" >/dev/null 2>&1; then run=1; else run=0; fi
-    printf '{"fake":%s,"wall":%s,"real":%s,"sys":%s,"run":%s}\n' \
-      "$fake" "${wall:-$WALL_MAX}" "${real:-null}" "${sys:-null}" "$run"
+    printf '{"fake":%s,"real":%s,"sys":%s,"run":%s}\n' \
+      "$fake" "${real:-null}" "${sys:-null}" "$run"
     ;;
   set_fake)
     case "$2" in
@@ -144,23 +130,8 @@ case "$1" in
     log "伪装温度切换为 $2"
     echo "OK"
     ;;
-  set_wall)
-    case "$2" in
-      ''|*[!0-9]*) echo "ERR: 用法 thermal.sh set_wall $WALL_MIN-$WALL_MAX" >&2; exit 1 ;;
-    esac
-    if [ "$2" -lt "$WALL_MIN" ] || [ "$2" -gt "$WALL_MAX" ]; then
-      echo "ERR: 温度墙范围 ${WALL_MIN}-${WALL_MAX}℃" >&2
-      exit 1
-    fi
-    init_defaults
-    echo "$2" > "$TDIR/wall" 2>/dev/null
-    LAST_MODE=""
-    tick_once
-    log "温度墙设置为 $2 ℃"
-    echo "OK"
-    ;;
   *)
-    echo "用法: thermal.sh [daemon|status|set_fake 0|1|set_wall $WALL_MIN-$WALL_MAX]" >&2
+    echo "用法: thermal.sh [daemon|status|set_fake 0|1]" >&2
     exit 1
     ;;
 esac

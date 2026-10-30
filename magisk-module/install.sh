@@ -229,7 +229,6 @@ on_install() {
 
         mkdir -p /data/adb/colorFC_thermal
         echo 0 > /data/adb/colorFC_thermal/fake
-        echo 55 > /data/adb/colorFC_thermal/wall
         ui_print "充电+温控代码移除完成"
     fi
 

@@ -603,8 +603,8 @@ cmd_takeover_set() {
 cmd_thermal() {
   [ -f "$MODDIR/thermal/thermal.sh" ] || err "未找到 thermal/thermal.sh"
   case "$1" in
-    status|set_fake|set_wall) ;;
-    *) err "用法: api.sh thermal [status|set_fake 0|1|set_wall 36-55]" ;;
+    status|set_fake) ;;
+    *) err "用法: api.sh thermal [status|set_fake 0|1]" ;;
   esac
   sh "$MODDIR/thermal/thermal.sh" "$@"
 }

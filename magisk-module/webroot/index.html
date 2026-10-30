@@ -337,19 +337,23 @@ nav button.on{color:var(--ac);font-weight:700}
   <div class="card" id="thermalCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">温控</span>
-      <label class="sw"><input type="checkbox" id="thFakeSw" onchange="thToggleFake(this.checked)"><i></i></label>
+      <span id="thRun" style="font-size:11px;font-weight:700;color:var(--t3)">--</span>
     </div>
     <div class="grid">
       <div class="cell"><i>伪装温度</i><b id="thFake">--</b></div>
       <div class="cell"><i>电池温度</i><b id="thReal">--</b></div>
       <div class="cell"><i>系统温度墙</i><b id="thSys">--</b></div>
     </div>
-    <div class="sl" style="margin-top:8px">
+    <div class="row-between" style="margin-top:10px;padding:2px 2px 0">
+      <span style="font-size:13px;font-weight:600">伪装温度</span>
+      <label class="sw"><input type="checkbox" id="thFakeSw" onchange="thToggleFake(this.checked)"><i></i></label>
+    </div>
+    <div class="sl" style="margin-top:6px">
       <label>温度墙</label>
       <input type="range" id="thWall" min="36" max="55" step="1" value="55" oninput="thWallDrag(this)">
       <output id="thWallOut">55 ℃</output>
     </div>
-    <div class="hint">开启后向温控持续注入 36℃ 伪装读数解除限制；电池温度达到温度墙后自动恢复真实读数，系统温控重新接管。温度墙 36-55℃，实时生效。</div>
+    <div class="hint">开启伪装温度后向温控持续注入 36℃ 读数解除限制；电池温度达到温度墙后自动恢复真实读数，系统温控重新接管。温度墙 36-55℃，实时生效。系统温度墙读取内核温控节点（电池/壳温传感区最高触发点）。</div>
   </div>
 </section>
 
@@ -2043,6 +2047,8 @@ async function loadThermal(){
       $('thFake').textContent = '36 ℃';
       $('thReal').textContent = (32.5+Math.sin(Date.now()/90000)*1.5).toFixed(1)+' ℃';
       $('thSys').textContent = '43 ℃';
+      $('thRun').textContent = '守护运行中';
+      $('thRun').style.color = 'var(--ok)';
       if(document.activeElement !== $('thWall')){
         $('thWall').value = 55;
         $('thWallOut').textContent = '55 ℃';
@@ -2055,9 +2061,11 @@ async function loadThermal(){
     let j = null;
     try{ j = JSON.parse(out); }catch(e){}
     if(!j) return;
-    $('thFake').textContent = j.fake===1 ? '36 ℃' : '已关闭';
+    $('thFake').textContent = j.fake===1 ? '36 ℃' : '未启用';
     $('thReal').textContent = (j.real!=null && !isNaN(j.real)) ? (j.real/10).toFixed(1)+' ℃' : '--';
     $('thSys').textContent = (j.sys!=null && !isNaN(j.sys)) ? j.sys+' ℃' : '--';
+    $('thRun').textContent = j.run===1 ? '守护运行中' : '守护未运行';
+    $('thRun').style.color = j.run===1 ? 'var(--ok)' : 'var(--warn)';
     const w = (j.wall>=36 && j.wall<=55) ? j.wall : 55;
     if(document.activeElement !== $('thWall')){
       $('thWall').value = w;

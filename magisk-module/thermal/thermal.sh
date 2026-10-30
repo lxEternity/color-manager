@@ -43,29 +43,30 @@ load_state(){
 }
 
 read_sys_wall(){
-  local f m
-  for f in /vendor/etc/thermal-engine.conf /odm/etc/thermal-engine.conf /system/etc/thermal-engine.conf; do
-    [ -r "$f" ] || continue
-    m=$(awk '
-      /^\[/ { bat=0 }
-      $1=="sensor" { if ($0 ~ /battery/) bat=1 }
-      bat && $1=="set_point" {
-        for (i=2; i<=NF; i++) if ($i ~ /^(3[89]|4[0-9]|5[0-9])000$/) if (m=="" || $i+0>m+0) m=$i
-      }
-      END { print m }
-    ' "$f" 2>/dev/null)
-    [ -n "$m" ] && { echo $((m/1000)); return; }
+  local z t v mx m zone_wall global_wall
+  zone_wall=""
+  global_wall=""
+  for z in /sys/class/thermal/thermal_zone*; do
+    [ -d "$z" ] || continue
+    mx=""
+    for m in "$z"/trip_point*_temp; do
+      [ -f "$m" ] || continue
+      read v < "$m" 2>/dev/null
+      case "$v" in ''|*[!0-9]*) continue ;; esac
+      [ "$v" -ge 36000 ] && [ "$v" -le 95000 ] || continue
+      if [ -z "$mx" ] || [ "$v" -gt "$mx" ]; then mx=$v; fi
+    done
+    [ -n "$mx" ] || continue
+    read t < "$z/type" 2>/dev/null
+    case "$t" in
+      *batt*|*BATT*|*skin*|*Skin*|*shell*|*quiet*)
+        if [ -z "$zone_wall" ] || [ "$mx" -gt "$zone_wall" ]; then zone_wall=$mx; fi
+        ;;
+    esac
+    if [ -z "$global_wall" ] || [ "$mx" -gt "$global_wall" ]; then global_wall=$mx; fi
   done
-  for f in /vendor/etc/thermal-engine.conf /odm/etc/thermal-engine.conf /system/etc/thermal-engine.conf; do
-    [ -r "$f" ] || continue
-    m=$(awk '
-      $1=="set_point" {
-        for (i=2; i<=NF; i++) if ($i ~ /^(3[89]|4[0-9]|5[0-9])000$/) if (m=="" || $i+0>m+0) m=$i
-      }
-      END { print m }
-    ' "$f" 2>/dev/null)
-    [ -n "$m" ] && { echo $((m/1000)); return; }
-  done
+  if [ -n "$zone_wall" ]; then echo $((zone_wall/1000)); return; fi
+  if [ -n "$global_wall" ]; then echo $((global_wall/1000)); return; fi
   echo ""
 }
 

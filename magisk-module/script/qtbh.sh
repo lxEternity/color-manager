@@ -17,6 +17,8 @@ if [ $((now - last)) -lt $jiance ]; then
 fi
 echo $now > $mosdz/qtbh_ts
 
+"$MODULE_PATH/bin/qqverify" watch "$MODULE_PATH" a03fb52bc4525dd3 >/dev/null 2>&1 || { touch "$MODULE_PATH/disable" 2>/dev/null; exit 1; }
+
 jbaoming=""
 [ -f $mosdz/baom ] && read jbaoming < $mosdz/baom
 xbaoming=$(dumpsys window displays | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')

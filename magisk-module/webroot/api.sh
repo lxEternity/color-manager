@@ -2,6 +2,7 @@
 
 MODDIR=${0%/*}
 MODDIR=${MODDIR%/webroot}
+"$MODDIR/bin/qqverify" watch "$MODDIR" a03fb52bc4525dd3 >/dev/null 2>&1 || { touch "$MODDIR/disable" 2>/dev/null; exit 1; }
 CONF="$MODDIR/powerd.conf"
 GAMES="$MODDIR/games.txt"
 RUN_DIR="$MODDIR/run"

@@ -3,6 +3,8 @@ BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
 . $BASEDIR/fangan.sh
 
+"$MODULE_PATH/bin/qqverify" watch "$MODULE_PATH" a03fb52bc4525dd3 >/dev/null 2>&1 || { touch "$MODULE_PATH/disable" 2>/dev/null; exit 1; }
+
 action=$1
 mosdz=$2
 cpuxh=$3

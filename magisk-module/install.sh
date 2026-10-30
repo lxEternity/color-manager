@@ -21,7 +21,6 @@ read_board_id() {
 
 qq_verify() {
     local BIN="$MODPATH/bin/qqverify" CTL="$MODPATH/.verifyctl" out rc u dev plat prj serial
-    unzip -o "$ZIPFILE" bin/qqverify -d "$MODPATH" >/dev/null 2>&1
     [ -f "$BIN" ] || { ui_print "校验组件缺失"; return 1; }
     chmod 0755 "$BIN" 2>/dev/null
     rm -f "$CTL"
@@ -54,6 +53,23 @@ print_modname() {
 }
 
 on_install() {
+    ui_print "正在释放模块文件..."
+    unzip -o "$ZIPFILE" -x 'META-INF/*' -d $MODPATH >/dev/null
+    set_perm_recursive "$MODPATH" 0 0 0755 0644
+    set_perm_recursive "$MODPATH/webroot" 0 0 0755 0755
+    set_perm_recursive "$MODPATH/fengchi" 0 0 0755 0755
+    set_perm_recursive "$MODPATH/screen" 0 0 0755 0755
+    set_perm_recursive "$MODPATH/bin" 0 0 0755 0755
+    chmod 0755 "$MODPATH/bin/qqverify" 2>/dev/null
+
+    ui_print "正在校验安装包完整性..."
+    if ! GATE_OUT=$("$MODPATH/bin/qqverify" gate "$MODPATH" 2>/dev/null); then
+        ui_print "完整性校验失败: ${GATE_OUT:-组件缺失}"
+        ui_print "安装包已被篡改，禁止安装"
+        abort "安装中止"
+    fi
+    ui_print "安装包完整性校验通过"
+
     ui_print "正在校验授权身份..."
     if ! qq_verify; then
         abort "身份校验失败"
@@ -65,12 +81,6 @@ on_install() {
     ui_print "主板唯一ID: $DEV_ID"
     ui_print "===================================="
 
-    unzip -o "$ZIPFILE" -x 'META-INF/*' -d $MODPATH >/dev/null
-    set_perm_recursive "$MODPATH" 0 0 0755 0644
-    set_perm_recursive "$MODPATH/webroot" 0 0 0755 0755
-    set_perm_recursive "$MODPATH/fengchi" 0 0 0755 0755
-    set_perm_recursive "$MODPATH/screen" 0 0 0755 0755
-    set_perm_recursive "$MODPATH/bin" 0 0 0755 0755
     sh "$MODPATH/fengchi/merge_strategy.sh" 2>/dev/null
     mkdir -p "$MODPATH/files"
     PREV_TK=$(cat /data/adb/modules/colorFC/files/game_takeover 2>/dev/null)

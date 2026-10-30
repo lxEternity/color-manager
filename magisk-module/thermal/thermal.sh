@@ -50,22 +50,10 @@ is_batt_zone(){
   return 1
 }
 
-zone_max_trip(){
-  local m v mx=""
-  for m in "$1"/trip_point*_temp; do
-    [ -f "$m" ] || continue
-    read v < "$m" 2>/dev/null
-    case "$v" in ''|*[!0-9]*) continue ;; esac
-    if [ -z "$mx" ] || [ "$v" -gt "$mx" ]; then mx=$v; fi
-  done
-  echo "$mx"
-}
-
-# snapshot stock battery-zone trips once, before the first write:
-# ORIG = restore list, syswall = reference value for the UI
+# snapshot stock battery-zone trips once, before the first write (restore list)
 snapshot_orig(){
   [ -f "$ORIG" ] && return
-  local z t m v mx best="" out=""
+  local z t m v out=""
   for z in /sys/class/thermal/thermal_zone*; do
     [ -d "$z" ] || continue
     read t < "$z/type" 2>/dev/null
@@ -77,27 +65,8 @@ snapshot_orig(){
       [ "$v" -ge 30000 ] && [ "$v" -le 90000 ] || continue
       out="$out$m=$v\n"
     done
-    mx=$(zone_max_trip "$z")
-    if [ -n "$mx" ] && { [ -z "$best" ] || [ "$mx" -gt "$best" ]; }; then best=$mx; fi
   done
   [ -n "$out" ] && printf "$out" > "$ORIG" 2>/dev/null
-  [ -n "$best" ] && [ ! -f "$TDIR/syswall" ] && echo $((best/1000)) > "$TDIR/syswall" 2>/dev/null
-}
-
-read_sys_wall(){
-  local v z t mx best=""
-  if [ -f "$TDIR/syswall" ]; then
-    read v < "$TDIR/syswall" 2>/dev/null
-    case "$v" in ''|*[!0-9]*) ;; *) echo "$v"; return ;; esac
-  fi
-  for z in /sys/class/thermal/thermal_zone*; do
-    [ -d "$z" ] || continue
-    read t < "$z/type" 2>/dev/null
-    is_batt_zone "$t" || continue
-    mx=$(zone_max_trip "$z")
-    if [ -n "$mx" ] && { [ -z "$best" ] || [ "$mx" -gt "$best" ]; }; then best=$mx; fi
-  done
-  [ -n "$best" ] && echo $((best/1000))
 }
 
 apply_all(){
@@ -179,10 +148,9 @@ case "$1" in
     load_state
     snapshot_orig
     real=$(get_real)
-    sys=$(read_sys_wall)
     if pgrep -f "thermal/thermal.sh daemon" >/dev/null 2>&1; then run=1; else run=0; fi
-    printf '{"wall":%s,"real":%s,"sys":%s,"run":%s}\n' \
-      "$wall" "${real:-null}" "${sys:-null}" "$run"
+    printf '{"wall":%s,"real":%s,"run":%s}\n' \
+      "$wall" "${real:-null}" "$run"
     ;;
   set_wall)
     case "$2" in

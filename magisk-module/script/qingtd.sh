@@ -2,6 +2,7 @@ BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
 shij="[$(date '%T')]"
 echo "$shij 动态切换模式启动成功" > $rizhidz
+rm -f "$MODULE_PATH/files/released" 2>/dev/null
 cpudiz=/sys/devices/system/cpu/cpufreq/policy0
 
 lm=$(cat $BASEDIR/../files/lastmode 2>/dev/null)

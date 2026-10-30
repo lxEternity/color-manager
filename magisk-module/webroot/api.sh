@@ -526,6 +526,7 @@ cmd_takeover_set() {
   [ -z "$cur" ] && cur=$(dumpsys window 2>/dev/null | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
   [ -n "$cur" ] && mos=$(grep "^$cur=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
   if [ "$1" = "color" ]; then
+    rm -f "$MODDIR/files/released" 2>/dev/null
     if [ -n "$mos" ]; then
       ms="$mos"
     else
@@ -539,6 +540,7 @@ cmd_takeover_set() {
   else
     if [ -n "$mos" ]; then
       sh "$MODDIR/script/release.sh" >/dev/null 2>&1
+      echo 1 > "$MODDIR/files/released"
     fi
   fi
   if [ "$1" = "fengchi" ]; then

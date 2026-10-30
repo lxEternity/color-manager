@@ -52,7 +52,10 @@ if [[ $jbaoming != $xbaoming ]]; then
             kzlx=1
             . /data/powercfg.sh
         else
-            sh "$BASEDIR/release.sh" >/dev/null 2>&1
+            if [ ! -f "$mosdz/released" ]; then
+                sh "$BASEDIR/release.sh" >/dev/null 2>&1
+                echo 1 > "$mosdz/released"
+            fi
             if [ "$tkm" = "fengchi" ] && [ ! -f "$MODULE_PATH/fengchi/.injected" ]; then
                 echo "$shij $xbaoming 游戏前台(风驰增强接管)，策略未注入，后台注入中" >> $rizhidz
                 nohup sh "$MODULE_PATH/fengchi/run_inject.sh" >/dev/null 2>&1 &
@@ -74,6 +77,7 @@ if [[ $jbaoming != $xbaoming ]]; then
             exit 0
         fi
         echo "$shij $xbaoming >> $mos (切回Color接管)" >> $rizhidz
+        rm -f "$mosdz/released" 2>/dev/null
         ms=$mos
         kzlx=1
         . /data/powercfg.sh

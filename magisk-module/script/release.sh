@@ -2,7 +2,15 @@ BASEDIR="$(dirname $(readlink -f "$0"))"
 . $BASEDIR/quanj.sh
 shij="[$(date '+%T')]"
 
-"$MODULE_PATH/bin/json_cpu_max_min" "100" "0" 2>/dev/null
+for p in /sys/devices/system/cpu/cpufreq/policy*; do
+    [ -d "$p" ] || continue
+    imf=$(cat "$p/cpuinfo_max_freq" 2>/dev/null)
+    imn=$(cat "$p/cpuinfo_min_freq" 2>/dev/null)
+    [ -z "$imf" ] && continue
+    chmod 666 "$p/scaling_max_freq" "$p/scaling_min_freq" 2>/dev/null
+    echo "$imf" > "$p/scaling_max_freq" 2>/dev/null
+    [ -n "$imn" ] && echo "$imn" > "$p/scaling_min_freq" 2>/dev/null
+done
 
 llccpath=/sys/devices/system/cpu/bus_dcvs/LLCC
 if [ -d "$llccpath" ]; then
@@ -12,7 +20,6 @@ if [ -d "$llccpath" ]; then
             [ -e "$f" ] || continue
             chmod 644 "$f" 2>/dev/null
             echo "$hw" > "$f" 2>/dev/null
-            chmod 444 "$f" 2>/dev/null
         done
     fi
 fi
@@ -28,14 +35,13 @@ done
 for d in /sys/devices/system/cpu/cpu*/core_ctl; do
     [ -d "$d" ] || continue
     chmod 666 "$d/enable" 2>/dev/null
-    echo 0 > "$d/enable" 2>/dev/null
+    echo 1 > "$d/enable" 2>/dev/null
     chmod 666 "$d/max_cpus" 2>/dev/null
     sz=$(cat /sys/devices/system/cpu/$(basename "${d%/core_ctl}")/topology/package_cpus_list 2>/dev/null)
     case "$sz" in
         *-*) echo "$sz" | awk -F'-' '{print $2-$1+1}' > "$d/max_cpus" 2>/dev/null;;
         *) echo 1 > "$d/max_cpus" 2>/dev/null;;
     esac
-    chmod 444 "$d/max_cpus" 2>/dev/null
 done
 
-echo "$shij 已释放Color调度参数，交由游戏接管方管理" >> $rizhidz
+echo "$shij 已解除Color调度全部锁定并恢复系统默认，游戏期间不再介入" >> $rizhidz

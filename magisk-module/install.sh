@@ -227,8 +227,12 @@ on_install() {
 
         sed -i '/colorFC-thermal-boot-begin/,/colorFC-thermal-boot-end/d' "$postfs_file"
 
-        mkdir -p /data/adb/colorFC_thermal
-        echo 0 > /data/adb/colorFC_thermal/fake
+        sed -i '/colorFC-thermal-svc-begin/,/colorFC-thermal-svc-end/d' "$MODPATH/service.sh"
+
+        sed -i '/colorFC-thermal-swap-begin/,/colorFC-thermal-swap-end/d' "$MODPATH/webroot/swap.sh"
+
+        rm -rf "$MODPATH/thermal"
+
         ui_print "充电+温控代码移除完成"
     fi
 

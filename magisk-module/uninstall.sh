@@ -32,5 +32,14 @@ case "$t" in
 		done
 		;;
 esac
+if [ -f "$tdir/trips_orig" ]; then
+	while IFS='=' read -r tp tv; do
+		case "$tp" in /sys/class/thermal/*) ;;
+			*) continue ;;
+		esac
+		case "$tv" in ''|*[!0-9]*) continue ;; esac
+		echo "$tv" > "$tp" 2>/dev/null
+	done < "$tdir/trips_orig"
+fi
 rm -rf "$tdir"
 } &

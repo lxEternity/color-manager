@@ -1,10 +1,18 @@
 #!/system/bin/sh
-# colorFC thermal control: continuous fake temp injection (never hand back to system thermal)
+# colorFC thermal control
+# - always inject fake 36C into /proc/shell-temp: lifts userspace thermal limits,
+#   never hands back (system thermal would force-disable apps & kill background)
+# - custom battery temp wall: written directly into kernel battery thermal zone
+#   trip points; at the wall the kernel throttles by itself (freq control, not
+#   the userspace app-freeze/kill behaviour)
 # state dir survives module updates and form swaps
 MODDIR=$(dirname "$(readlink -f "$0")")
 TDIR=/data/adb/colorFC_thermal
 LOG="$TDIR/thermal.log"
+ORIG="$TDIR/trips_orig"
 FAKE_MS=36000
+WALL_MIN=36
+WALL_MAX=55
 
 log(){
   echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$LOG" 2>/dev/null
@@ -19,7 +27,7 @@ log_trim(){
 
 init_defaults(){
   mkdir -p "$TDIR" 2>/dev/null
-  [ -f "$TDIR/fake" ] || echo 1 > "$TDIR/fake" 2>/dev/null
+  [ -f "$TDIR/wall" ] || echo "$WALL_MAX" > "$TDIR/wall" 2>/dev/null
 }
 
 get_real(){
@@ -29,36 +37,67 @@ get_real(){
 }
 
 load_state(){
-  read fake < "$TDIR/fake" 2>/dev/null
-  [ "$fake" = "1" ] || fake=0
+  read wall < "$TDIR/wall" 2>/dev/null
+  case "$wall" in ''|*[!0-9]*) wall=$WALL_MAX ;; esac
+  [ "$wall" -gt "$WALL_MAX" ] && wall=$WALL_MAX
+  [ "$wall" -lt "$WALL_MIN" ] && wall=$WALL_MIN
 }
 
-read_sys_wall(){
-  local z t v mx m zone_wall global_wall
-  zone_wall=""
-  global_wall=""
+is_batt_zone(){
+  case "$1" in
+    *batt*|*BATT*|*Battery*|*battery*) return 0 ;;
+  esac
+  return 1
+}
+
+zone_max_trip(){
+  local m v mx=""
+  for m in "$1"/trip_point*_temp; do
+    [ -f "$m" ] || continue
+    read v < "$m" 2>/dev/null
+    case "$v" in ''|*[!0-9]*) continue ;; esac
+    if [ -z "$mx" ] || [ "$v" -gt "$mx" ]; then mx=$v; fi
+  done
+  echo "$mx"
+}
+
+# snapshot stock battery-zone trips once, before the first write:
+# ORIG = restore list, syswall = reference value for the UI
+snapshot_orig(){
+  [ -f "$ORIG" ] && return
+  local z t m v mx best="" out=""
   for z in /sys/class/thermal/thermal_zone*; do
     [ -d "$z" ] || continue
-    mx=""
+    read t < "$z/type" 2>/dev/null
+    is_batt_zone "$t" || continue
     for m in "$z"/trip_point*_temp; do
       [ -f "$m" ] || continue
       read v < "$m" 2>/dev/null
       case "$v" in ''|*[!0-9]*) continue ;; esac
-      [ "$v" -ge 36000 ] && [ "$v" -le 95000 ] || continue
-      if [ -z "$mx" ] || [ "$v" -gt "$mx" ]; then mx=$v; fi
+      [ "$v" -ge 30000 ] && [ "$v" -le 90000 ] || continue
+      out="$out$m=$v\n"
     done
-    [ -n "$mx" ] || continue
-    read t < "$z/type" 2>/dev/null
-    case "$t" in
-      *batt*|*BATT*|*skin*|*Skin*|*shell*|*quiet*)
-        if [ -z "$zone_wall" ] || [ "$mx" -gt "$zone_wall" ]; then zone_wall=$mx; fi
-        ;;
-    esac
-    if [ -z "$global_wall" ] || [ "$mx" -gt "$global_wall" ]; then global_wall=$mx; fi
+    mx=$(zone_max_trip "$z")
+    if [ -n "$mx" ] && { [ -z "$best" ] || [ "$mx" -gt "$best" ]; }; then best=$mx; fi
   done
-  if [ -n "$zone_wall" ]; then echo $((zone_wall/1000)); return; fi
-  if [ -n "$global_wall" ]; then echo $((global_wall/1000)); return; fi
-  echo ""
+  [ -n "$out" ] && printf "$out" > "$ORIG" 2>/dev/null
+  [ -n "$best" ] && [ ! -f "$TDIR/syswall" ] && echo $((best/1000)) > "$TDIR/syswall" 2>/dev/null
+}
+
+read_sys_wall(){
+  local v z t mx best=""
+  if [ -f "$TDIR/syswall" ]; then
+    read v < "$TDIR/syswall" 2>/dev/null
+    case "$v" in ''|*[!0-9]*) ;; *) echo "$v"; return ;; esac
+  fi
+  for z in /sys/class/thermal/thermal_zone*; do
+    [ -d "$z" ] || continue
+    read t < "$z/type" 2>/dev/null
+    is_batt_zone "$t" || continue
+    mx=$(zone_max_trip "$z")
+    if [ -n "$mx" ] && { [ -z "$best" ] || [ "$mx" -gt "$best" ]; }; then best=$mx; fi
+  done
+  [ -n "$best" ] && echo $((best/1000))
 }
 
 apply_all(){
@@ -69,21 +108,47 @@ apply_all(){
   done
 }
 
+# write the user wall into every non-critical battery-zone trip point,
+# clamped below the zone's critical trip; re-applied every tick
+apply_wall(){
+  local z t tp ty v crit tgt
+  for z in /sys/class/thermal/thermal_zone*; do
+    [ -d "$z" ] || continue
+    read t < "$z/type" 2>/dev/null
+    is_batt_zone "$t" || continue
+    crit=""
+    for ty in "$z"/trip_point*_type; do
+      [ -f "$ty" ] || continue
+      read v < "$ty" 2>/dev/null
+      [ "$v" = "critical" ] || continue
+      tp="${ty%_type}_temp"
+      [ -f "$tp" ] || continue
+      read v < "$tp" 2>/dev/null
+      case "$v" in ''|*[!0-9]*) continue ;; esac
+      if [ -z "$crit" ] || [ "$v" -lt "$crit" ]; then crit=$v; fi
+    done
+    for tp in "$z"/trip_point*_temp; do
+      [ -f "$tp" ] || continue
+      ty="${tp%_temp}_type"
+      v=""
+      [ -f "$ty" ] && read v < "$ty" 2>/dev/null
+      [ "$v" = "critical" ] && continue
+      read v < "$tp" 2>/dev/null
+      case "$v" in ''|*[!0-9]*) continue ;; esac
+      [ "$v" -ge 30000 ] && [ "$v" -le 90000 ] || continue
+      tgt=$((wall*1000))
+      [ -n "$crit" ] && [ "$tgt" -ge "$crit" ] && tgt=$((crit-1000))
+      [ "$v" = "$tgt" ] && continue
+      chmod 644 "$tp" 2>/dev/null
+      echo "$tgt" > "$tp" 2>/dev/null
+    done
+  done
+}
+
 tick_once(){
-  local real mode
   load_state
-  real=$(get_real)
-  if [ "$fake" = "1" ]; then
-    mode="fake"
-    apply_all "$FAKE_MS"
-  else
-    mode="off"
-    [ -n "$real" ] && apply_all $((real*100))
-  fi
-  if [ "$mode" != "$LAST_MODE" ]; then
-    echo "$mode" > "$TDIR/mode" 2>/dev/null
-    LAST_MODE="$mode"
-  fi
+  apply_all "$FAKE_MS"
+  apply_wall
 }
 
 daemon_main(){
@@ -95,9 +160,9 @@ daemon_main(){
   done
   init_defaults
   load_state
-  log "温控守护启动 pid=$$ fake=$fake（持续伪装，不交还系统温控）"
+  snapshot_orig
+  log "温控守护启动 pid=$$ wall=$wall（36℃注入不交还 + 内核电池温度墙）"
   log_trim
-  LAST_MODE=""
   while :; do
     tick_once
     log_trim
@@ -112,26 +177,30 @@ case "$1" in
   status)
     init_defaults
     load_state
+    snapshot_orig
     real=$(get_real)
     sys=$(read_sys_wall)
     if pgrep -f "thermal/thermal.sh daemon" >/dev/null 2>&1; then run=1; else run=0; fi
-    printf '{"fake":%s,"real":%s,"sys":%s,"run":%s}\n' \
-      "$fake" "${real:-null}" "${sys:-null}" "$run"
+    printf '{"wall":%s,"real":%s,"sys":%s,"run":%s}\n' \
+      "$wall" "${real:-null}" "${sys:-null}" "$run"
     ;;
-  set_fake)
+  set_wall)
     case "$2" in
-      0|1) ;;
-      *) echo "ERR: 用法 thermal.sh set_fake 0|1" >&2; exit 1 ;;
+      ''|*[!0-9]*) echo "ERR: 用法 thermal.sh set_wall $WALL_MIN-$WALL_MAX" >&2; exit 1 ;;
     esac
+    if [ "$2" -lt "$WALL_MIN" ] || [ "$2" -gt "$WALL_MAX" ]; then
+      echo "ERR: 温度墙范围 ${WALL_MIN}-${WALL_MAX}℃" >&2
+      exit 1
+    fi
     init_defaults
-    echo "$2" > "$TDIR/fake" 2>/dev/null
-    LAST_MODE=""
+    snapshot_orig
+    echo "$2" > "$TDIR/wall" 2>/dev/null
     tick_once
-    log "伪装温度切换为 $2"
+    log "电池温度墙设置为 $2 ℃"
     echo "OK"
     ;;
   *)
-    echo "用法: thermal.sh [daemon|status|set_fake 0|1]" >&2
+    echo "用法: thermal.sh [daemon|status|set_wall $WALL_MIN-$WALL_MAX]" >&2
     exit 1
     ;;
 esac

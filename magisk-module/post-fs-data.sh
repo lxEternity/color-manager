@@ -24,12 +24,7 @@ if [ "$tkm" = "color" ]; then
 	dumpsys horae testmode
 fi
 # colorFC-thermal-boot-begin
-TDIR=/data/adb/colorFC_thermal
-th_fake=1
-[ -f "$TDIR/fake" ] && read th_fake < "$TDIR/fake"
-if [ "$th_fake" = "1" ]; then
-    for i in $(seq 0 7); do
-        echo "$i 36000" > /proc/shell-temp
-    done
-fi
+for i in $(seq 0 7); do
+    echo "$i 36000" > /proc/shell-temp
+done
 # colorFC-thermal-boot-end

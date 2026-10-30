@@ -25,13 +25,6 @@ if [[ $action == "balance" ]]; then
     $mokzdz/A/scx1.sh
     $mokzdz/A/json_cpu_max_min "72" "16"
     $mokzdz/A/llcc.sh set_max_freq 720000
-
-    echo "32" > /dev/cpuctl/display/cpu.uclamp.min
-    echo "30" > /dev/cpuctl/ssfg/cpu.uclamp.min
-    echo "42" > /dev/cpuctl/touch/cpu.uclamp.min
-    echo "34" > /dev/cpuctl/multimedia/cpu.uclamp.min
-    echo "42" > /dev/cpuctl/rt/cpu.uclamp.min
-    echo "28" > /dev/cpuctl/top-app/cpu.uclamp.min
 fi
 
 if [[ $action == "performance" ]]; then

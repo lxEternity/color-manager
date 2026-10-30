@@ -159,6 +159,12 @@ nav button.on{color:var(--ac);font-weight:700}
 .stepper b{min-width:48px;text-align:center;font-size:12px;font-weight:700}
 
 .keys{display:flex;gap:8px;flex-wrap:wrap}
+.tk-del{background:none;border:0;color:var(--warn);font-size:15px;font-weight:700;padding:4px 8px;cursor:pointer;flex:none}
+.ap-row{display:flex;justify-content:space-between;align-items:center;background:var(--soft);border-radius:10px;padding:10px 12px;margin-top:6px;cursor:pointer;gap:10px}
+.ap-row .tx{flex:1;min-width:0}
+.ap-row b{font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-row i{font-style:normal;display:block;color:var(--t3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-row .md{flex:none;font-size:13px;font-weight:700}
 .key{border:1.5px solid var(--stroke);background:var(--card);border-radius:14px;padding:8px 14px;cursor:pointer;
   text-align:center;transition:.15s;min-width:64px}
 .key .f{display:block;font-size:18px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums}
@@ -311,11 +317,27 @@ nav button.on{color:var(--ac);font-weight:700}
   <div class="card" id="takeoverCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">游戏接管模式</span>
-      <span style="color:var(--t3);font-size:11px">退出游戏一律切回Color接管</span>
+      <span style="color:var(--t3);font-size:11px">退出应用一律切回Color接管</span>
     </div>
     <div class="chips" id="takeoverChips" style="margin-bottom:0"></div>
+    <div id="takeoverAppBox" style="display:none">
+      <div class="row-between" style="margin:12px 0 4px">
+        <span style="color:var(--t2);font-size:12px">接管应用</span>
+        <span id="tkAppCnt" style="color:var(--t3);font-size:11px"></span>
+      </div>
+      <div id="tkApps"></div>
+      <button class="mini-btn" style="width:100%;padding:9px 0;margin-top:8px" onclick="tkPickApps()">选择应用</button>
+      <div class="row-between" style="margin:12px 0 2px">
+        <span style="color:var(--t2);font-size:12px">检测时长</span>
+        <div class="stepper">
+          <button onclick="tkStepIv(-1)">−</button>
+          <b id="tkIv">1 秒</b>
+          <button onclick="tkStepIv(1)">+</button>
+        </div>
+      </div>
+    </div>
     <button class="btn" id="takeoverSaveBtn" style="margin-top:11px" onclick="saveTakeover()">保存</button>
-    <div class="hint">Color调度：游戏由Color按名单模式接管；官方风驰：游戏期间Color不介入，交由系统风驰调度；风驰增强：游戏期间由游戏助手增强策略接管（首次选择自动后台注入）。保存后自动静默重启游戏助手并清理应用增强数据。所有模式下CPU解除限制与伪装温度保持生效，游戏名单取自动态模式切换.conf中配置了专属模式的应用。</div>
+    <div class="hint">Color调度：应用由Color按名单模式接管；官方风驰：所选应用前台时Color不介入，交由系统风驰调度；风驰增强：所选应用前台时由游戏助手增强策略接管（首次选择自动后台注入）。保存后自动静默重启游戏助手并清理应用增强数据；应用退出前台立即切回Color接管。接管名单为自选应用与动态模式切换.conf中配置了专属模式的应用。</div>
   </div>
 
   <div class="card" id="adaptCard" style="display:none">
@@ -360,6 +382,19 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="card" id="modeSliders"></div>
     <button class="btn" onclick="saveMode()">保存</button>
     <div class="hint" id="modesFileHint" style="text-align:center;margin-top:8px"></div>
+
+    <div class="card" id="appPolicyCard" style="margin-top:15px">
+      <div class="row-between" style="margin-bottom:10px">
+        <span style="font-weight:700">应用策略</span>
+        <span style="color:var(--t3);font-size:11px">前台自动切换调度模式</span>
+      </div>
+      <div id="apList"></div>
+      <div style="display:flex;gap:10px;margin-top:13px">
+        <button class="mini-btn" style="flex:1;color:#A02CF0;border-color:#A02CF0;padding:11px 0;font-weight:700" onclick="apAddRule()">添加应用规则</button>
+        <button class="btn" id="apSaveBtn" style="flex:1;margin-top:0" onclick="apSave()">保存策略</button>
+      </div>
+      <div class="hint">moren 为全局默认模式；为应用配置专属模式后，前台运行时由前台监视实时切换（写入 动态模式切换.conf 并双写模块模板防止开机恢复回滚）。</div>
+    </div>
   </div>
 </section>
 
@@ -642,13 +677,16 @@ async function refreshHome(){
   if(demoMode){
     $('curMode').textContent='balance';
     renderHomeChips('balance');
-    renderTakeoverChips('color');
+    tkSel='color'; tkCur='color'; tkApps=['com.tencent.tmgp.sgame']; tkIv=1; tkInitApps='com.tencent.tmgp.sgame'; tkInitIv=1;
+    renderTakeoverChips();
     return;
   }
   const out = await shOut(
     (form==='dispatch'
       ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)";`+
-        `echo "TK=$(sh ${MOD}/webroot/api.sh takeover_get 2>/dev/null)"`
+        `echo "TK=$(sh ${MOD}/webroot/api.sh takeover_get 2>/dev/null)";`+
+        `echo "TIV=$(cat ${MOD}/files/takeover_iv 2>/dev/null)";`+
+        `sed 's/^/TKAPP=/' ${MOD}/files/takeover_apps 2>/dev/null`
       : `echo "PD=$(sh ${MOD}/powerd.sh status 2>/dev/null | tail -1)";`+
         `echo "BIG=$(grep -o 'CPU_PCT_BIG=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
         `echo "MID2=$(grep -o 'CPU_PCT_MID2=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
@@ -664,6 +702,13 @@ async function refreshHome(){
     renderHomeChips(curMode);
     let tk = g('TK'); if(!TK_KEYS.includes(tk)) tk='color';
     tkSel = tk; tkCur = tk;
+    let tiv = parseInt(g('TIV'),10);
+    if(!(tiv>=1 && tiv<=10)) tiv = 1;
+    tkIv = tiv; tkInitIv = tiv;
+    tkApps = [];
+    let m; const reApp = /^TKAPP=(.+)$/gm;
+    while((m = reApp.exec(out))){ const p = m[1].trim(); if(p) tkApps.push(p); }
+    tkInitApps = [...tkApps].sort().join('\n');
     renderTakeoverChips();
   }else{
     $('pBig').textContent = g('BIG')+'%'; $('pMid2').textContent = g('MID2')+'%';
@@ -700,31 +745,117 @@ async function applyMode(k){
 
 const TK_KEYS = ['color','official','fengchi'];
 const TK_NAMES = {color:'Color调度', official:'官方风驰', fengchi:'风驰增强'};
-let tkSel = 'color', tkCur = 'color';
+let tkSel = 'color', tkCur = 'color', tkApps = [], tkIv = 1, tkInitApps = '', tkInitIv = 1;
 
+function tkDirty(){
+  return tkSel!==tkCur || tkIv!==tkInitIv || [...tkApps].sort().join('\n')!==tkInitApps;
+}
+function tkAppLabel(pkg){
+  return (SCR.apps && SCR.apps.get(pkg)?.label) || SCR_KNOWN[pkg] || pkg;
+}
+function renderTkApps(){
+  const box = $('tkApps'); if(!box) return;
+  $('tkAppCnt').textContent = tkApps.length ? tkApps.length+' 个' : '未选择';
+  if(!tkApps.length){ box.innerHTML = '<div class="empty" style="padding:10px 8px">还没有选择接管应用，点击「选择应用」添加</div>'; return; }
+  box.innerHTML = tkApps.map(p=>{
+    const label = tkAppLabel(p);
+    const ic = SCR.iconMode==='ksu' ? '<img src="ksu://icon/'+scrEsc(p)+'" alt="" onerror="this.remove()">' : scrEsc([...label][0]||'?');
+    return '<div class="rule-row"><span class="rule-ic">'+ic+'</span>'+
+      '<span class="rule-tx"><b>'+scrEsc(label)+'</b><i>'+scrEsc(p)+'</i></span>'+
+      '<button class="tk-del" onclick="tkRemoveApp(\''+scrEsc(p)+'\')">✕</button></div>';
+  }).join('');
+}
+function tkRemoveApp(pkg){
+  tkApps = tkApps.filter(p=>p!==pkg);
+  renderTkApps();
+  renderTakeoverChips();
+}
+function tkStepIv(d){
+  tkIv = Math.max(1, Math.min(10, tkIv+d));
+  $('tkIv').textContent = tkIv+' 秒';
+  renderTakeoverChips();
+}
 function renderTakeoverChips(){
   const box = $('takeoverChips'); box.innerHTML='';
   TK_KEYS.forEach(k=>{
     const c = document.createElement('button');
     c.className = 'chip'+(k===tkSel?' on':'');
     c.textContent = TK_NAMES[k];
-    c.onclick = ()=>{ tkSel = k; renderTakeoverChips(); };
+    c.onclick = ()=>{
+      tkSel = k;
+      renderTakeoverChips();
+      if(k!=='color') tkPickApps();
+    };
     box.appendChild(c);
   });
+  const ab = $('takeoverAppBox');
+  if(ab) ab.style.display = tkSel!=='color' ? '' : 'none';
+  renderTkApps();
+  $('tkIv').textContent = tkIv+' 秒';
   const b = $('takeoverSaveBtn');
-  if(b) b.disabled = (tkSel === tkCur);
+  if(b) b.disabled = !tkDirty();
+}
+
+function tkPickApps(){
+  if(demoMode && !SCR.apps){
+    SCR.apps = new Map(SCR_GAMES.concat(['com.tencent.mm','com.tencent.mobileqq','tv.danmaku.bili','com.ss.android.ugc.aweme'])
+      .map(p=>[p,{label:SCR_KNOWN[p]||p, sys:!SCR_GAMES.includes(p)}]));
+  }
+  let filter = '';
+  const draw = ()=>{
+    const box = $('tkPickList');
+    if(!box) return;
+    if(!SCR.apps){ box.innerHTML = '<div class="empty">正在读取应用列表…<br>首次读取需要几秒钟</div>'; return; }
+    const f = filter.toLowerCase();
+    const list = [...SCR.apps.entries()].filter(([p,v])=>!f || p.toLowerCase().includes(f) || v.label.toLowerCase().includes(f))
+      .sort((a,b)=>(tkApps.includes(b[0])-tkApps.includes(a[0])) || (a[1].sys-b[1].sys) || a[1].label.localeCompare(b[1].label,'zh'))
+      .slice(0,150);
+    box.innerHTML = list.length ? list.map(([p,v])=>{
+      const on = tkApps.includes(p);
+      const ic = SCR.iconMode==='ksu' ? '<img src="ksu://icon/'+scrEsc(p)+'" alt="" onerror="this.remove()">' : scrEsc([...v.label][0]||'?');
+      return '<div class="rule-row" data-pkg="'+scrEsc(p)+'"><span class="rule-ic">'+ic+'</span>'+
+        '<span class="rule-tx"><b>'+scrEsc(v.label)+'</b><i>'+scrEsc(p)+'</i></span>'+
+        '<b class="rule-hz" style="color:'+(on?'var(--ac)':'var(--t3)')+'">'+(on?'✓ 已选':'未选')+'</b></div>';
+    }).join('') : '<div class="empty">没有找到匹配的应用</div>';
+  };
+  openSheet('<h3>选择接管应用</h3><label class="search"><input id="tkPickQ" placeholder="搜索应用名称或包名" autocomplete="off"></label>'+
+    '<div class="pick-list" id="tkPickList"></div>'+
+    '<div class="acts" style="margin-top:12px"><button class="btn" data-act="close">完成</button></div>',
+  e=>{
+    const a = e.target.closest('[data-act]');
+    const b = e.target.closest('.rule-row');
+    if(b){
+      const p = b.dataset.pkg;
+      const i = tkApps.indexOf(p);
+      if(i>=0) tkApps.splice(i,1); else tkApps.push(p);
+      renderTkApps();
+      renderTakeoverChips();
+      draw();
+    } else if(a && a.dataset.act==='close') closeSheet();
+  });
+  $('tkPickQ').addEventListener('input', e=>{ filter = e.target.value.trim(); draw(); });
+  draw();
+  if(!SCR.apps){
+    scrLoadApps().then(()=>{
+      if(!SCR.apps){ const box = $('tkPickList'); if(box) box.innerHTML = '<div class="empty">读取应用列表失败</div>'; return; }
+      draw();
+    });
+  }
 }
 
 async function saveTakeover(){
   if(demoMode){ toast('演示模式'); return; }
-  if(tkSel === tkCur){ toast('游戏接管模式未更改'); return; }
+  if(!tkDirty()){ toast('游戏接管配置未更改'); return; }
   const b = $('takeoverSaveBtn'); if(b) b.disabled = true;
+  const appsOk = await writeFile(`${MOD}/files/takeover_apps`, tkApps.length ? tkApps.join('\n')+'\n' : '');
+  const ivOk = await writeFile(`${MOD}/files/takeover_iv`, String(tkIv)+'\n');
+  if(!appsOk || !ivOk){ toast('接管应用/检测时长写入失败'); if(b) b.disabled = false; return; }
   toast('正在切换到 '+TK_NAMES[tkSel]+'…');
   const r = await exec(`sh ${MOD}/webroot/api.sh takeover_set ${tkSel}`);
   if(r && r.errno !== 0){ toast('设置失败，请重试'); if(b) b.disabled = false; return; }
-  tkCur = tkSel;
+  tkCur = tkSel; tkInitIv = tkIv; tkInitApps = [...tkApps].sort().join('\n');
   renderTakeoverChips();
-  toast(TK_NAMES[tkSel]+' 已保存，游戏助手/应用增强已静默重启'+(tkSel!=='color'?'，游戏期间Color调度不接管':''));
+  toast(TK_NAMES[tkSel]+' 已保存，游戏助手/应用增强已静默重启'+(tkSel!=='color'?'，所选应用前台时Color调度不接管':''));
 }
 
 const SLIDER_DEFS = [
@@ -733,12 +864,12 @@ const SLIDER_DEFS = [
   {k:'cpuMaxB',     t:'大核上限',  min:5,  max:100, step:1,  suf:'%'},
   {k:'cpuMin',      t:'CPU 下限',  min:0,  max:95,  step:1,  suf:'%'},
   {k:'llcc',        t:'LLCC 频率', min:350000, max:1800000, step:50000, div:1000, suf:' MHz'},
-  {k:'uclampDisplay',t:'显示增强', min:0, max:100, step:1, suf:'%'},
-  {k:'uclampSsfg',   t:'后台增强', min:0, max:100, step:1, suf:'%'},
-  {k:'uclampTouch',  t:'触控增强', min:0, max:100, step:1, suf:'%'},
-  {k:'uclampMm',     t:'多媒体增强',min:0,max:100, step:1, suf:'%'},
-  {k:'uclampRt',     t:'实时增强', min:0, max:100, step:1, suf:'%'},
-  {k:'uclampTopApp', t:'前台增强', min:0, max:100, step:1, suf:'%'},
+  {k:'uclampDisplay',t:'显示增强', min:0, max:100, step:1, suf:'%', not:'balance'},
+  {k:'uclampSsfg',   t:'后台增强', min:0, max:100, step:1, suf:'%', not:'balance'},
+  {k:'uclampTouch',  t:'触控增强', min:0, max:100, step:1, suf:'%', not:'balance'},
+  {k:'uclampMm',     t:'多媒体增强',min:0,max:100, step:1, suf:'%', not:'balance'},
+  {k:'uclampRt',     t:'实时增强', min:0, max:100, step:1, suf:'%', not:'balance'},
+  {k:'uclampTopApp', t:'前台增强', min:0, max:100, step:1, suf:'%', not:'balance'},
   {k:'walt1', t:'WALT 限制1', min:0, max:100,   step:1,    suf:'', only:'fast'},
   {k:'walt2', t:'WALT 限制2', min:100,max:10000, step:100,  suf:' µs', only:'fast'},
 ];
@@ -859,6 +990,7 @@ function renderMode(){
   const md = modesData[editMode]||{}, box=$('modeSliders'); box.innerHTML='';
   SLIDER_DEFS.forEach(d=>{
     if(d.only && d.only!==editMode) return;
+    if(d.not && d.not===editMode) return;
     const row=document.createElement('div'); row.className='sl';
     row.innerHTML=`<label>${d.t}</label>
       <input type="range" min="${d.min}" max="${d.max}" step="${d.step}"
@@ -920,18 +1052,159 @@ function buildConf(text, data){
     blk = blk.replace(/(\$mokzdz\/[ABC]\/opt2 )\d+/, '$1'+d.opt2);
     blk = blk.replace(/json_cpu_max_min "[^"]*" "[^"]*"(?: "[^"]*")?(?: "[^"]*")?/, `json_cpu_max_min "${d.cpuMax}" "${d.cpuMaxB}" "${d.cpuMin}" "0"`);
     blk = blk.replace(/(llcc\.sh set_max_freq )\d+/, '$1'+d.llcc);
-    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/display\/cpu\.uclamp\.min)/, `echo "${d.uclampDisplay}"$2`);
-    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/ssfg\/cpu\.uclamp\.min)/, `echo "${d.uclampSsfg}"$2`);
-    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/touch\/cpu\.uclamp\.min)/, `echo "${d.uclampTouch}"$2`);
-    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/multimedia\/cpu\.uclamp\.min)/, `echo "${d.uclampMm}"$2`);
-    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/rt\/cpu\.uclamp\.min)/, `echo "${d.uclampRt}"$2`);
-    blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/top-app\/cpu\.uclamp\.min)/, `echo "${d.uclampTopApp}"$2`);
+    if(mode!=='balance'){
+      blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/display\/cpu\.uclamp\.min)/, `echo "${d.uclampDisplay??0}"$2`);
+      blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/ssfg\/cpu\.uclamp\.min)/, `echo "${d.uclampSsfg??0}"$2`);
+      blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/touch\/cpu\.uclamp\.min)/, `echo "${d.uclampTouch??0}"$2`);
+      blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/multimedia\/cpu\.uclamp\.min)/, `echo "${d.uclampMm??0}"$2`);
+      blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/rt\/cpu\.uclamp\.min)/, `echo "${d.uclampRt??0}"$2`);
+      blk = blk.replace(/echo "(\d+)"(\s*>\s*\/dev\/cpuctl\/top-app\/cpu\.uclamp\.min)/, `echo "${d.uclampTopApp??0}"$2`);
+    }
     if(mode==='fast'){
       blk = blk.replace(/walt_up_rate_limit_us "\d+" "\d+"/, `walt_up_rate_limit_us "${d.walt1}" "${d.walt2}"`);
     }
     out = out.replace(re, 'if [[ $action == "'+mode+'" ]]; then'+blk+'\nfi');
   });
   return out;
+}
+
+const AP_CONF = '/sdcard/Android/qingtd/动态模式切换.conf';
+const AP_MOD_CONF = MOD+'/qingtd/动态模式切换.conf';
+let apMoren = 'powersave', apRules = [], apLoaded = false, apSaving = false;
+
+function apLabel(pkg){
+  return (SCR.apps && SCR.apps.get(pkg)?.label) || SCR_KNOWN[pkg] || pkg;
+}
+function apColor(m){ return MODE_COLORS[MODE_KEYS.indexOf(m)] || 'var(--t2)'; }
+async function loadAppPolicy(){
+  if(form!=='dispatch') return;
+  if(demoMode){
+    apMoren = 'balance';
+    apRules = [{pkg:'com.miHoYo.Yuanshen', mode:'performance'}, {pkg:'com.tencent.mm', mode:'powersave'}];
+    apLoaded = true;
+    renderAppPolicy();
+    return;
+  }
+  const t = await readFileB64(AP_CONF);
+  apMoren = 'powersave'; apRules = [];
+  (t||'').split('\n').forEach(l=>{
+    l = l.trim();
+    if(!l || l.startsWith('#')) return;
+    const i = l.indexOf('=');
+    if(i <= 0) return;
+    const k = l.slice(0, i).trim(), v = l.slice(i+1).trim();
+    if(k === 'moren'){ if(MODE_KEYS.includes(v)) apMoren = v; return; }
+    if(!/^[\w.]+$/.test(k) || !MODE_KEYS.includes(v)) return;
+    const r = apRules.find(x=>x.pkg===k);
+    if(r) r.mode = v; else apRules.push({pkg:k, mode:v});
+  });
+  apLoaded = true;
+  renderAppPolicy();
+}
+function renderAppPolicy(){
+  const box = $('apList'); if(!box) return;
+  let h = '<div class="ap-row" onclick="apPickMode(\'moren\')"><span class="tx"><b>全局默认</b><i>moren</i></span>'+
+    '<b class="md" style="color:'+apColor(apMoren)+'">'+MODE_NAMES[apMoren]+'</b></div>';
+  apRules.forEach((r,i)=>{
+    const label = apLabel(r.pkg);
+    h += '<div class="ap-row" onclick="apPickMode('+i+')"><span class="tx"><b>'+scrEsc(label)+'</b><i>'+scrEsc(r.pkg)+'</i></span>'+
+      '<b class="md" style="color:'+apColor(r.mode)+'">'+MODE_NAMES[r.mode]+'</b></div>';
+  });
+  box.innerHTML = h + (!apRules.length ? '<div class="empty" style="padding:12px 8px">暂无应用规则，点击「添加应用规则」新建</div>' : '');
+}
+function apModeSheet(target){
+  const isMoren = target==='moren';
+  const isNew = typeof target==='string' && !isMoren;
+  const idx = typeof target==='number' ? target : -1;
+  const cur = isMoren ? apMoren : (isNew ? '' : apRules[idx].mode);
+  openSheet('<h3>选择调度模式</h3>'+
+    (isNew ? '<p class="msg">'+scrEsc(apLabel(target))+'<br>'+scrEsc(target)+'</p>' : '')+
+    '<div class="chips" style="margin:6px 0 2px">'+MODE_KEYS.map((k,i)=>
+      '<button class="chip'+(k===cur?' on':'')+'" data-mode="'+k+'"><span class="dot" style="background:'+MODE_COLORS[i]+'"></span>'+MODE_NAMES[k]+'</button>').join('')+'</div>'+
+    '<div class="acts" style="margin-top:14px">'+
+    (!isMoren && !isNew ? '<button class="btn btn-danger" data-act="del">删除规则</button>' : '')+
+    '<button class="btn btn-ghost" data-act="close">取消</button></div>',
+  e=>{
+    const c = e.target.closest('.chip[data-mode]');
+    const a = e.target.closest('[data-act]');
+    if(c){
+      const m = c.dataset.mode;
+      if(isMoren) apMoren = m;
+      else if(isNew){ apRules.push({pkg:target, mode:m}); }
+      else apRules[idx].mode = m;
+      closeSheet();
+      renderAppPolicy();
+      toast((isMoren?'全局默认':'应用规则')+'已设为 '+MODE_NAMES[m]+'，记得保存策略');
+    } else if(a && a.dataset.act==='del'){
+      apRules.splice(idx, 1);
+      closeSheet();
+      renderAppPolicy();
+      toast('规则已删除，记得保存策略');
+    } else if(a && a.dataset.act==='close') closeSheet();
+  });
+}
+function apPickMode(target){ apModeSheet(target); }
+function apAddRule(){
+  if(demoMode && !SCR.apps){
+    SCR.apps = new Map(SCR_GAMES.concat(['com.tencent.mm','com.tencent.mobileqq','tv.danmaku.bili','com.ss.android.ugc.aweme'])
+      .map(p=>[p,{label:SCR_KNOWN[p]||p, sys:!SCR_GAMES.includes(p)}]));
+  }
+  let filter = '';
+  const draw = ()=>{
+    const box = $('apPickList');
+    if(!box) return;
+    if(!SCR.apps){ box.innerHTML = '<div class="empty">正在读取应用列表…<br>首次读取需要几秒钟</div>'; return; }
+    const f = filter.toLowerCase();
+    const list = [...SCR.apps.entries()].filter(([p,v])=>!f || p.toLowerCase().includes(f) || v.label.toLowerCase().includes(f))
+      .filter(([p])=>!apRules.some(r=>r.pkg===p))
+      .sort((a,b)=>(a[1].sys-b[1].sys) || a[1].label.localeCompare(b[1].label,'zh'))
+      .slice(0,150);
+    box.innerHTML = list.length ? list.map(([p,v])=>{
+      const ic = SCR.iconMode==='ksu' ? '<img src="ksu://icon/'+scrEsc(p)+'" alt="" onerror="this.remove()">' : scrEsc([...v.label][0]||'?');
+      return '<div class="rule-row" data-pkg="'+scrEsc(p)+'"><span class="rule-ic">'+ic+'</span>'+
+        '<span class="rule-tx"><b>'+scrEsc(v.label)+'</b><i>'+scrEsc(p)+'</i></span></div>';
+    }).join('') : '<div class="empty">没有找到匹配的应用</div>';
+  };
+  openSheet('<h3>选择应用</h3><label class="search"><input id="apPickQ" placeholder="搜索应用名称或包名" autocomplete="off"></label>'+
+    '<div class="pick-list" id="apPickList"></div>'+
+    '<div class="acts" style="margin-top:12px"><button class="btn btn-ghost" data-act="close">关闭</button></div>',
+  e=>{
+    const a = e.target.closest('[data-act]');
+    const b = e.target.closest('.rule-row');
+    if(b){ closeSheet(); apModeSheet(b.dataset.pkg); return; }
+    if(a && a.dataset.act==='close') closeSheet();
+  });
+  $('apPickQ').addEventListener('input', e=>{ filter = e.target.value.trim(); draw(); });
+  draw();
+  if(!SCR.apps){
+    scrLoadApps().then(()=>{
+      if(!SCR.apps){ const box = $('apPickList'); if(box) box.innerHTML = '<div class="empty">读取应用列表失败</div>'; return; }
+      draw();
+    });
+  }
+}
+async function apSave(){
+  if(demoMode){ toast('演示模式：真机保存将写入 动态模式切换.conf'); return; }
+  if(!apLoaded){ toast('配置尚未加载完成'); return; }
+  if(apSaving) return;
+  apSaving = true;
+  const b = $('apSaveBtn');
+  if(b){ b.disabled = true; b.textContent = '保存中…'; }
+  let sb = '#moren是全局默认的意思，包名等号加模式（实时的）\n#模式powersave、balance、performance、fast\n';
+  sb += 'moren='+apMoren+'\n';
+  apRules.forEach(r=>{ sb += r.pkg+'='+r.mode+'\n'; });
+  try{
+    const ok1 = await writeFile(AP_CONF, sb);
+    let ok2 = true;
+    try{ ok2 = await writeFile(AP_MOD_CONF, sb); }catch(e){}
+    if(!ok1){ toast('保存失败：写入 动态模式切换.conf 失败'); return; }
+    if(!ok2){ toast('已保存（模块模板写入失败，开机恢复可能回滚）'); }
+    else toast('保存成功');
+    await loadAppPolicy();
+  }finally{
+    apSaving = false;
+    if(b){ b.disabled = false; b.textContent = '保存策略'; }
+  }
 }
 
 async function writeFile(path, content){
@@ -2094,7 +2367,7 @@ function go(p){
     if(p==='modes') editMode = curMode;
     if(p==='gov')   govMode  = curMode;
   }
-  if(p==='modes') loadModes();
+  if(p==='modes'){ loadModes(); loadAppPolicy(); }
   if(p==='gov') loadGov();
   if(p==='log'){ loadScreen(); }
 }
@@ -2119,12 +2392,6 @@ if [[ $action == "balance" ]]; then
     $mokzdz/A/scx1.sh
     $mokzdz/A/json_cpu_max_min "72" "16"
     $mokzdz/A/llcc.sh set_max_freq 720000
-    echo "32" > /dev/cpuctl/display/cpu.uclamp.min
-    echo "30" > /dev/cpuctl/ssfg/cpu.uclamp.min
-    echo "42" > /dev/cpuctl/touch/cpu.uclamp.min
-    echo "34" > /dev/cpuctl/multimedia/cpu.uclamp.min
-    echo "42" > /dev/cpuctl/rt/cpu.uclamp.min
-    echo "28" > /dev/cpuctl/top-app/cpu.uclamp.min
 fi
 if [[ $action == "performance" ]]; then
 	echo "performance" > $pan1

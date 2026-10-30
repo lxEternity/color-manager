@@ -546,6 +546,21 @@ official_mask_off() {
   start horae 2>/dev/null
 }
 
+cmd_takeover_cfg() {
+  local iv=1 v
+  if [ -f "$MODDIR/files/takeover_iv" ]; then
+    read -r v < "$MODDIR/files/takeover_iv"
+    case "$v" in ''|*[!0-9]*) v=1 ;; esac
+    [ "$v" -ge 1 ] && [ "$v" -le 10 ] && iv=$v
+  fi
+  echo "IV=$iv"
+  if [ -f "$MODDIR/files/takeover_apps" ]; then
+    while IFS= read -r v; do
+      valid_pkg "$v" && echo "APP=$v"
+    done < "$MODDIR/files/takeover_apps"
+  fi
+}
+
 cmd_takeover_set() {
   case "$1" in
     color|official|fengchi) ;;
@@ -577,7 +592,7 @@ cmd_takeover_set() {
       . /data/powercfg.sh >/dev/null 2>&1
     fi
   else
-    if [ -n "$mos" ]; then
+    if [ -n "$mos" ] || grep -qx "$cur" "$MODDIR/files/takeover_apps" 2>/dev/null; then
       sh "$MODDIR/script/release.sh" >/dev/null 2>&1
       echo 1 > "$MODDIR/files/released"
     fi
@@ -629,6 +644,7 @@ case "$1" in
   ping) cmd_ping ;;
   swap) cmd_swap "$2" ;;
   takeover_get) cmd_takeover_get ;;
+  takeover_cfg) cmd_takeover_cfg ;;
   takeover_set) cmd_takeover_set "$2" ;;
   status) cmd_status ;;
   log) cmd_log "$2" ;;

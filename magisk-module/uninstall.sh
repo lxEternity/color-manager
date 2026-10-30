@@ -9,3 +9,12 @@ mokml="/sdcard/Android/$mingc"
 	rm -rf $mokml
 	rm -f /data/powercfg*
 } &
+
+{
+MODDIR=${0%/*}
+[ -f "$MODDIR/screen/common.sh" ] && . "$MODDIR/screen/common.sh" && {
+	apply_ltpo keep
+	restore_orig
+	rm -f "$STATE" "$REV"
+}
+} &

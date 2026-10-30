@@ -11,6 +11,7 @@ fi
 chmod 0755 "$MODDIR/powerd.sh" 2>/dev/null
 chmod 0755 "$MODDIR"/webroot/*.sh 2>/dev/null
 chmod 0755 "$MODDIR"/bin/* 2>/dev/null
+chmod 0755 "$MODDIR"/system/bin/* 2>/dev/null
 
 SH=/system/bin/sh
 
@@ -18,8 +19,8 @@ while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done
 sleep 10
 
 is_alive() {
-  local pid
-  pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
+  local pid=""
+  read -r pid < "$MODDIR/powerd.lock/pid" 2>/dev/null
   case "$pid" in
     ''|*[!0-9]*) ;;
     *) [ -r "/proc/$pid/cmdline" ] && grep -q "powerd.sh" "/proc/$pid/cmdline" 2>/dev/null && return 0 ;;
@@ -32,7 +33,7 @@ is_alive() {
 
 while true; do
   if ! is_alive && [ ! -f "$MODDIR/pause" ]; then
-    nohup "$SH" "$MODDIR/powerd.sh" start > /dev/null 2>&1 &
+    POWERD_MKSH=1 nohup "$SH" "$MODDIR/powerd.sh" start > /dev/null 2>&1 &
   fi
 
   if [ -f "$MODDIR/pwlogd.sh" ] && ! pgrep -f "pwlogd.sh" >/dev/null 2>&1; then

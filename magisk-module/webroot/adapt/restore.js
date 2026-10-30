@@ -50,7 +50,7 @@
     // 各 Tab 都常驻 DOM，必须从「配置」页特有的滑杆往上找容器，并确认它当前可见
     var slider = document.querySelector('.slider-row');
     if (!slider) return;
-    var host = slider.closest ? slider.closest('.container') : null;
+    var host = slider.closest ? (slider.closest('.tabpage') || slider.closest('.container')) : null;
     if (!host) return;
     if (host.offsetParent === null) return;                       // 当前不在配置页
     if (host.querySelector('#pd-restore-card')) return;           // 已经挂过

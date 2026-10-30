@@ -119,6 +119,7 @@ cmd_clusters() {
       /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies \
       /sys/class/devfreq/3d00000.qcom,kgsl-3d0/available_frequencies \
       /sys/class/devfreq/5000000.qcom,kgsl-3d0/available_frequencies \
+      /sys/class/devfreq/2c00000.qcom,kgsl-3d0/available_frequencies \
       /sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies \
       /sys/class/devfreq/48000000.mali/available_frequencies \
       /sys/class/devfreq/13000000.mali/available_frequencies \
@@ -141,6 +142,8 @@ cmd_clusters() {
         _mx=$(printf '%s\n' $gvals | sort -rn | head -1)
         if [ -n "$_mx" ] && [ "$_mx" -lt 10000 ]; then
           gvals=$(printf '%s\n' $gvals | awk '{printf "%.0f\n", $1 * 1000000}')
+        elif [ -n "$_mx" ] && [ "$_mx" -lt 10000000 ]; then
+          gvals=$(printf '%s\n' $gvals | awk '{printf "%.0f\n", $1 * 1000}')
         fi
       fi
       gvals=$(printf '%s\n' $gvals | grep -E '^[0-9]+$' | sort -n | tr '\n' ',')
@@ -152,7 +155,7 @@ cmd_clusters() {
       max_hz=$(printf '%s' "$gfreqs_json" | tr ',[]' '\n\n\n' | grep -E '^[0-9]+$' | sort -rn | head -1)
       table_max=$max_hz
     else
-      max_hz=$((mhz * 1000000))
+      max_hz=$(awk -v m="$mhz" 'BEGIN{printf "%.0f", m * 1000000}')
     fi
     local max_src="hw" conf_gpu_max=""
     if [ -n "$table_max" ] && [ -f "$CONF" ]; then
@@ -176,22 +179,27 @@ cmd_clusters() {
 cmd_ping() { echo OK; }
 
 cmd_status() {
-  local state pid alive=0 paused=0 game_pkg gpu last soc
-  state=$(cat "$MODDIR/state" 2>/dev/null)
+  local state="" pid="" alive=0 paused=0 game_pkg="" gpu="" last="" screen="" soc k v
+  read -r state < "$MODDIR/state" 2>/dev/null
   [ -z "$state" ] && state=unknown
-  pid=$(cat "$MODDIR/powerd.lock/pid" 2>/dev/null)
+  read -r pid < "$MODDIR/powerd.lock/pid" 2>/dev/null
   case "$pid" in ''|*[!0-9]*) pid="" ;; *) [ -d "/proc/$pid" ] && alive=1 ;; esac
   [ -f "$MODDIR/pause" ] && paused=1
   if [ -f "$RUN_DIR/status" ]; then
-    game_pkg=$(sed -n 's/^game_pkg=//p' "$RUN_DIR/status" 2>/dev/null | head -1)
-    gpu=$(sed -n 's/^gpu_result=//p' "$RUN_DIR/status" 2>/dev/null | head -1)
-    last=$(sed -n 's/^last_seen=//p' "$RUN_DIR/status" 2>/dev/null | head -1)
+    while IFS='=' read -r k v; do
+      case "$k" in
+        game_pkg)   game_pkg="$v" ;;
+        gpu_result) gpu="$v" ;;
+        last_seen)  last="$v" ;;
+        screen)     screen="$v" ;;
+      esac
+    done < "$RUN_DIR/status"
   fi
   soc=$(getprop ro.soc.model 2>/dev/null)
   [ -z "$soc" ] && soc=$(getprop ro.board.platform 2>/dev/null)
-  printf '{"state":"%s","alive":%d,"paused":%d,"pid":"%s","game_pkg":"%s","gpu_result":"%s","last_seen":"%s","soc":"%s"}\n' \
+  printf '{"state":"%s","alive":%d,"paused":%d,"pid":"%s","game_pkg":"%s","gpu_result":"%s","last_seen":"%s","screen":"%s","soc":"%s"}\n' \
     "$(jesc "$state")" "$alive" "$paused" "$(jesc "$pid")" "$(jesc "$game_pkg")" \
-    "$(jesc "$gpu")" "$(jesc "$last")" "$(jesc "$soc")"
+    "$(jesc "$gpu")" "$(jesc "$last")" "$(jesc "$screen")" "$(jesc "$soc")"
 }
 
 cmd_log() {
@@ -212,14 +220,14 @@ ensure_conf_keys() {
     grep -q "^$k=" "$CONF" 2>/dev/null && continue
     case "$k" in
       INTERVAL) v=5 ;;
-      GAME_EXIT_GRACE_SEC) v=30 ;;
+      GAME_EXIT_GRACE_SEC) v=10 ;;
       FENGCHI_DETECT_SEC) v=1 ;;
-      CPU_PCT_BIG) v=58 ;;
-      CPU_PCT_MID2) v=60 ;;
-      CPU_PCT_MID) v=62 ;;
-      CPU_PCT_LITTLE) v=65 ;;
-      GPU_PCT) v=60 ;;
-      GPU_BOOST_CONTROL) v=0 ;;
+      CPU_PCT_BIG) v=55 ;;
+      CPU_PCT_MID2) v=50 ;;
+      CPU_PCT_MID) v=48 ;;
+      CPU_PCT_LITTLE) v=60 ;;
+      GPU_PCT) v=38 ;;
+      GPU_BOOST_CONTROL) v=1 ;;
       CPU_GOVERNOR) v= ;;
       LOG_FILE) v="$MODDIR/powerd.log" ;;
     esac
@@ -377,24 +385,22 @@ icon_candidates() {
 }
 
 cmd_app_icon() {
-  local p="$1" apk entry mime b64 listing dir f mt now cands fallback fb_mime cand
+  local p="$1" apk entry mime b64 listing dir f miss mt now cands fallback fb_mime cand
   valid_pkg "$p" || return 1
   command -v unzip >/dev/null 2>&1 || return 1
   dir="$RUN_DIR/icons"
   mkdir -p "$dir" 2>/dev/null
   f="$dir/$p.b64"
-  if [ -f "$f" ]; then
-    mt=$(stat -c '%Y' "$f" 2>/dev/null); now=$(date +%s)
-    case "$mt" in
-      ''|*[!0-9]*) ;;
-      *)
-        if [ -s "$f" ]; then
-          [ $((now - mt)) -lt 604800 ] && { cat "$f"; return 0; }
-        else
-          [ $((now - mt)) -lt 3600 ] && return 0
-        fi
-        ;;
-    esac
+  miss="$dir/$p.miss"
+  now=$(date +%s)
+  if [ -s "$f" ]; then
+    mt=$(stat -c '%Y' "$f" 2>/dev/null)
+    case "$mt" in ''|*[!0-9]*) ;; *) [ $((now - mt)) -lt 604800 ] && { cat "$f"; return 0; } ;; esac
+  fi
+  if [ -f "$miss" ]; then
+    mt=$(stat -c '%Y' "$miss" 2>/dev/null)
+    case "$mt" in ''|*[!0-9]*) ;; *) [ $((now - mt)) -lt 300 ] && return 0 ;; esac
+    rm -f "$miss" 2>/dev/null
   fi
   for apk in $(pm path "$p" 2>/dev/null | sed 's/^package://'); do
     [ -f "$apk" ] || continue
@@ -440,10 +446,11 @@ $(icon_candidates "$listing")"
     [ -n "$b64" ] || { b64="$fallback"; mime="$fb_mime"; }
     [ -n "$b64" ] || continue
     printf 'data:%s;base64,%s' "$mime" "$b64" > "$f" 2>/dev/null
+    rm -f "$miss" 2>/dev/null
     cat "$f"
     return 0
   done
-  : > "$f" 2>/dev/null
+  : > "$miss" 2>/dev/null
   return 0
 }
 
@@ -483,7 +490,7 @@ cmd_restart() {
     [ "$w" -ge 10 ] && [ -d "/proc/$pid" ] && kill -9 "$pid" 2>/dev/null
     sleep 1
   fi
-  nohup /system/bin/sh "$MODDIR/powerd.sh" start >/dev/null 2>&1 &
+  POWERD_MKSH=1 nohup /system/bin/sh "$MODDIR/powerd.sh" start >/dev/null 2>&1 &
   echo OK
 }
 
@@ -512,6 +519,33 @@ cmd_takeover_get() {
   echo "$v"
 }
 
+OFFICIAL_MASKS="/system_ext/bin/horae /proc/game_opt/cpu_max_freq /proc/game_opt/fake_cpu7_cpuinfo_max_freq /proc/game_opt/disable_cpufreq_limit /proc/game_opt/early_detect/fst_cpu_max_freq /proc/game_opt/early_detect/flt_cpu_max_freq /proc/game_opt/early_detect/edb_cpu_max_freq"
+
+official_mask_on() {
+  local t
+  for t in $OFFICIAL_MASKS; do
+    umount "$t" 2>/dev/null
+    chmod +w "$t" 2>/dev/null
+    echo "" | tee /dev/fas_rs_mask "$t" 2>/dev/null
+    /bin/find "$t" -exec mount /dev/fas_rs_mask {} \; 2>/dev/null
+    rm -f /dev/fas_rs_mask 2>/dev/null
+  done
+  dumpsys horae testmode 2>/dev/null
+}
+
+official_mask_off() {
+  local t n
+  for t in $OFFICIAL_MASKS; do
+    n=0
+    while grep -q " $t " /proc/mounts 2>/dev/null && [ "$n" -lt 5 ]; do
+      umount "$t" 2>/dev/null || break
+      n=$((n+1))
+    done
+  done
+  stop horae 2>/dev/null
+  start horae 2>/dev/null
+}
+
 cmd_takeover_set() {
   case "$1" in
     color|official|fengchi) ;;
@@ -519,6 +553,11 @@ cmd_takeover_set() {
   esac
   mkdir -p "$MODDIR/files"
   echo "$1" > "$MODDIR/files/game_takeover"
+  if [ "$1" = "color" ]; then
+    official_mask_on
+  else
+    official_mask_off
+  fi
   rm -f "/sdcard/Android/qingtd/stop" 2>/dev/null
   pgrep -f qingtdjc1 >/dev/null 2>&1 || nohup sh "$MODDIR/script/qingtdjc1.sh" >/dev/null 2>&1 &
   local cur="" mos="" moren="" ms kzlx
@@ -543,10 +582,12 @@ cmd_takeover_set() {
       echo 1 > "$MODDIR/files/released"
     fi
   fi
+  local fc_tail=""
   if [ "$1" = "fengchi" ]; then
-    nohup sh "$MODDIR/fengchi/run_inject.sh" >/dev/null 2>&1 &
+    rm -f "$MODDIR/fengchi/.injected" 2>/dev/null
+    fc_tail="sh '$MODDIR/fengchi/run_inject.sh' >/dev/null 2>&1"
   fi
-  nohup sh -c '
+  nohup sh -c "
     sleep 1
     am force-stop com.oplus.games >/dev/null 2>&1
     monkey -p com.oplus.games -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
@@ -554,8 +595,25 @@ cmd_takeover_set() {
     rm -f /data/data/com.oplus.cosa/no_backup/androidx.work.workdb* 2>/dev/null
     am force-stop com.oplus.cosa >/dev/null 2>&1
     monkey -p com.oplus.cosa -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-  ' >/dev/null 2>&1 &
+    $fc_tail
+  " >/dev/null 2>&1 &
   echo "OK"
+}
+
+cmd_screen_ctl() {
+  local sub="$1"
+  case "$sub" in
+    scan|reset|apps) ;;
+    ltpo)
+      case "$2" in
+        compat|disable|keep) ;;
+        *) err "用法: api.sh screen_ctl ltpo [compat|disable|keep]" ;;
+      esac
+      ;;
+    *) err "用法: api.sh screen_ctl [scan|apps|ltpo|reset]" ;;
+  esac
+  [ -f "$MODDIR/screen/ctl.sh" ] || err "未找到 screen/ctl.sh"
+  sh "$MODDIR/screen/ctl.sh" "$@"
 }
 
 case "$1" in
@@ -578,6 +636,7 @@ case "$1" in
   app_icon) cmd_app_icon "$2" ;;
   clusters) cmd_clusters ;;
   restart) cmd_restart ;;
+  screen_ctl) cmd_screen_ctl "$2" "$3" ;;
   about) cmd_about ;;
   *) echo "ERR: 未知命令" >&2; exit 1 ;;
 esac

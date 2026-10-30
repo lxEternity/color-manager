@@ -1,6 +1,6 @@
 #!/system/bin/sh
 
-if [ -z "$POWERD_MKSH" ]; then
+if [ -z "${KSH_VERSION:-}" ] && [ -z "$POWERD_MKSH" ]; then
   SECONDS=0
   sleep 1
   if [ "${SECONDS:-0}" -lt 1 ] 2>/dev/null; then
@@ -15,48 +15,53 @@ case "$MODDIR" in "$0") MODDIR=. ;; esac
 [ -f "$MODDIR/powerd.conf" ] && . "$MODDIR/powerd.conf"
 LOG_FILE="${LOG_FILE:-$MODDIR/powerd.log}"
 LOG_MAX_BYTES="${LOG_MAX_BYTES:-262144}"
-exec 2>>"$LOG_FILE"
 STATE_FILE="$MODDIR/state"
-STATE=""                     # 内存态镜像：主循环每轮都要读状态，避免 fork cat
+STATE=""
 LOCK_DIR="$MODDIR/powerd.lock"
 GAME_LIST="$MODDIR/games.txt"
-RUN_DIR="$MODDIR/run"            # 状态快照与 GPU 恢复记录
+RUN_DIR="$MODDIR/run"
 GPU_JOURNAL="$RUN_DIR/gpu.saved"
-GAME_PERM_JOURNAL="$RUN_DIR/game_perms.saved"  # 游戏放权时的原始权限记录
+GAME_PERM_JOURNAL="$RUN_DIR/game_perms.saved"
 STATUS_FILE="$RUN_DIR/status"
-ORIG_GOVS_FILE="$RUN_DIR/orig_govs"  # 调速器原始值持久化（防 kill -9 丢失）
+ORIG_GOVS_FILE="$RUN_DIR/orig_govs"
 PAUSE_FILE="$MODDIR/pause"
 GPU_RESULT=unknown
-GPU_OK=0                     # detect_gpu 成功（有可写节点或 pwrlevel）才置 1
+GPU_OK=0
 CPUFREQ="$SYSFS_PREFIX/sys/devices/system/cpu/cpufreq"
 
 GPU=""
 GPU_MIN=""
 GPU_NORMAL=""
 GPU_MAX_HZ=""
-GPU_PCT="${GPU_PCT:-60}"
+GPU_PCT="${GPU_PCT:-38}"
+GPU_BOOST_CONTROL="${GPU_BOOST_CONTROL:-1}"
 
 INTERVAL="${INTERVAL:-5}"
 APPLIED_GAME_PKG=""
 GAME_REENTER=0
-GAME_PKG=""            # 当前前台游戏包名
-GAME_PKGS=""           # games.txt 包名集合，带 mtime 缓存
+GAME_PKG=""
+GAME_PKGS=""
 GAME_PKGS_MTIME=""
 GAME_PKGS_LOADED=""
 GAME_MISSING_SINCE=""
-GAME_LAST_SEEN=0       # 最后一次判定为游戏态的 $SECONDS
-NOW_SEC=0              # 本轮 $SECONDS（单调秒）
-FG_APPS=""             # 最近一次前台探测结果（包名）
-FG_SLEEP=0             # 最近一次探测：1=息屏
-FG_PROBE_TS=-100       # 探测时刻（$SECONDS），用于复用 2 秒内的结果
-SCREEN_OFF_MULT=3      # 息屏轮询倍数：息屏不可能有前台游戏，降低巡检频率
-LAST_STATUS=""         # 上次发布的状态文本，内容不变就不重写 status 文件
-SLEEP_TICKS=0          # 连续息屏轮数，用于两段式节流
-GAME_EXIT_GRACE_SEC="${GAME_EXIT_GRACE_SEC:-30}"
+GAME_LAST_SEEN=0
+NOW_SEC=0
+FG_APPS=""
+FG_SLEEP=0
+FG_PROBE_TS=-100
+SCREEN_OFF_MULT=3
+BACKLIGHT_NODE=""
+BACKLIGHT_SLEEP_OK=0
+BACKLIGHT_SKIPS=0
+BACKLIGHT_SKIP_MAX=6
+GRACE_LOGGED=0
+LAST_STATUS=""
+SLEEP_TICKS=0
+GAME_EXIT_GRACE_SEC="${GAME_EXIT_GRACE_SEC:-10}"
 FENGCHI_DETECT_SEC="${FENGCHI_DETECT_SEC:-1}"
 
 CPU_CAPS=""
-POLICIES=""                  # policy 名列表（由 CPU_CAPS 派生，启动时算一次）
+POLICIES=""
 WL_EFF=""
 ORIG_CPU_MAXS=""
 ORIG_GPU_MAX=""
@@ -119,15 +124,16 @@ validate_pct() {
 }
 
 validate_config() {
-  validate_pct CPU_PCT_BIG "${CPU_PCT_BIG:-}" 58
-  validate_pct CPU_PCT_MID2 "${CPU_PCT_MID2:-}" 60
-  validate_pct CPU_PCT_MID "${CPU_PCT_MID:-}" 62
-  validate_pct CPU_PCT_LITTLE "${CPU_PCT_LITTLE:-}" 65
-  validate_pct GPU_PCT "${GPU_PCT:-}" 60
+  validate_pct CPU_PCT_BIG "${CPU_PCT_BIG:-}" 55
+  validate_pct CPU_PCT_MID2 "${CPU_PCT_MID2:-}" 50
+  validate_pct CPU_PCT_MID "${CPU_PCT_MID:-}" 48
+  validate_pct CPU_PCT_LITTLE "${CPU_PCT_LITTLE:-}" 60
+  validate_pct GPU_PCT "${GPU_PCT:-}" 38
+  case "$GPU_BOOST_CONTROL" in 0|1) ;; *) GPU_BOOST_CONTROL=1 ;; esac
   case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=5 ;; esac
   [ "$INTERVAL" -lt 2 ] && INTERVAL=2
   [ "$INTERVAL" -gt 60 ] && INTERVAL=60
-  case "$GAME_EXIT_GRACE_SEC" in ''|*[!0-9]*) GAME_EXIT_GRACE_SEC=30 ;; esac
+  case "$GAME_EXIT_GRACE_SEC" in ''|*[!0-9]*) GAME_EXIT_GRACE_SEC=10 ;; esac
   [ "$GAME_EXIT_GRACE_SEC" -lt "$INTERVAL" ] && GAME_EXIT_GRACE_SEC=$INTERVAL
   [ "$GAME_EXIT_GRACE_SEC" -gt 300 ] && GAME_EXIT_GRACE_SEC=300
   case "$FENGCHI_DETECT_SEC" in ''|*[!0-9]*) FENGCHI_DETECT_SEC=1 ;; esac
@@ -140,8 +146,8 @@ acquire_lock() {
     LOCK_OWNED=1
     return 0
   fi
-  local owner
-  owner=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+  local owner=""
+  [ -f "$LOCK_DIR/pid" ] && read -r owner < "$LOCK_DIR/pid" 2>/dev/null
   if [ -n "$owner" ] && [ -d "/proc/$owner" ]; then
     echo "powerd already running pid=$owner" >&2
     return 1
@@ -154,11 +160,26 @@ acquire_lock() {
 
 release_lock() {
   [ "$LOCK_OWNED" = "1" ] || return 0
-  if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$$" ]; then
+  local cur_pid=""
+  [ -f "$LOCK_DIR/pid" ] && read -r cur_pid < "$LOCK_DIR/pid" 2>/dev/null
+  if [ "$cur_pid" = "$$" ]; then
     rm -f "$LOCK_DIR/pid"
     rmdir "$LOCK_DIR" 2>/dev/null || true
   fi
   LOCK_OWNED=0
+}
+
+detect_backlight() {
+  local n
+  BACKLIGHT_NODE=""
+  BACKLIGHT_SLEEP_OK=0
+  for n in \
+    /sys/class/leds/lcd-backlight/brightness \
+    /sys/class/backlight/panel0-backlight/brightness \
+    /sys/class/backlight/panel1-backlight/brightness \
+    /sys/class/backlight/*/brightness; do
+    [ -r "$n" ] && { BACKLIGHT_NODE="$n"; break; }
+  done
 }
 
 validate_hw_gpu_max() {
@@ -219,6 +240,7 @@ detect_gpu() {
     "/sys/class/kgsl/kgsl-3d0/gpu_available_frequencies" \
     "/sys/class/devfreq/3d00000.qcom,kgsl-3d0/available_frequencies" \
     "/sys/class/devfreq/5000000.qcom,kgsl-3d0/available_frequencies" \
+    "/sys/class/devfreq/2c00000.qcom,kgsl-3d0/available_frequencies" \
     "/sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies" \
     "/sys/class/devfreq/48000000.mali/available_frequencies" \
     "/sys/class/devfreq/13000000.mali/available_frequencies" \
@@ -245,6 +267,8 @@ detect_gpu() {
     _mx=$(printf '%s\n' $GPU_FREQS | sort -rn | head -1)
     if [ -n "$_mx" ] && [ "$_mx" -lt 10000 ]; then
       GPU_FREQS=$(printf '%s\n' $GPU_FREQS | awk '{printf "%.0f\n", $1 * 1000000}')
+    elif [ -n "$_mx" ] && [ "$_mx" -lt 10000000 ]; then
+      GPU_FREQS=$(printf '%s\n' $GPU_FREQS | awk '{printf "%.0f\n", $1 * 1000}')
     fi
   fi
   GPU_FREQS=$(printf '%s\n' "$GPU_FREQS" | grep -E '^[0-9]+$')
@@ -253,8 +277,8 @@ detect_gpu() {
   GPU_MIN_HZ=$(printf '%s\n' "$GPU_FREQS" | sort -n | head -1)
   validate_hw_gpu_max "$gpumax"
 
-  GPU_NORMAL=$(awk -v m="$gpumax" -v p="${GPU_PCT:-60}" 'BEGIN{printf "%.0f", m*p/100}')
-  [ -n "$HW_GPU_MAX" ] && GPU_NORMAL=$(awk -v m="$HW_GPU_MAX" -v p="${GPU_PCT:-60}" 'BEGIN{printf "%.0f", m*p/100}')
+  GPU_NORMAL=$(awk -v m="$gpumax" -v p="${GPU_PCT:-38}" 'BEGIN{printf "%.0f", m*p/100}')
+  [ -n "$HW_GPU_MAX" ] && GPU_NORMAL=$(awk -v m="$HW_GPU_MAX" -v p="${GPU_PCT:-38}" 'BEGIN{printf "%.0f", m*p/100}')
 
   local gpu_best=0
   for f in $GPU_FREQS; do
@@ -307,7 +331,7 @@ detect_gpu() {
   fi
 
   if [ -n "$GPU" ]; then
-    log "GPU 探测[$GPU_PLATFORM]: $GPU max=${HW_GPU_MAX:-$gpumax} 封顶=${GPU_NORMAL}Hz min=${GPU_MIN:-?} 最低档=${GPU_MIN_HZ:-?}$([ -n "$GPU_PWRLEVEL" ] && echo " pwrlevel=${GPU_PWRLEVEL_NORMAL}(${GPU_PCT:-60}%)")$([ -n "$HW_GPU_MAX" ] && echo " [conf]")"
+    log "GPU 探测[$GPU_PLATFORM]: $GPU max=${HW_GPU_MAX:-$gpumax} 封顶=${GPU_NORMAL}Hz min=${GPU_MIN:-?} 最低档=${GPU_MIN_HZ:-?}$([ -n "$GPU_PWRLEVEL" ] && echo " pwrlevel=${GPU_PWRLEVEL_NORMAL}(${GPU_PCT:-38}%)")$([ -n "$HW_GPU_MAX" ] && echo " [conf]")"
   elif [ -n "$GPU_PWRLEVEL" ]; then
     log "GPU 探测: 仅 pwrlevel 可用 max=${HW_GPU_MAX:-$gpumax} 封顶level=${GPU_PWRLEVEL_NORMAL}"
   else
@@ -353,13 +377,13 @@ detect_cpu_caps() {
     tier=0
     for f in $freqs; do [ "$f" = "$maxf" ] && break; tier=$((tier+1)); done
     if [ "$tier" -eq $((n-1)) ]; then
-      pct="${CPU_PCT_BIG:-58}"
+      pct="${CPU_PCT_BIG:-55}"
     elif [ "$tier" -eq 0 ] && [ "$n" -gt 1 ]; then
-      pct="${CPU_PCT_LITTLE:-65}"
+      pct="${CPU_PCT_LITTLE:-60}"
     elif [ "$n" -ge 4 ] && [ "$tier" -eq $((n-2)) ]; then
-      pct="${CPU_PCT_MID2:-60}"
+      pct="${CPU_PCT_MID2:-50}"
     else
-      pct="${CPU_PCT_MID:-62}"
+      pct="${CPU_PCT_MID:-48}"
     fi
     cap=$(( maxf * pct / 100 ))
     case "$cap" in ''|0|*[!0-9]*) log "WARN: $pol cap=$cap 异常，跳过"; continue ;; esac
@@ -485,17 +509,16 @@ restore_game_perms() {
 }
 
 loosen_game_perms() {
-  local node
+  local node seen=" "
   for node in "$CPUFREQ"/policy*/scaling_max_freq \
               "$CPUFREQ"/policy*/scaling_min_freq \
-              "$CPUFREQ"/policy*/scaling_governor; do
-    [ -e "$node" ] && loosen_node_perm "$node" 666
-  done
-  for node in "$GPU" "$GPU_MIN" "$GPU_PWRLEVEL"; do
-    [ -n "$node" ] && [ -e "$node" ] && loosen_node_perm "$node" 666
-  done
-  for node in $(gpu_max_nodes); do
-    [ -e "$node" ] && loosen_node_perm "$node" 666
+              "$CPUFREQ"/policy*/scaling_governor \
+              "$GPU" "$GPU_MIN" "$GPU_PWRLEVEL" \
+              $(gpu_max_nodes); do
+    [ -n "$node" ] && [ -e "$node" ] || continue
+    case "$seen" in *" $node "*) continue ;; esac
+    seen="$seen$node "
+    loosen_node_perm "$node" 666
   done
   log "  游戏放权：CPU/GPU/调速器节点权限已交由系统接管"
 }
@@ -565,18 +588,20 @@ snapshot_governors() {
 }
 
 restore_governors_from_file() {
-  local item pol orig got
+  local line item pol orig got
   [ -f "$ORIG_GOVS_FILE" ] || return 0
-  while read -r item; do
-    pol=${item%:*}; orig=${item##*:}
-    [ -n "$pol" ] && [ -n "$orig" ] && [ "$pol" != "$item" ] || continue
-    [ -f "$CPUFREQ/$pol/scaling_governor" ] || continue
-    chmod 644 "$CPUFREQ/$pol/scaling_governor" 2>/dev/null
-    printf '%s\n' "$orig" > "$CPUFREQ/$pol/scaling_governor" 2>/dev/null
-    got=$(cat "$CPUFREQ/$pol/scaling_governor" 2>/dev/null)
-    [ "$got" = "$orig" ] \
-      && log "  $pol 调速器恢复(异常退出) -> $orig" \
-      || log "  WARN: $pol 调速器恢复失败 want=$orig got=$got"
+  while read -r line; do
+    for item in $line; do
+      pol=${item%:*}; orig=${item##*:}
+      [ -n "$pol" ] && [ -n "$orig" ] && [ "$pol" != "$item" ] || continue
+      [ -f "$CPUFREQ/$pol/scaling_governor" ] || continue
+      chmod 644 "$CPUFREQ/$pol/scaling_governor" 2>/dev/null
+      printf '%s\n' "$orig" > "$CPUFREQ/$pol/scaling_governor" 2>/dev/null
+      got=$(cat "$CPUFREQ/$pol/scaling_governor" 2>/dev/null)
+      [ "$got" = "$orig" ] \
+        && log "  $pol 调速器恢复(异常退出) -> $orig" \
+        || log "  WARN: $pol 调速器恢复失败 want=$orig got=$got"
+    done
   done < "$ORIG_GOVS_FILE"
 }
 
@@ -752,15 +777,61 @@ gpu_min_to_floor() {
   gpu_write_node "$GPU_MIN" "$want"
 }
 
+GPUMIN_HITS=0
+GPUMIN_BACKOFF=1
+GPUMIN_SKIP=0
+GPUMIN_SUM=0
+GPUMIN_SUM_TS=0
+GPUMIN_LAST_TS=0
+GPUMIN_WIN=600
+
+gpumin_flush_sum() {
+  [ "$GPUMIN_SUM" -gt 0 ] && log "GPU_MIN 压回汇总: ${GPUMIN_SUM} 次/10min"
+  GPUMIN_SUM=0
+}
+
+gpumin_reset() {
+  [ "$GPUMIN_BACKOFF" -gt 1 ] && [ "$1" != "quiet" ] && log "GPU_MIN 退避结束"
+  gpumin_flush_sum
+  GPUMIN_HITS=0
+  GPUMIN_BACKOFF=1
+  GPUMIN_SKIP=0
+}
+
 patrol_gpu_min() {
-  [ "${GPU_BOOST_CONTROL:-0}" = "1" ] || return 0
+  [ "${GPU_BOOST_CONTROL:-1}" = "1" ] || return 0
   [ -n "$GPU_MIN" ] && [ -e "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ] || return 0
-  local cur="" norm raw_after="" after
+  if [ "$GPUMIN_SKIP" -gt 0 ]; then
+    GPUMIN_SKIP=$((GPUMIN_SKIP - 1))
+    return 0
+  fi
+  local cur="" norm raw_after="" after nb now=${NOW_SEC:-$SECONDS}
   read -r cur < "$GPU_MIN" 2>/dev/null
   case "$cur" in ''|*[!0-9]*) return 0 ;; esac
   if [ "$GPU_MIN_IS_MHZ" = "1" ]; then norm=$(( cur * 1000000 )); else norm=$cur; fi
+  if [ "$GPUMIN_HITS" -gt 0 ] && [ $(( now - GPUMIN_LAST_TS )) -ge "$GPUMIN_WIN" ]; then
+    gpumin_reset
+  fi
   [ "$norm" -gt "$GPU_MIN_HZ" ] || return 0
   gpu_min_to_floor || return 1
+  GPUMIN_HITS=$((GPUMIN_HITS + 1))
+  GPUMIN_LAST_TS=$now
+  nb=1
+  if [ "$GPUMIN_HITS" -ge 6 ]; then nb=6
+  elif [ "$GPUMIN_HITS" -eq 5 ]; then nb=4
+  elif [ "$GPUMIN_HITS" -eq 4 ]; then nb=2
+  fi
+  if [ "$nb" != "$GPUMIN_BACKOFF" ]; then
+    GPUMIN_BACKOFF=$nb
+    log "GPU_MIN 退避: 间隔=${nb} 周期"
+  fi
+  GPUMIN_SKIP=$((GPUMIN_BACKOFF - 1))
+  if [ "$GPUMIN_HITS" -gt 1 ]; then
+    [ "$GPUMIN_SUM" -eq 0 ] && GPUMIN_SUM_TS=$now
+    GPUMIN_SUM=$((GPUMIN_SUM + 1))
+    [ $(( now - GPUMIN_SUM_TS )) -ge "$GPUMIN_WIN" ] && gpumin_flush_sum
+    return 0
+  fi
   read -r raw_after < "$GPU_MIN" 2>/dev/null
   case "$raw_after" in ''|*[!0-9]*) return 1 ;; esac
   if [ "$GPU_MIN_IS_MHZ" = "1" ]; then after=$(( raw_after * 1000000 )); else after=$raw_after; fi
@@ -796,11 +867,13 @@ apply_normal() {
   if [ "$prev" != "normal" ]; then
     log "→ 常态 GPU=${GPU_NORMAL} CPU: $CPU_CAPS"
     restore_game_perms
-    if [ "${GPU_BOOST_CONTROL:-0}" = "1" ] && [ "$prev" = "game" ]; then
+    if [ "${GPU_BOOST_CONTROL:-1}" = "1" ] && [ "$prev" = "game" ]; then
       gpu_min_to_floor 2>/dev/null
     fi
     apply_cpu_caps
     [ "$GPU_OK" = "1" ] && write_gpu "$GPU_NORMAL"
+    APPLIED_GAME_PKG=""
+    GAME_PKG=""
     set_state normal
   else
     patrol_cpu_caps
@@ -823,10 +896,16 @@ apply_game() {
      [ "$APPLIED_GAME_PKG" = "$GAME_PKG" ] && [ "$GAME_REENTER" = "0" ]; then
     return 0
   fi
+  local was_reenter="$GAME_REENTER"
+  gpumin_reset quiet
   APPLIED_GAME_PKG=$GAME_PKG
   GAME_REENTER=0
-  log "  游戏前台进入: $GAME_PKG"
-  log "→ 游戏解锁到硬件最高频率 GPU_MAX=${GPU_MAX_HZ:-?}Hz GPU_MIN=${GPU_MIN_HZ:-?}Hz，交还系统接管"
+  if [ "$STATE" = "game" ] && [ "$was_reenter" = "1" ]; then
+    log "  游戏回到前台(宽限期内恢复): $GAME_PKG"
+  else
+    log "  游戏前台进入: $GAME_PKG"
+    log "→ 游戏解锁到硬件最高频率 GPU_MAX=${GPU_MAX_HZ:-?}Hz GPU_MIN=${GPU_MIN_HZ:-?}Hz，交还系统接管"
+  fi
 
   unlock_cpu_game
   if [ "$GPU_OK" = "1" ] && [ -n "$GPU_MAX_HZ" ]; then
@@ -835,7 +914,7 @@ apply_game() {
   if [ -n "$GPU_PWRLEVEL" ]; then
     gpu_write_node "$GPU_PWRLEVEL" 0 || log 'WARN: 游戏 GPU pwrlevel 写入失败'
   fi
-  if [ "${GPU_BOOST_CONTROL:-0}" = "1" ] && [ -n "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ]; then
+  if [ "${GPU_BOOST_CONTROL:-1}" = "1" ] && [ -n "$GPU_MIN" ] && [ -n "$GPU_MIN_HZ" ]; then
     local game_min_write
     if [ "$GPU_MIN_IS_MHZ" = "1" ]; then
       game_min_write=$(( GPU_MIN_HZ / 1000000 ))
@@ -871,6 +950,7 @@ load_game_pkgs() {
   if [ -f "$GAME_LIST" ]; then
     while IFS= read -r _p || [ -n "$_p" ]; do
       _p=${_p%$CR}
+      _p=${_p%%[	 ]*}
       case "$_p" in
         \#*|"") continue ;;
       esac
@@ -894,11 +974,12 @@ game_exit_due() {
 }
 
 publish_status() {
-  local body tmp scr=on
+  local body tmp scr=on shown_pkg="${GAME_PKG:-}"
   [ "$FG_SLEEP" = "1" ] && scr=off
+  [ "$STATE" = "game" ] && [ -z "$shown_pkg" ] && shown_pkg="${APPLIED_GAME_PKG:-}"
   body="state=${STATE:-unknown}
 game_proc=none
-game_pkg=${GAME_PKG:-}
+game_pkg=$shown_pkg
 game_pid=
 last_seen=${GAME_LAST_SEEN:-}
 gpu_result=${GPU_RESULT:-unknown}
@@ -911,7 +992,7 @@ screen=$scr"
 
 probe_window_dump() {
   { timeout 2 dumpsys window $1 2>/dev/null || :; } | awk '
-    BEGIN { sleeping = 0 }
+    BEGIN { sleeping = 0; seen = 0 }
     function package_of(line) {
       if (!match(line, / u[0-9]+ [a-zA-Z0-9._]+\//)) return ""
       line = substr(line, RSTART, RLENGTH)
@@ -919,19 +1000,46 @@ probe_window_dump() {
       sub(/\/$/, "", line)
       return line
     }
-    /mCurrentFocus=/ && !have_focus { focus = package_of($0); have_focus = 1 }
-    /mFocusedApp=/ && !have_app { app = package_of($0); have_app = 1 }
-    /mTopFullscreenOpaqueWindowState=/ && !have_top { top = package_of($0); have_top = 1 }
+    /mCurrentFocus=/ {
+      seen = 1
+      if (!have_focus) {
+        p = package_of($0)
+        if (p != "") { focus = p; have_focus = 1 }
+      }
+    }
+    /mFocusedApp=/ {
+      seen = 1
+      if (!have_app) {
+        p = package_of($0)
+        if (p != "") { app = p; have_app = 1 }
+      }
+    }
+    /mTopFullscreenOpaqueWindowState=/ {
+      if (!have_top) {
+        p = package_of($0)
+        if (p != "") { top = p; have_top = 1 }
+      }
+    }
     /mSleeping=/ && !have_sleep { have_sleep = 1; if ($0 ~ /mSleeping=true/) sleeping = 1 }
     END {
-      result = have_focus ? focus : app
+      result = have_focus ? focus : (have_app ? app : top)
       if (result ~ /^(com\.omarea\.vtools|bin\.mt\.plus|bin\.mt\.plus\.canary)$/ && top != "") result = top
-      print ((have_focus || have_app) ? 1 : 0) " " sleeping " " result
+      print (seen ? 1 : 0) " " sleeping " " result
     }'
 }
 
 refresh_foreground() {
-  local out ok slp app
+  local out ok slp app _bl=""
+  if [ "$FG_SLEEP" = "1" ] && [ "$BACKLIGHT_SLEEP_OK" = "1" ] && [ -n "$BACKLIGHT_NODE" ]; then
+    read -r _bl < "$BACKLIGHT_NODE" 2>/dev/null
+    if [ "$_bl" = "0" ] && [ "$BACKLIGHT_SKIPS" -lt "$BACKLIGHT_SKIP_MAX" ]; then
+      BACKLIGHT_SKIPS=$((BACKLIGHT_SKIPS + 1))
+      FG_APPS=""
+      FG_PROBE_TS=$NOW_SEC
+      return 0
+    fi
+  fi
+  BACKLIGHT_SKIPS=0
   out=$(probe_window_dump d)
   set -- $out
   ok=${1:-0}; slp=${2:-0}; app=${3:-}
@@ -943,6 +1051,11 @@ refresh_foreground() {
   FG_APPS="$app"
   FG_SLEEP=$slp
   FG_PROBE_TS=$NOW_SEC
+  if [ "$slp" = "1" ] && [ -n "$BACKLIGHT_NODE" ]; then
+    _bl=""
+    read -r _bl < "$BACKLIGHT_NODE" 2>/dev/null
+    [ "$_bl" = "0" ] && BACKLIGHT_SLEEP_OK=1 || BACKLIGHT_SLEEP_OK=0
+  fi
 }
 
 is_game() {
@@ -960,9 +1073,11 @@ is_game() {
       ;;
   esac
   NOW_SEC=$SECONDS
-  [ -n "$GAME_MISSING_SINCE" ] || GAME_MISSING_SINCE=$NOW_SEC
-  [ -z "$previous" ] || log "  游戏离开前台: $previous，开始退出宽限"
-  GAME_REENTER=1
+  if [ "$STATE" = "game" ]; then
+    [ -n "$GAME_MISSING_SINCE" ] || GAME_MISSING_SINCE=$NOW_SEC
+    [ -z "$previous" ] || log "  游戏离开前台: $previous，开始退出宽限"
+    GAME_REENTER=1
+  fi
   return 1
 }
 
@@ -979,8 +1094,10 @@ cleanup() {
 
 main() {
   acquire_lock || return 1
+  mkdir -p "${LOG_FILE%/*}" 2>/dev/null
   : > "$LOG_FILE"
-  log "===== powerd start pid=$$ $(ts_now) ====="
+  exec 2>>"$LOG_FILE"
+  log "===== powerd v1.2.2 start pid=$$ $(ts_now) ====="
   trap 'cleanup' EXIT
   trap 'exit 0' INT TERM
   validate_config
@@ -995,8 +1112,9 @@ main() {
   sleep 3
 
   SOC=$(getprop ro.soc.model 2>/dev/null | tr 'A-Z' 'a-z')
-  [ -n "$SOC" ] || SOC=$(getprop ro.board.platform 2>/dev/null)
+  [ -n "$SOC" ] || SOC=$(getprop ro.board.platform 2>/dev/null | tr 'A-Z' 'a-z')
 
+  detect_backlight
   detect_cpu_caps
   detect_gpu
   [ -z "$CPU_CAPS" ] && log "WARN: 未探测到 cpufreq policy"
@@ -1005,7 +1123,7 @@ main() {
   mkdir -p "$RUN_DIR" 2>/dev/null
   restore_governors_from_file
   load_game_pkgs
-  log "游戏判定: 前台窗口 白名单=$(printf '%s' "$GAME_PKGS" | wc -w) 个包 迟滞=${GAME_EXIT_GRACE_SEC}s"
+  log "游戏判定: 前台窗口 白名单=$(printf '%s' "$GAME_PKGS" | wc -w) 个包 迟滞=${GAME_EXIT_GRACE_SEC}s 背光节点=${BACKLIGHT_NODE:-none}"
 
   snapshot_governors
   snapshot_limits
@@ -1019,20 +1137,24 @@ main() {
     NOW_SEC=$SECONDS
     if is_game; then
       GAME_MISSING_SINCE=""
+      GRACE_LOGGED=0
       GAME_LAST_SEEN=$NOW_SEC
       apply_game
-      [ "$STATE" = "game" ] && patrol_gpu_min
       publish_status
       sleep $(( INTERVAL * 2 ))
     else
       if [ "$STATE" = "game" ]; then
         if ! game_exit_due; then
-          elapsed=$(( NOW_SEC - GAME_MISSING_SINCE ))
-          log "  游戏离开前台，宽限 ${elapsed}/${GAME_EXIT_GRACE_SEC}s，保持解锁"
+          if [ "$GRACE_LOGGED" = "0" ]; then
+            log "  游戏离开前台，宽限 ${GAME_EXIT_GRACE_SEC}s 内保持解锁"
+            GRACE_LOGGED=1
+          fi
+          publish_status
           sleep "$INTERVAL"
           continue
         fi
         GAME_LAST_SEEN=0
+        GRACE_LOGGED=0
         log "  游戏已离开前台（首次检测丢失后 $((NOW_SEC - GAME_MISSING_SINCE))s），复位"
         apply_normal
       else
@@ -1078,7 +1200,15 @@ case "${1:-start}" in
     : > "$PAUSE_FILE"
     pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
     case "$pid" in ''|*[!0-9]*) echo "not running" ;; *)
-      if [ -d "/proc/$pid" ]; then kill -TERM "$pid" 2>/dev/null; echo "restore requested"; else rm -rf "$LOCK_DIR"; echo "not running"; fi
+      if [ -d "/proc/$pid" ]; then
+        kill -TERM "$pid" 2>/dev/null
+        _w=0
+        while [ -d "/proc/$pid" ] && [ "$_w" -lt 10 ]; do sleep 1; _w=$((_w+1)); done
+        echo "restore requested"
+      else
+        rm -rf "$LOCK_DIR" 2>/dev/null
+        echo "not running"
+      fi
     esac
     ;;
   status)

@@ -69,6 +69,7 @@ on_install() {
     set_perm_recursive "$MODPATH" 0 0 0755 0644
     set_perm_recursive "$MODPATH/webroot" 0 0 0755 0755
     set_perm_recursive "$MODPATH/fengchi" 0 0 0755 0755
+    set_perm_recursive "$MODPATH/screen" 0 0 0755 0755
     set_perm_recursive "$MODPATH/bin" 0 0 0755 0755
     sh "$MODPATH/fengchi/merge_strategy.sh" 2>/dev/null
     mkdir -p "$MODPATH/files"

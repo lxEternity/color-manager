@@ -186,3 +186,6 @@ chmod 0777 /sys/devices/system
 
 chmod 0755 "$MODULE_PATH/pwlogd.sh" 2>/dev/null
 nohup sh "$MODULE_PATH/pwlogd.sh" >/dev/null 2>&1 &
+
+chmod 0755 "$MODULE_PATH/screen/"*.sh 2>/dev/null
+nohup sh "$MODULE_PATH/screen/daemon.sh" >/dev/null 2>&1 &

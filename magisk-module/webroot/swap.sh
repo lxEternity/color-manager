@@ -121,6 +121,8 @@ start_adapt() {
 
 start_dispatch() {
     nohup /system/bin/sh "$MODROOT/script/qingtd.sh" >/dev/null 2>&1 &
+    pgrep -f "screen/daemon.sh" >/dev/null 2>&1 || \
+        nohup /system/bin/sh "$MODROOT/screen/daemon.sh" >/dev/null 2>&1 &
     sleep 1
     cur=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)
     [ -z "$cur" ] && cur="balance"

@@ -600,6 +600,15 @@ cmd_takeover_set() {
   echo "OK"
 }
 
+cmd_thermal() {
+  [ -f "$MODDIR/thermal/thermal.sh" ] || err "未找到 thermal/thermal.sh"
+  case "$1" in
+    status|set_fake|set_wall) ;;
+    *) err "用法: api.sh thermal [status|set_fake 0|1|set_wall 36-55]" ;;
+  esac
+  sh "$MODDIR/thermal/thermal.sh" "$@"
+}
+
 cmd_screen_ctl() {
   local sub="$1"
   case "$sub" in
@@ -637,6 +646,7 @@ case "$1" in
   clusters) cmd_clusters ;;
   restart) cmd_restart ;;
   screen_ctl) cmd_screen_ctl "$2" "$3" ;;
+  thermal) cmd_thermal "$2" "$3" ;;
   about) cmd_about ;;
   *) echo "ERR: 未知命令" >&2; exit 1 ;;
 esac

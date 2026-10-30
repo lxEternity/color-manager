@@ -189,3 +189,6 @@ nohup sh "$MODULE_PATH/pwlogd.sh" >/dev/null 2>&1 &
 
 chmod 0755 "$MODULE_PATH/screen/"*.sh 2>/dev/null
 nohup sh "$MODULE_PATH/screen/daemon.sh" >/dev/null 2>&1 &
+
+chmod 0755 "$MODULE_PATH/thermal/"*.sh 2>/dev/null
+pgrep -f "thermal/thermal.sh daemon" >/dev/null 2>&1 || nohup sh "$MODULE_PATH/thermal/thermal.sh" daemon >/dev/null 2>&1 &

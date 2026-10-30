@@ -96,13 +96,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;heigh
 .btn:active{transform:scale(.97);opacity:.9}
 .btn:disabled{opacity:.45;pointer-events:none}
 
-.entry{display:flex;align-items:center;gap:11px;cursor:pointer}
-.entry .bar{width:4px;height:30px;border-radius:3px}
-.entry .tx{flex:1}
-.entry .tx b{font-size:14px}
-.entry .tx i{font-style:normal;display:block;color:var(--t3);font-size:11px;margin-top:1px}
-.entry svg{width:16px;height:16px;flex:none}
-
 .page{display:none}
 .page.on{display:block}
 
@@ -306,28 +299,6 @@ nav button.on{color:var(--ac);font-weight:700}
     </div>
   </div>
 
-  <div class="card collapsed" id="cellCard">
-    <div class="collapse-head" onclick="$('cellCard').classList.toggle('collapsed')">
-      <span style="font-weight:700">电芯检测</span>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="#9AA7BD" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
-    </div>
-    <div class="collapse-body">
-      <div class="row-between" style="margin-bottom:10px">
-        <span style="color:var(--t3);font-size:11px">设计/满容/寿命/循环/电压/技术</span>
-        <button class="mini-btn" onclick="loadCells(true)">重新检测</button>
-      </div>
-      <div class="grid" id="cellGrid">
-        <div class="cell"><i>设计容量</i><b id="cellDesign">--</b></div>
-        <div class="cell"><i>实测满容(FCC)</i><b id="cellFcc">--</b></div>
-        <div class="cell"><i>电池寿命</i><b id="cellHealth">--</b></div>
-        <div class="cell"><i>循环次数</i><b id="cellCycle">--</b></div>
-        <div class="cell"><i>电芯电压</i><b id="cellVolt">--</b></div>
-        <div class="cell"><i>电池技术</i><b id="cellTech">--</b></div>
-      </div>
-      <div class="hint" id="cellHint"></div>
-    </div>
-  </div>
-
   <div class="card" id="modeCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">模式快切</span>
@@ -363,17 +334,22 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="hint">常态按百分比锁定 CPU/GPU，检测到 games.txt 内游戏前台时自动放开。修改 powerd.conf 或 games.txt 立即生效（MT管理器 Action 按钮可打开配置）。</div>
   </div>
 
-  <div id="homeEntries">
-    <div class="card entry" onclick="go('modes')">
-      <div class="bar" style="background:var(--ac)"></div>
-      <div class="tx"><b>调度参数</b><i>四模式 CPU 频率与提升参数</i></div>
-      <svg viewBox="0 0 24 24" fill="none" stroke="#0096C8" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+  <div class="card" id="thermalCard" style="display:none">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">温控</span>
+      <label class="sw"><input type="checkbox" id="thFakeSw" onchange="thToggleFake(this.checked)"><i></i></label>
     </div>
-    <div class="card entry" onclick="go('gov')">
-      <div class="bar" style="background:var(--ac2)"></div>
-      <div class="tx"><b>调速器配置</b><i>预设调速器切换与参数</i></div>
-      <svg viewBox="0 0 24 24" fill="none" stroke="#A02CF0" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+    <div class="grid">
+      <div class="cell"><i>伪装温度</i><b id="thFake">--</b></div>
+      <div class="cell"><i>电池温度</i><b id="thReal">--</b></div>
+      <div class="cell"><i>系统温度墙</i><b id="thSys">--</b></div>
     </div>
+    <div class="sl" style="margin-top:8px">
+      <label>温度墙</label>
+      <input type="range" id="thWall" min="36" max="55" step="1" value="55" oninput="thWallDrag(this)">
+      <output id="thWallOut">55 ℃</output>
+    </div>
+    <div class="hint">开启后向温控持续注入 36℃ 伪装读数解除限制；电池温度达到温度墙后自动恢复真实读数，系统温控重新接管。温度墙 36-55℃，实时生效。</div>
   </div>
 </section>
 
@@ -608,7 +584,7 @@ function renderFormCard(){
   $('modeCard').style.display = form==='dispatch'?'':'none';
   $('takeoverCard').style.display = form==='dispatch'?'':'none';
   $('adaptCard').style.display = form==='adapt'?'':'none';
-  $('homeEntries').style.display = form==='dispatch'?'':'none';
+  $('thermalCard').style.display = form==='dispatch'?'':'none';
   const un = form!=='dispatch';
   $('modesUnavail').style.display = un?'':'none';
   $('modesBody').style.display = un?'none':'';
@@ -1374,10 +1350,13 @@ function pwStart(){
   detectDualCell();
   pwRender();
   pwSample();
+  loadThermal();
   pwTimer = setInterval(pwSample, PW_INTERVAL);
+  thTimer = setInterval(loadThermal, 5000);
 }
 function pwStop(){
   if(pwTimer){ clearInterval(pwTimer); pwTimer=null; }
+  if(thTimer){ clearInterval(thTimer); thTimer=null; }
 }
 let pwView = 'rt';
 function setPwView(v){
@@ -2055,38 +2034,64 @@ document.addEventListener('click', e=>{
 });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && SCR.loaded) renderScrStatus(); });
 
-async function loadCells(manual){
-  const set=(id,v)=>{ $(id).textContent = v; };
-  if(demoMode){
-    set('cellDesign','5500 mAh'); set('cellFcc','5312 mAh'); set('cellHealth','96.6%');
-    set('cellCycle','187'); set('cellVolt','4.42 V'); set('cellTech','Li-poly');
-    $('cellHint').textContent = '演示数据 · 真机将读取 OPLUS/标准电池节点并按 FCC/设计容量计算寿命';
-    if(manual) toast('已重新检测');
-    return;
+let thTimer = null, thWallT = null, thBusy = false;
+async function loadThermal(){
+  if(thBusy) return;
+  thBusy = true;
+  try{
+    if(demoMode){
+      $('thFake').textContent = '36 ℃';
+      $('thReal').textContent = (32.5+Math.sin(Date.now()/90000)*1.5).toFixed(1)+' ℃';
+      $('thSys').textContent = '43 ℃';
+      if(document.activeElement !== $('thWall')){
+        $('thWall').value = 55;
+        $('thWallOut').textContent = '55 ℃';
+        $('thWall').style.setProperty('--p','100%');
+      }
+      $('thFakeSw').checked = true;
+      return;
+    }
+    const out = await shOut(`sh ${MOD}/webroot/api.sh thermal status`);
+    let j = null;
+    try{ j = JSON.parse(out); }catch(e){}
+    if(!j) return;
+    $('thFake').textContent = j.fake===1 ? '36 ℃' : '已关闭';
+    $('thReal').textContent = (j.real!=null && !isNaN(j.real)) ? (j.real/10).toFixed(1)+' ℃' : '--';
+    $('thSys').textContent = (j.sys!=null && !isNaN(j.sys)) ? j.sys+' ℃' : '--';
+    const w = (j.wall>=36 && j.wall<=55) ? j.wall : 55;
+    if(document.activeElement !== $('thWall')){
+      $('thWall').value = w;
+      $('thWallOut').textContent = w+' ℃';
+      $('thWall').style.setProperty('--p', ((w-36)/19*100)+'%');
+    }
+    $('thFakeSw').checked = j.fake===1;
+  }finally{ thBusy = false; }
+}
+async function thToggleFake(on){
+  if(demoMode){ toast(on ? '演示模式：伪装温度已开启' : '演示模式：伪装温度已关闭'); return; }
+  const r = await exec(`sh ${MOD}/webroot/api.sh thermal set_fake ${on?1:0}`);
+  if(r.errno===0 && r.stdout.trim()==='OK'){
+    toast(on ? '伪装温度已开启，实时生效' : '已关闭伪装，恢复系统温控');
+  }else{
+    toast('设置失败：'+((r.stderr||'').trim()||(r.stdout||'').trim()||'未知错误'));
   }
-  const read = paths => shOut(
-    `for p in ${paths.join(' ')}; do v=$(cat $p 2>/dev/null); `+
-    `[ -n "$v" ] && { echo "$v"; exit 0; }; done; echo NA`);
-  const design = (await read(['/sys/class/oplus_chg/battery/design_capacity','/sys/class/power_supply/battery/charge_full_design'])).trim();
-  const fcc = (await read(['/sys/class/oplus_chg/battery/fg_full_capacity','/sys/class/power_supply/battery/charge_full','/sys/class/power_supply/bms/charge_full'])).trim();
-  const cycle = (await read(['/sys/class/oplus_chg/battery/normal_cycle_cnt','/sys/class/power_supply/battery/cycle_count'])).trim();
-  const volt = (await read(['/sys/class/power_supply/battery/voltage_now'])).trim();
-  const tech = (await read(['/sys/class/power_supply/battery/technology'])).trim();
-  let d=-1, f=-1;
-  if(/^\d+(\.\d+)?$/.test(design)) d = +design;
-  if(/^\d+(\.\d+)?$/.test(fcc)) f = +fcc;
-  if(d>10000) d = d/1000;
-  if(f>10000) f = f/1000;
-  set('cellDesign', d>0? Math.round(d)+' mAh' : '--');
-  set('cellFcc', f>0? Math.round(f)+' mAh' : '--');
-  set('cellHealth', (d>0 && f>0)? (f/d*100).toFixed(1)+'%' : '--');
-  set('cellCycle', /^\d+$/.test(cycle)? cycle+' 次' : '--');
-  set('cellVolt', /^\d+(\.\d+)?$/.test(volt)
-    ? ((+volt>1000000? +volt/1e6 : +volt>2500? +volt/1000 : +volt)).toFixed(2)+' V'
-    : '--');
-  set('cellTech', tech && tech!=='NA'? tech : '--');
-  $('cellHint').textContent = 'FCC=电池实际满充电荷量，随循环衰减；寿命 = FCC ÷ 设计容量';
-  if(manual) toast('已重新检测');
+  loadThermal();
+}
+function thWallDrag(el){
+  const v = +el.value;
+  $('thWallOut').textContent = v+' ℃';
+  el.style.setProperty('--p', ((v-36)/19*100)+'%');
+  clearTimeout(thWallT);
+  thWallT = setTimeout(()=>thWallApply(v), 600);
+}
+async function thWallApply(v){
+  if(demoMode){ toast('演示模式：温度墙已设为 '+v+' ℃'); return; }
+  const r = await exec(`sh ${MOD}/webroot/api.sh thermal set_wall ${v}`);
+  if(r.errno===0 && r.stdout.trim()==='OK'){
+    toast('温度墙已设为 '+v+' ℃，实时生效');
+  }else{
+    toast('设置失败：'+((r.stderr||'').trim()||(r.stdout||'').trim()||'未知错误'));
+  }
 }
 
 function go(p){
@@ -2094,7 +2099,7 @@ function go(p){
     $('pg-'+k).classList.toggle('on',k===p);
     $('nb-'+k).classList.toggle('on',k===p);
   });
-  if(p==='home'){ refreshHome(); pwStart(); loadCells(false); } else { pwStop(); }
+  if(p==='home'){ refreshHome(); pwStart(); } else { pwStop(); }
   if(!demoMode && MODE_KEYS.includes(curMode)){
     if(p==='modes') editMode = curMode;
     if(p==='gov')   govMode  = curMode;
@@ -2168,13 +2173,12 @@ const DEMO_GOV = {
 
 (async ()=>{
   await loadCellMode();
-  if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); pwStart(); loadCells(false); return; }
+  if(demoMode){ form='dispatch'; renderFormCard(); refreshHome(); pwStart(); return; }
   await detectForm();
   if(form==='adapt'){ location.replace('./adapt/index.html'); return; }
   renderFormCard();
   await refreshHome();
   pwStart();
-  loadCells(false);
 })();
 </script>
 </body>

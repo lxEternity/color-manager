@@ -23,6 +23,13 @@ if [ "$tkm" = "color" ]; then
 	lock_val "" "/proc/game_opt/early_detect/edb_cpu_max_freq"
 	dumpsys horae testmode
 fi
-for i in $(seq 0 7); do
-    echo "$i 36000" > /proc/shell-temp
-done
+# colorFC-thermal-boot-begin
+TDIR=/data/adb/colorFC_thermal
+th_fake=1
+[ -f "$TDIR/fake" ] && read th_fake < "$TDIR/fake"
+if [ "$th_fake" = "1" ]; then
+    for i in $(seq 0 7); do
+        echo "$i 36000" > /proc/shell-temp
+    done
+fi
+# colorFC-thermal-boot-end

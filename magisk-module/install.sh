@@ -225,7 +225,11 @@ on_install() {
 
         sed -i '/dumpsys horae testmode/d' "$postfs_file"
 
-        sed -i '/for i in \$(seq 0 7); do echo "\$i 36000" > \/proc\/shell-temp/d' "$postfs_file"
+        sed -i '/colorFC-thermal-boot-begin/,/colorFC-thermal-boot-end/d' "$postfs_file"
+
+        mkdir -p /data/adb/colorFC_thermal
+        echo 0 > /data/adb/colorFC_thermal/fake
+        echo 55 > /data/adb/colorFC_thermal/wall
         ui_print "充电+温控代码移除完成"
     fi
 

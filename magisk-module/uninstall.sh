@@ -18,3 +18,19 @@ MODDIR=${0%/*}
 	rm -f "$STATE" "$REV"
 }
 } &
+
+{
+tdir=/data/adb/colorFC_thermal
+t=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)
+case "$t" in
+	''|*[!0-9]*) ;;
+	*)
+		i=0
+		while [ "$i" -le 7 ]; do
+			echo "$i $((t*100))" > /proc/shell-temp 2>/dev/null
+			i=$((i+1))
+		done
+		;;
+esac
+rm -rf "$tdir"
+} &

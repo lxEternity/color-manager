@@ -52,6 +52,7 @@ if [[ $jbaoming != $xbaoming ]]; then
             kzlx=1
             . /data/powercfg.sh
         else
+            sh "$BASEDIR/release.sh" >/dev/null 2>&1
             if [ "$tkm" = "fengchi" ] && [ ! -f "$MODULE_PATH/fengchi/.injected" ]; then
                 echo "$shij $xbaoming 游戏前台(风驰增强接管)，策略未注入，后台注入中" >> $rizhidz
                 nohup sh "$MODULE_PATH/fengchi/run_inject.sh" >/dev/null 2>&1 &

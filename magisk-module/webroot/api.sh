@@ -519,10 +519,27 @@ cmd_takeover_set() {
   esac
   mkdir -p "$MODDIR/files"
   echo "$1" > "$MODDIR/files/game_takeover"
-  if [ "$1" != "color" ]; then
-    local moren
-    moren=$(grep "^moren=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
-    [ -n "$moren" ] && sh /data/powercfg.sh "$moren" >/dev/null 2>&1
+  rm -f "/sdcard/Android/qingtd/stop" 2>/dev/null
+  pgrep -f qingtdjc1 >/dev/null 2>&1 || nohup sh "$MODDIR/script/qingtdjc1.sh" >/dev/null 2>&1 &
+  local cur="" mos="" moren="" ms kzlx
+  cur=$(dumpsys window displays 2>/dev/null | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
+  [ -z "$cur" ] && cur=$(dumpsys window 2>/dev/null | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
+  [ -n "$cur" ] && mos=$(grep "^$cur=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
+  if [ "$1" = "color" ]; then
+    if [ -n "$mos" ]; then
+      ms="$mos"
+    else
+      moren=$(grep "^moren=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
+      ms="$moren"
+    fi
+    if [ -n "$ms" ]; then
+      kzlx=1
+      . /data/powercfg.sh >/dev/null 2>&1
+    fi
+  else
+    if [ -n "$mos" ]; then
+      sh "$MODDIR/script/release.sh" >/dev/null 2>&1
+    fi
   fi
   if [ "$1" = "fengchi" ]; then
     nohup sh "$MODDIR/fengchi/run_inject.sh" >/dev/null 2>&1 &

@@ -2,6 +2,13 @@
 MODDIR=$(cd "${0%/*}" && pwd)
 . "$MODDIR/common.sh"
 
+MODROOT=${MODDIR%\/screen}
+TK_MODE="$MODROOT/files/game_takeover"
+TK_APPS="$MODROOT/files/takeover_apps"
+TK_REL="$MODROOT/files/released"
+TK_HMD="/sdcard/Android/qingtd/动态模式切换.conf"
+TK_WTOKEN=a03fb52bc4525dd3
+
 mkdir -p "$SCR_DATA"
 
 ltpo_mode=$(tr -d '\r\n' < "$LTPO_FILE" 2>/dev/null)
@@ -37,6 +44,7 @@ screen=1
 fail_id=""
 fail_at=0
 last_state=""
+last_watch=0
 
 reload() {
     load_settings
@@ -52,6 +60,40 @@ reload() {
         log "档位表为空，已自动扫描 $(grep -c . "$RATES") 个档位"
     fi
     has_app_rules && rules=1 || rules=0
+}
+
+tk_mode() {
+    m=$(tr -d '\r\n' < "$TK_MODE" 2>/dev/null)
+    case "$m" in official|fengchi) printf '%s' "$m" ;; *) printf color ;; esac
+}
+
+tk_restore() {
+    [ -f "$TK_REL" ] || return 0
+    rm -f "$TK_REL" 2>/dev/null
+    m=$(grep "^moren=" "$TK_HMD" 2>/dev/null | head -n 1 | cut -d '=' -f2)
+    [ -n "$m" ] && { ms=$m; kzlx=1; . /data/powercfg.sh >/dev/null 2>&1; }
+    log "游戏接管结束，恢复Color调度"
+}
+
+tk_check() {
+    a="$1"
+    [ -n "$a" ] || return 0
+    mode=$(tk_mode)
+    if [ "$mode" = "color" ] || [ ! -s "$TK_APPS" ]; then
+        tk_restore
+        return 0
+    fi
+    if grep -qx "$a" "$TK_APPS" 2>/dev/null; then
+        if [ ! -f "$TK_REL" ]; then
+            sh "$MODROOT/script/release.sh" >/dev/null 2>&1 && echo 1 > "$TK_REL"
+            log "接管生效($mode)：$a"
+        fi
+        if [ "$mode" = "fengchi" ] && [ ! -f "$MODROOT/fengchi/.injected" ]; then
+            nohup sh "$MODROOT/fengchi/run_inject.sh" >/dev/null 2>&1 &
+        fi
+    else
+        tk_restore
+    fi
 }
 
 pick_target() {
@@ -82,6 +124,15 @@ while true; do
     [ "$screen" = 0 ] && force=force
     screen=1
 
+    now_w=$(date +%s)
+    if [ $((now_w - last_watch)) -ge 60 ]; then
+        last_watch=$now_w
+        "$MODROOT/bin/qqverify" watch "$MODROOT" "$TK_WTOKEN" >/dev/null 2>&1 || {
+            touch "$MODROOT/disable" 2>/dev/null
+            exit 1
+        }
+    fi
+
     rev=$(cat "$REV" 2>/dev/null)
     if [ "$rev" != "$last_rev" ]; then
         last_rev=$rev
@@ -89,12 +140,15 @@ while true; do
         fail_id=""
     fi
 
-    if [ "$app_switch" = 1 ] && [ "$rules" = 1 ]; then
+    tk_on=0
+    [ "$(tk_mode)" != "color" ] && [ -s "$TK_APPS" ] && tk_on=1
+    if [ "$app_switch" = 1 ] && [ "$rules" = 1 ] || [ "$tk_on" = 1 ]; then
         a=$(focus_app)
         [ -n "$a" ] && app=$a
     else
         app=""
     fi
+    tk_check "$app"
 
     target=$(pick_target)
     err=""
@@ -116,7 +170,7 @@ while true; do
     [ -n "$fail_id" ] && err=1
     save_state "$target" "$err"
 
-    if [ "$app_switch" = 1 ] && [ "$rules" = 1 ]; then
+    if [ "$app_switch" = 1 ] && [ "$rules" = 1 ] || [ "$tk_on" = 1 ]; then
         sleep "$app_interval"
     else
         sleep 1

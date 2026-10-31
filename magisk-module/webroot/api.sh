@@ -548,13 +548,6 @@ official_mask_off() {
 }
 
 cmd_takeover_cfg() {
-  local iv=1 v
-  if [ -f "$MODDIR/files/takeover_iv" ]; then
-    read -r v < "$MODDIR/files/takeover_iv"
-    case "$v" in ''|*[!0-9]*) v=1 ;; esac
-    [ "$v" -ge 1 ] && [ "$v" -le 10 ] && iv=$v
-  fi
-  echo "IV=$iv"
   if [ -f "$MODDIR/files/takeover_apps" ]; then
     while IFS= read -r v; do
       valid_pkg "$v" && echo "APP=$v"
@@ -576,28 +569,6 @@ cmd_takeover_set() {
   fi
   rm -f "/sdcard/Android/qingtd/stop" 2>/dev/null
   pgrep -f qingtdjc1 >/dev/null 2>&1 || nohup sh "$MODDIR/script/qingtdjc1.sh" >/dev/null 2>&1 &
-  local cur="" mos="" moren="" ms kzlx
-  cur=$(dumpsys window displays 2>/dev/null | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
-  [ -z "$cur" ] && cur=$(dumpsys window 2>/dev/null | grep "mFocusedApp" | grep -v "AppWindowToken" | grep "ActivityRecord" | awk -F " " '{print $3}' | awk -F "/" '{print $1}')
-  [ -n "$cur" ] && mos=$(grep "^$cur=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
-  if [ "$1" = "color" ]; then
-    rm -f "$MODDIR/files/released" 2>/dev/null
-    if [ -n "$mos" ]; then
-      ms="$mos"
-    else
-      moren=$(grep "^moren=" "/sdcard/Android/qingtd/动态模式切换.conf" 2>/dev/null | head -n 1 | cut -d '=' -f2)
-      ms="$moren"
-    fi
-    if [ -n "$ms" ]; then
-      kzlx=1
-      . /data/powercfg.sh >/dev/null 2>&1
-    fi
-  else
-    if [ -n "$mos" ] || grep -qx "$cur" "$MODDIR/files/takeover_apps" 2>/dev/null; then
-      sh "$MODDIR/script/release.sh" >/dev/null 2>&1
-      echo 1 > "$MODDIR/files/released"
-    fi
-  fi
   local fc_tail=""
   if [ "$1" = "fengchi" ]; then
     rm -f "$MODDIR/fengchi/.injected" 2>/dev/null

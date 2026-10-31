@@ -327,14 +327,7 @@ nav button.on{color:var(--ac);font-weight:700}
       </div>
       <div id="tkApps"></div>
       <button class="mini-btn" style="width:100%;padding:9px 0;margin-top:8px" onclick="tkPickApps()">选择应用</button>
-      <div class="row-between" style="margin:12px 0 2px">
-        <span style="color:var(--t2);font-size:12px">检测时长</span>
-        <div class="stepper">
-          <button onclick="tkStepIv(-1)">−</button>
-          <b id="tkIv">1 秒</b>
-          <button onclick="tkStepIv(1)">+</button>
-        </div>
-      </div>
+      <div class="hint" style="margin:8px 2px 0">前台检测与检测间隔跟随屏幕管理的按应用切换</div>
     </div>
     <button class="btn" id="takeoverSaveBtn" style="margin-top:11px" onclick="saveTakeover()">保存</button>
     <div class="hint">Color调度：按Color调度模式接管；官方风驰：系统风驰调度；风驰增强：游戏助手增强策略接管</div>
@@ -677,7 +670,7 @@ async function refreshHome(){
   if(demoMode){
     $('curMode').textContent='balance';
     renderHomeChips('balance');
-    tkSel='color'; tkCur='color'; tkApps=['com.tencent.tmgp.sgame']; tkIv=1; tkInitApps='com.tencent.tmgp.sgame'; tkInitIv=1;
+    tkSel='color'; tkCur='color'; tkApps=['com.tencent.tmgp.sgame']; tkInitApps='com.tencent.tmgp.sgame';
     renderTakeoverChips();
     return;
   }
@@ -685,7 +678,6 @@ async function refreshHome(){
     (form==='dispatch'
       ? `echo "CUR=$(cat /sdcard/Android/qingtd/cur_powermode.txt 2>/dev/null)";`+
         `echo "TK=$(sh ${MOD}/webroot/api.sh takeover_get 2>/dev/null)";`+
-        `echo "TIV=$(cat ${MOD}/files/takeover_iv 2>/dev/null)";`+
         `sed 's/^/TKAPP=/' ${MOD}/files/takeover_apps 2>/dev/null`
       : `echo "PD=$(sh ${MOD}/powerd.sh status 2>/dev/null | tail -1)";`+
         `echo "BIG=$(grep -o 'CPU_PCT_BIG=[0-9]*' ${MOD}/powerd.conf 2>/dev/null | head -1 | cut -d= -f2)";`+
@@ -702,9 +694,6 @@ async function refreshHome(){
     renderHomeChips(curMode);
     let tk = g('TK'); if(!TK_KEYS.includes(tk)) tk='color';
     tkSel = tk; tkCur = tk;
-    let tiv = parseInt(g('TIV'),10);
-    if(!(tiv>=1 && tiv<=10)) tiv = 1;
-    tkIv = tiv; tkInitIv = tiv;
     tkApps = [];
     let m; const reApp = /^TKAPP=(.+)$/gm;
     while((m = reApp.exec(out))){ const p = m[1].trim(); if(p) tkApps.push(p); }
@@ -745,10 +734,10 @@ async function applyMode(k){
 
 const TK_KEYS = ['color','official','fengchi'];
 const TK_NAMES = {color:'Color调度', official:'官方风驰', fengchi:'风驰增强'};
-let tkSel = 'color', tkCur = 'color', tkApps = [], tkIv = 1, tkInitApps = '', tkInitIv = 1;
+let tkSel = 'color', tkCur = 'color', tkApps = [], tkInitApps = '';
 
 function tkDirty(){
-  return tkSel!==tkCur || tkIv!==tkInitIv || [...tkApps].sort().join('\n')!==tkInitApps;
+  return tkSel!==tkCur || [...tkApps].sort().join('\n')!==tkInitApps;
 }
 function tkAppLabel(pkg){
   return (SCR.apps && SCR.apps.get(pkg)?.label) || SCR_KNOWN[pkg] || pkg;
@@ -770,11 +759,6 @@ function tkRemoveApp(pkg){
   renderTkApps();
   renderTakeoverChips();
 }
-function tkStepIv(d){
-  tkIv = Math.max(1, Math.min(10, tkIv+d));
-  $('tkIv').textContent = tkIv+' 秒';
-  renderTakeoverChips();
-}
 function renderTakeoverChips(){
   const box = $('takeoverChips'); box.innerHTML='';
   TK_KEYS.forEach(k=>{
@@ -791,7 +775,6 @@ function renderTakeoverChips(){
   const ab = $('takeoverAppBox');
   if(ab) ab.style.display = tkSel!=='color' ? '' : 'none';
   renderTkApps();
-  $('tkIv').textContent = tkIv+' 秒';
   const b = $('takeoverSaveBtn');
   if(b) b.disabled = !tkDirty();
 }
@@ -848,14 +831,13 @@ async function saveTakeover(){
   if(!tkDirty()){ toast('游戏接管配置未更改'); return; }
   const b = $('takeoverSaveBtn'); if(b) b.disabled = true;
   const appsOk = await writeFile(`${MOD}/files/takeover_apps`, tkApps.length ? tkApps.join('\n')+'\n' : '');
-  const ivOk = await writeFile(`${MOD}/files/takeover_iv`, String(tkIv)+'\n');
-  if(!appsOk || !ivOk){ toast('接管应用/检测时长写入失败'); if(b) b.disabled = false; return; }
+  if(!appsOk){ toast('接管应用写入失败'); if(b) b.disabled = false; return; }
   toast('正在切换到 '+TK_NAMES[tkSel]+'…');
   const r = await exec(`sh ${MOD}/webroot/api.sh takeover_set ${tkSel}`);
   if(r && r.errno !== 0){ toast('设置失败，请重试'); if(b) b.disabled = false; return; }
-  tkCur = tkSel; tkInitIv = tkIv; tkInitApps = [...tkApps].sort().join('\n');
+  tkCur = tkSel; tkInitApps = [...tkApps].sort().join('\n');
   renderTakeoverChips();
-  toast(TK_NAMES[tkSel]+' 已保存，游戏助手/应用增强已静默重启'+(tkSel!=='color'?'，所选应用前台时Color调度不接管':''));
+  toast(TK_NAMES[tkSel]+' 已保存'+(tkSel!=='color'?'，检测到所选应用在前台时自动接管，退出后切回Color调度':''));
 }
 
 const SLIDER_DEFS = [

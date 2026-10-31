@@ -70,16 +70,16 @@ on_install() {
     fi
     ui_print "安装包完整性校验通过"
 
+    DEV_ID=$(read_board_id)
+    ui_print "===================================="
+    ui_print "主板唯一ID: $DEV_ID"
+    ui_print "===================================="
+
     ui_print "正在校验授权身份..."
     if ! qq_verify; then
         abort "身份校验失败"
     fi
     ui_print "身份校验通过"
-
-    DEV_ID=$(read_board_id)
-    ui_print "===================================="
-    ui_print "主板唯一ID: $DEV_ID"
-    ui_print "===================================="
 
     sh "$MODPATH/fengchi/merge_strategy.sh" 2>/dev/null
     mkdir -p "$MODPATH/files"
@@ -178,23 +178,23 @@ on_install() {
     case "$FA" in
         a)
             if [ "$FA_GOV" = "sugov_next" ]; then
-                echo "识别到sugov_next调速器，启用A配置刷入，并把调速器改为sugov_next"
+                echo "识别到sugov_next调速器，启用方案1刷入，并把调速器改为sugov_next"
                 for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
                     chmod 777 "$g" 2>/dev/null
                     echo sugov_next > "$g" 2>/dev/null
                 done
             else
-                echo "识别到scx调速器，启用A配置刷入"
+                echo "识别到scx调速器，启用方案1刷入"
             fi
             ;;
         b)
-            echo "识别到hmbird调速器，启用B加强版配置刷入"
+            echo "识别到hmbird调速器，启用方案2刷入"
             ;;
         c)
-            echo "未检测到scx/hmbird/sugov_next，启用C配置刷入"
+            echo "未检测到scx/hmbird/sugov_next，启用方案3刷入"
             ;;
         *)
-            echo "方案检测失败（调速器节点不可读），默认启用C配置刷入"
+            echo "方案检测失败（调速器节点不可读），默认启用方案3刷入"
             echo "c" > "$MODPATH/files/fangan"
             ;;
     esac

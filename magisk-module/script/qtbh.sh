@@ -5,12 +5,17 @@ now=$(date +%s)
 last=0
 [ -f $mosdz/qtbh_ts ] && read last < $mosdz/qtbh_ts
 [ -z "$last" ] && last=0
-if [ $((now - last)) -lt 2 ]; then
+
+jiance=1
+[ -f $mosdz/takeover_iv ] && read jiance < $mosdz/takeover_iv
+case "$jiance" in ''|*[!0-9]*) jiance=1 ;; esac
+[ "$jiance" -lt 1 ] && jiance=1
+[ "$jiance" -gt 10 ] && jiance=10
+
+if [ $((now - last)) -lt $jiance ]; then
     exit 0
 fi
 echo $now > $mosdz/qtbh_ts
-
-"$MODULE_PATH/bin/qqverify" watch "$MODULE_PATH" a03fb52bc4525dd3 >/dev/null 2>&1 || { touch "$MODULE_PATH/disable" 2>/dev/null; exit 1; }
 
 jbaoming=""
 [ -f $mosdz/baom ] && read jbaoming < $mosdz/baom
@@ -43,8 +48,14 @@ if [[ $jbaoming != $xbaoming ]]; then
         exit 0
     fi
 
-    if [ -f $mosdz/released ]; then
-        echo "$shij $xbaoming 前台(游戏接管中)，Color不介入" >> $rizhidz
+    tkm=""
+    [ -f $mosdz/game_takeover ] && read tkm < $mosdz/game_takeover
+    [ -z "$tkm" ] && tkm=color
+    [ "$tkm" = "official" ] && tkm=color
+
+    if [ "$tkm" = "fengchi" ]; then
+        echo "$shij $xbaoming 前台(风驰增强形态·调度目录已整体卸载)，Color不介入" >> $rizhidz
+        jbaoming=$xbaoming
         echo $xbaoming > $mosdz/baom
         exit 0
     fi

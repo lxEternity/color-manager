@@ -516,7 +516,8 @@ cmd_swap() {
 
 cmd_takeover_get() {
   v=$(cat "$MODDIR/files/game_takeover" 2>/dev/null)
-  case "$v" in color|official|fengchi) ;; *) v=color ;; esac
+  [ "$v" = "official" ] && v=color
+  case "$v" in color|fengchi) ;; *) v=color ;; esac
   echo "$v"
 }
 
@@ -547,18 +548,10 @@ official_mask_off() {
   start horae 2>/dev/null
 }
 
-cmd_takeover_cfg() {
-  if [ -f "$MODDIR/files/takeover_apps" ]; then
-    while IFS= read -r v; do
-      valid_pkg "$v" && echo "APP=$v"
-    done < "$MODDIR/files/takeover_apps"
-  fi
-}
-
 cmd_takeover_set() {
   case "$1" in
-    color|official|fengchi) ;;
-    *) err "用法: api.sh takeover_set [color|official|fengchi]" ;;
+    color|fengchi) ;;
+    *) err "用法: api.sh takeover_set [color|fengchi]" ;;
   esac
   mkdir -p "$MODDIR/files"
   echo "$1" > "$MODDIR/files/game_takeover"
@@ -567,8 +560,13 @@ cmd_takeover_set() {
   else
     official_mask_off
   fi
+  local swap_r
+  swap_r=$(sh "$MODDIR/script/tk_swap.sh" "$1" 2>&1)
+  case "$swap_r" in
+    OK_FENGCHI|OK_COLOR|ALREADY) ;;
+    *) err "形态切换失败: $swap_r" ;;
+  esac
   rm -f "/sdcard/Android/qingtd/stop" 2>/dev/null
-  pgrep -f qingtdjc1 >/dev/null 2>&1 || nohup sh "$MODDIR/script/qingtdjc1.sh" >/dev/null 2>&1 &
   local fc_tail=""
   if [ "$1" = "fengchi" ]; then
     rm -f "$MODDIR/fengchi/.injected" 2>/dev/null
@@ -616,7 +614,6 @@ case "$1" in
   ping) cmd_ping ;;
   swap) cmd_swap "$2" ;;
   takeover_get) cmd_takeover_get ;;
-  takeover_cfg) cmd_takeover_cfg ;;
   takeover_set) cmd_takeover_set "$2" ;;
   status) cmd_status ;;
   log) cmd_log "$2" ;;

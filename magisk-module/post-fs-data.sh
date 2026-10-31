@@ -2,6 +2,7 @@ MODDIR=$(dirname "$(readlink -f "$0")")
 tkm=""
 [ -f "$MODDIR/files/game_takeover" ] && read tkm < "$MODDIR/files/game_takeover"
 [ -z "$tkm" ] && tkm=color
+[ "$tkm" = "official" ] && tkm=color
 
 lock_val() {
 	umount $2

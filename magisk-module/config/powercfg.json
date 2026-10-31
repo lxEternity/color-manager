@@ -1,8 +1,8 @@
 {
     "name": "Color调度极致版",
     "author": "白驹过隙而已",
-    "version": "1.4.3.0",
-    "versionCode": 1430,
+    "version": "1.4.1.0",
+    "versionCode": 1410,
     "features": {
         "strict": true,
         "pedestal": true

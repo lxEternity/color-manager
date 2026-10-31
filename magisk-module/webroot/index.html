@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Color调度管理</title>
+<title>Color调度</title>
 <style>
 :root{
   --bg:#F5F7FC; --card:#FFFFFF; --stroke:#E4EBF4;
@@ -238,7 +238,7 @@ nav button.on{color:var(--ac);font-weight:700}
     <circle cx="65" cy="46" r="5" fill="none" stroke="#FF9100" stroke-width="1.6"/>
     <path d="M65 42.5c1.4 1.8 2.7 2.6 2.7 4.2a2.7 2.7 0 1 1-5.4 0c0-1.6 1.3-2.4 2.7-4.2z" fill="#FF9100"/>
   </svg>
-  <div><h1>Color管理器<small> · 自适应限频</small></h1></div>
+  <div><h1>Color调度<small> 正在运行中 </small></h1></div>
   <span class="form-badge dispatch" id="formBadge">--</span>
   <span class="demo-badge" id="demoBadge">演示模式</span>
 </header>
@@ -311,13 +311,13 @@ nav button.on{color:var(--ac);font-weight:700}
       <span style="color:var(--t3);font-size:11px">当前: <b id="curMode" style="color:var(--ac)">--</b></span>
     </div>
     <div class="chips" id="homeChips" style="margin-bottom:0"></div>
-    <div class="hint">前台监视（动态模式切换.conf）按应用自动切换；手动选择会立即应用并同步为默认模式（moren），重进不再被切回。</div>
+    <div class="hint">前台监视</div>
   </div>
 
   <div class="card" id="takeoverCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">游戏接管模式</span>
-      <span style="color:var(--t3);font-size:11px">退出应用一律切回Color接管</span>
+      <span style="color:var(--t3);font-size:11px">退出应用切回Color接管</span>
     </div>
     <div class="chips" id="takeoverChips" style="margin-bottom:0"></div>
     <div id="takeoverAppBox" style="display:none">
@@ -337,7 +337,7 @@ nav button.on{color:var(--ac);font-weight:700}
       </div>
     </div>
     <button class="btn" id="takeoverSaveBtn" style="margin-top:11px" onclick="saveTakeover()">保存</button>
-    <div class="hint">Color调度：应用由Color按名单模式接管；官方风驰：所选应用前台时Color不介入，交由系统风驰调度；风驰增强：所选应用前台时由游戏助手增强策略接管（首次选择自动后台注入）。保存后自动静默重启游戏助手并清理应用增强数据；应用退出前台立即切回Color接管。接管名单为自选应用与动态模式切换.conf中配置了专属模式的应用。</div>
+    <div class="hint">Color调度：按Color调度模式接管；官方风驰：系统风驰调度；风驰增强：游戏助手增强策略接管</div>
   </div>
 
   <div class="card" id="adaptCard" style="display:none">
@@ -370,7 +370,7 @@ nav button.on{color:var(--ac);font-weight:700}
       <input type="range" id="thWall" min="36" max="55" step="1" value="55" oninput="thWallDrag(this)">
       <output id="thWallOut">55 ℃</output>
     </div>
-    <div class="hint">持续注入 36℃ 伪装读数解除系统温控限制且不交还权限（不触发系统强制禁用应用与杀后台）；电池温度墙直接写入内核电池温控节点，电池温度达到温度墙后由内核温控自行降频保护。温度墙 36-55℃ 实时生效，卸载模块自动恢复。</div>
+    <div class="hint"> 充电时最高电池温度 </div>
   </div>
 </section>
 
@@ -500,11 +500,11 @@ nav button.on{color:var(--ac);font-weight:700}
 
     <div class="card">
       <div class="row-between" style="margin-bottom:10px">
-        <span style="font-weight:700">维护</span>
+        <span style="font-weight:700">Heart HX，爱意藏在细节里。</span>
         <button class="mini-btn" onclick="scrOpenLog()">运行记录</button>
       </div>
       <button class="btn btn-danger" onclick="scrResetAll()">清除全部配置</button>
-      <div class="hint">清除全局档位、档位标注与全部应用规则；后台服务会重新扫描并自动标注。Astra_MaxRefresh_Pro 的旧数据首次启动时已自动导入（/data/adb/colorFC_screen）。</div>
+      <div class="hint">清除全局档位、档位标注与全部应用规则</div>
     </div>
 
   </div>
@@ -566,8 +566,8 @@ const MOD = '/data/adb/modules/colorFC';
 const MODE_KEYS = ['powersave','balance','performance','fast'];
 const MODE_NAMES = {powersave:'省电', balance:'均衡', performance:'性能', fast:'极速'};
 const MODE_COLORS = ['#00B5A3','#0096C8','#E08A00','#A02CF0'];
-const MODE_DESC = ['powersave · 最长续航，压制频率与提升值','balance · 日常使用，兼顾流畅与功耗',
-  'performance · 高负载场景，激进提升','fast · 极限性能，全力释放'];
+const MODE_DESC = ['待机日用长续航','游戏日常使用，兼顾流畅与功耗',
+  '高负载场景，激进提升',' 极限性能，火力全开'];
 const GOV_FILES = {powersave:'conservative.sh', balance:'scx1.sh', performance:'scx2.sh', fast:'scx3.sh'};
 
 let form = 'dispatch';

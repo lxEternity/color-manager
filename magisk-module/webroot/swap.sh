@@ -5,7 +5,7 @@ STORE=/data/adb/colorFC_store
 DLOG=$STORE/swap.log
 mode=$1
 
-DISPATCH_ITEMS="script A B C config qingtd files install.sh post-fs-data.sh uninstall.sh service.sh module.prop META-INF README.md Updatelog.md json_cpu_max_min.c Color调度管理器_1.3.8.apk"
+DISPATCH_ITEMS="script A B C config qingtd files install.sh post-fs-data.sh uninstall.sh service.sh module.prop META-INF README.md Updatelog.md Color调度管理器_1.3.8.apk"
 
 ADAPT_ITEMS="service.sh post-fs-data.sh action.sh powerd.sh powerd.conf games.txt system updatelog.txt module.prop state pause status.json powerd.log"
 

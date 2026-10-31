@@ -333,6 +333,19 @@ nav button.on{color:var(--ac);font-weight:700}
     <div class="hint">Color调度：按Color调度模式接管；官方风驰：系统风驰调度；风驰增强：游戏助手增强策略接管</div>
   </div>
 
+  <div class="card" id="appPolicyHomeCard" style="display:none">
+    <div class="row-between" style="margin-bottom:10px">
+      <span style="font-weight:700">应用策略</span>
+      <span style="color:var(--t3);font-size:11px">前台自动切换调度模式</span>
+    </div>
+    <div id="apListHome"></div>
+    <div style="display:flex;gap:10px;margin-top:13px">
+      <button class="mini-btn" style="flex:1;color:#A02CF0;border-color:#A02CF0;padding:11px 0;font-weight:700" onclick="apAddRule()">添加应用规则</button>
+      <button class="btn" id="apSaveBtnHome" style="flex:1;margin-top:0" onclick="apSave()">保存策略</button>
+    </div>
+    <div class="hint">moren 为全局默认模式；为应用配置专属模式后，前台运行时实时切换。</div>
+  </div>
+
   <div class="card" id="adaptCard" style="display:none">
     <div class="row-between" style="margin-bottom:10px">
       <span style="font-weight:700">自适应限频状态</span>
@@ -610,6 +623,7 @@ function renderFormCard(){
   $('demoBadge').style.display = demoMode?'inline-block':'none';
   $('modeCard').style.display = form==='dispatch'?'':'none';
   $('takeoverCard').style.display = form==='dispatch'?'':'none';
+  $('appPolicyHomeCard').style.display = form==='dispatch'?'':'none';
   $('adaptCard').style.display = form==='adapt'?'':'none';
   $('thermalCard').style.display = form==='dispatch'?'':'none';
   const un = form!=='dispatch';
@@ -667,6 +681,7 @@ function errnoTag(r){ return (r&&r.errno!=null)?r.errno:'?'; }
 
 async function refreshHome(){
   await detectSoc();
+  loadAppPolicy();
   if(demoMode){
     $('curMode').textContent='balance';
     renderHomeChips('balance');
@@ -1084,7 +1099,6 @@ async function loadAppPolicy(){
   renderAppPolicy();
 }
 function renderAppPolicy(){
-  const box = $('apList'); if(!box) return;
   let h = '<div class="ap-row" onclick="apPickMode(\'moren\')"><span class="tx"><b>全局默认</b><i>moren</i></span>'+
     '<b class="md" style="color:'+apColor(apMoren)+'">'+MODE_NAMES[apMoren]+'</b></div>';
   apRules.forEach((r,i)=>{
@@ -1092,7 +1106,8 @@ function renderAppPolicy(){
     h += '<div class="ap-row" onclick="apPickMode('+i+')"><span class="tx"><b>'+scrEsc(label)+'</b><i>'+scrEsc(r.pkg)+'</i></span>'+
       '<b class="md" style="color:'+apColor(r.mode)+'">'+MODE_NAMES[r.mode]+'</b></div>';
   });
-  box.innerHTML = h + (!apRules.length ? '<div class="empty" style="padding:12px 8px">暂无应用规则，点击「添加应用规则」新建</div>' : '');
+  h += (!apRules.length ? '<div class="empty" style="padding:12px 8px">暂无应用规则，点击「添加应用规则」新建</div>' : '');
+  ['apList','apListHome'].forEach(id=>{ const box=$(id); if(box) box.innerHTML = h; });
 }
 function apModeSheet(target){
   const isMoren = target==='moren';
@@ -1170,8 +1185,8 @@ async function apSave(){
   if(!apLoaded){ toast('配置尚未加载完成'); return; }
   if(apSaving) return;
   apSaving = true;
-  const b = $('apSaveBtn');
-  if(b){ b.disabled = true; b.textContent = '保存中…'; }
+  const bs = [$('apSaveBtn'), $('apSaveBtnHome')].filter(Boolean);
+  bs.forEach(b=>{ b.disabled = true; b.textContent = '保存中…'; });
   let sb = '#moren是全局默认的意思，包名等号加模式（实时的）\n#模式powersave、balance、performance、fast\n';
   sb += 'moren='+apMoren+'\n';
   apRules.forEach(r=>{ sb += r.pkg+'='+r.mode+'\n'; });
@@ -1185,7 +1200,7 @@ async function apSave(){
     await loadAppPolicy();
   }finally{
     apSaving = false;
-    if(b){ b.disabled = false; b.textContent = '保存策略'; }
+    bs.forEach(b=>{ b.disabled = false; b.textContent = '保存策略'; });
   }
 }
 

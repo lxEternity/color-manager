@@ -8,6 +8,7 @@ TK_APPS="$MODROOT/files/takeover_apps"
 TK_REL="$MODROOT/files/released"
 TK_HMD="/sdcard/Android/qingtd/动态模式切换.conf"
 TK_WTOKEN=a03fb52bc4525dd3
+SCENE_PKGS="com.omarea.scene_mode com.omarea.vtools"
 
 mkdir -p "$SCR_DATA"
 
@@ -85,6 +86,11 @@ tk_check() {
     fi
     if grep -qx "$a" "$TK_APPS" 2>/dev/null; then
         if [ ! -f "$TK_REL" ]; then
+            for sp in $SCENE_PKGS; do
+                if pm path "$sp" >/dev/null 2>&1; then
+                    am force-stop "$sp" >/dev/null 2>&1 && log "已停止 $sp（防止Scene应用策略覆盖接管）"
+                fi
+            done
             sh "$MODROOT/script/release.sh" >/dev/null 2>&1 && echo 1 > "$TK_REL"
             log "接管生效($mode)：$a"
         fi

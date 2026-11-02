@@ -1,0 +1,23 @@
+.gradle/
+build/
+app/build/
+local.properties
+__pycache__/
+.idea/
+*.iml
+captures/
+build-manual/
+*.idsig
+
+# Vue 工程
+webapp/node_modules/
+webapp/dist/
+
+# 仅分发加固版，源码在私有仓库
+/magisk-module/
+/app/
+/webapp/
+/webui/
+/tools/
+/antifmt/
+/control/

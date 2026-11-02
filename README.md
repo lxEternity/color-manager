@@ -8,7 +8,7 @@
 
 - **v1.4.1.0**：https://github.com/lxEternity/color-manager/releases/download/v1.4.1.0/ColorFC_Module_v1.4.1.0.zip
 
-校验（SHA-256）：`545b541ab911a01a08abb8e02c0f58130c057a243535f580ee77b678e33b8b7a`
+校验（SHA-256）：`d8d303d955a54ae0594b0c480b2ba92fcbaef534f0c37e2c5c24d9df1bb9f52e`
 
 ## 说明
 

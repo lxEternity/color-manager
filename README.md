@@ -8,9 +8,9 @@
 
 - **v1.4.1.1**：https://github.com/lxEternity/color-manager/releases/download/v1.4.1.1/ColorFC_Module_v1.4.1.1.zip
 
-校验（SHA-256）：`6b064e8cceb44ad4702eb79e12ec94e47ff0c93b16483634f2c63f2a4b740ed6`
+校验（SHA-256）：`754e8a218d7166c9af22e55aa016b2935c30ab8df58afc2c3f306718f98085a9`
 
-> 本版替换了此前有缺陷的同版本号包（修复进游戏不切换模式；qingtd 全部更名为 ColorFC，安装时自动清除旧版数据并保留应用策略；WEBUI 新增主题系统），请重新下载。
+> 本版替换了此前有缺陷的同版本号包（修复安装器数据目录缺陷与待机功耗问题；进游戏模式切换修复；WEBUI 新增主题系统与自定义背景；qingtd 全部更名为 ColorFC，安装时自动清除旧版数据并保留应用策略），请重新下载。
 
 ## 说明
 

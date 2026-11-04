@@ -8,7 +8,7 @@
 
 - **v1.4.1.2**：https://github.com/lxEternity/color-manager/releases/download/v1.4.1.2/ColorFC_Module_v1.4.1.2.zip
 
-校验（SHA-256）：`494e94f0b5ecd0d7d6a8452db5ae5b6ddee4c5e5e6cac2691a9359886cfdcd29`
+校验（SHA-256）：`d8ed01c6ef9ee0cb3700abc83bc77227729c946c4568f6189b2b889035fa110f`
 
 > 本版重新打包修复：改包后完整性校验不符（qqverify 清单与文件哈希已重新绑定，解包实测 PKG_OK）；脚本补齐 shebang 并以 `sh` 前缀启动守护（防执行位丢失）；包内中文文件名编码损坏已修复。此前各版修复（进游戏切换、待机功耗、启动健壮性）均已包含，请重新下载。
 

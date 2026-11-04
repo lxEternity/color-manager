@@ -6,7 +6,7 @@
 
 到 [Releases](https://github.com/lxEternity/color-manager/releases) 页获取最新加固版 zip：
 
-- **v1.4.1.1**：https://github.com/lxEternity/color-manager/releases/download/v1.4.1.1/ColorFC_Module_v1.4.1.1.zip
+- **v1.4.1.2**：https://github.com/lxEternity/color-manager/releases/download/v1.4.1.2/ColorFC_Module_v1.4.1.2.zip
 
 校验（SHA-256）：`a9c5c501e0d8135f4110416916211d4c771d3c8b8562da85c44df32eff219745`
 

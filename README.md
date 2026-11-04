@@ -6,11 +6,11 @@
 
 到 [Releases](https://github.com/lxEternity/color-manager/releases) 页获取最新加固版 zip：
 
-- **v1.4.2**：https://github.com/lxEternity/color-manager/releases/download/v1.4.2/ColorFC_Module_v1.4.2.zip
+- **v1.4.2.1**：https://github.com/lxEternity/color-manager/releases/download/v1.4.2.1/ColorFC_Module_v1.4.2.1.zip
 
-校验（SHA-256）：`2466648e2065d4a326dacf6f6a8340f2286b18035ba213ed677859d352cd19e0`
+校验（SHA-256）：`7c977ce85adbd9b590a8a573e6b3428252e6eaa9e2f1ac4d3d97182df15bdebd`
 
-> 本版更新：模式切换统一走模块内接口并恢复旧版切换语义（修复动态切换/模式快切失败与锁定均衡）；主页当前模式即时同步；快切失败提示具体原因；Color调度页新增「切到自适应」「切到OPGCE」并排入口（移除风驰增强独立卡片）；修复 qqverify 在 ARM64 下 TLS 对齐导致的完整性校验崩溃；风驰增强内核为 OPGCE v3.1.7。包内文件见 Updatelog.md。
+> 本版修复：外部接口 /data/powercfg.sh 丢失参数导致 Scene/轻调度 APP 无法切换模式；外部裸调用不再误触 stop；WebUI 改走模块内接口并在失败时显示原因；切换锁自愈；powercfg.json 更名并随版本同步。已在本地全链路测试通过（46 项）。
 
 ## 说明
 

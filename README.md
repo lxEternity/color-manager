@@ -6,11 +6,11 @@
 
 到 [Releases](https://github.com/lxEternity/color-manager/releases) 页获取最新加固版 zip：
 
-- **v1.4.1.2**：https://github.com/lxEternity/color-manager/releases/download/v1.4.1.2/ColorFC_Module_v1.4.1.2.zip
+- **v1.4.2**：https://github.com/lxEternity/color-manager/releases/download/v1.4.2/ColorFC_Module_v1.4.2.zip
 
-校验（SHA-256）：`240ba0f52b5f4eb0de12b3a3f19229efade9f6d72046e9aee58c22ade880dcaa`
+校验（SHA-256）：`2466648e2065d4a326dacf6f6a8340f2286b18035ba213ed677859d352cd19e0`
 
-> 本版重新打包修复：改包后完整性校验不符（qqverify 清单与文件哈希已重新绑定，解包实测 PKG_OK）；脚本补齐 shebang 并以 `sh` 前缀启动守护（防执行位丢失）；包内中文文件名编码损坏已修复。此前各版修复（进游戏切换、待机功耗、启动健壮性）均已包含，请重新下载。
+> 本版更新：模式切换统一走模块内接口并恢复旧版切换语义（修复动态切换/模式快切失败与锁定均衡）；主页当前模式即时同步；快切失败提示具体原因；Color调度页新增「切到自适应」「切到OPGCE」并排入口（移除风驰增强独立卡片）；修复 qqverify 在 ARM64 下 TLS 对齐导致的完整性校验崩溃；风驰增强内核为 OPGCE v3.1.7。包内文件见 Updatelog.md。
 
 ## 说明
 
